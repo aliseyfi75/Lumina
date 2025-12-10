@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Lumina Collector",
+  "version": "1.0",
+  "description": "Highlight a word to add it to your Lumina Flashcards.",
+  "permissions": [
+    "contextMenus",
+    "storage",
+    "notifications"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Lumina Settings"
+  },
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  }
+}

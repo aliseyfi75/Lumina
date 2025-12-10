@@ -2,20 +2,59 @@
 <html>
 <head>
   <style>
-    body { width: 300px; padding: 15px; font-family: 'Inter', sans-serif; }
-    h3 { margin-top: 0; color: #0f172a; }
-    input { width: 100%; padding: 8px; margin-bottom: 10px; box-sizing: border-box; border: 1px solid #cbd5e1; rounded: 4px; }
-    button { width: 100%; padding: 8px; background: #0284c7; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
-    button:hover { background: #0369a1; }
-    .status { margin-top: 10px; font-size: 12px; color: #16a34a; display: none; text-align: center; }
+    body { width: 300px; padding: 20px; font-family: 'Inter', sans-serif; color: #334155; }
+    h3 { margin: 0 0 15px 0; color: #0f172a; font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+    
+    /* Layout Classes */
+    .hidden { display: none !important; }
+    .section { animation: fadeIn 0.2s; }
+    
+    /* Input Styles */
+    label { display: block; font-size: 12px; color: #64748b; margin-bottom: 6px; }
+    input { width: 100%; padding: 8px 12px; margin-bottom: 12px; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; outline: none; }
+    input:focus { border-color: #0ea5e9; box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.1); }
+
+    /* Button Styles */
+    .btn { width: 100%; padding: 8px; border: none; border-radius: 6px; cursor: pointer; font-weight: 500; font-size: 13px; transition: all 0.2s; }
+    .btn-primary { background: #0284c7; color: white; }
+    .btn-primary:hover { background: #0369a1; }
+    .btn-secondary { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; margin-top: 8px; }
+    .btn-secondary:hover { background: #e2e8f0; color: #1e293b; }
+
+    /* Static Display Styles */
+    .id-display { background: #f8fafc; border: 1px dashed #cbd5e1; padding: 12px; rounded: 8px; margin-bottom: 12px; word-break: break-all; font-family: monospace; font-size: 12px; color: #475569; text-align: center; }
+    
+    /* Status Messages */
+    .status { margin-top: 12px; font-size: 11px; text-align: center; min-height: 16px; }
+    .status.success { color: #16a34a; }
+    .status.error { color: #ef4444; }
+
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
   </style>
 </head>
 <body>
-  <h3>Lumina Sync</h3>
-  <p style="font-size: 12px; color: #64748b;">Enter your Pantry ID (found in the Lumina web app Data Manager):</p>
-  <input type="text" id="pantryId" placeholder="e.g. 94389b..." />
-  <button id="saveBtn">Connect Extension</button>
-  <div id="status" class="status">Connected successfully!</div>
+  <h3>
+    <img src="icon.png" style="width: 20px; height: 20px;">
+    Lumina Sync
+  </h3>
+
+  <div id="viewSection" class="section hidden">
+    <div class="id-display" id="displayId"></div>
+    <div style="font-size: 11px; color: #64748b; text-align: center; margin-bottom: 12px;">
+      <span style="color:#16a34a">●</span> Connected to Cloud
+    </div>
+    <button id="editBtn" class="btn btn-secondary">Edit Pantry ID</button>
+  </div>
+
+  <div id="editSection" class="section hidden">
+    <label for="pantryIdInput">Enter your Pantry ID:</label>
+    <input type="text" id="pantryIdInput" placeholder="e.g. 94389b-..." />
+    
+    <button id="saveBtn" class="btn btn-primary">Connect Extension</button>
+    <button id="cancelBtn" class="btn btn-secondary hidden">Cancel</button>
+  </div>
+
+  <div id="status" class="status"></div>
   <script src="popup.js"></script>
 </body>
 </html>

@@ -9,6 +9,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const cancelBtn = document.getElementById('cancelBtn');
   const statusEl = document.getElementById('status');
 
+  const PANTRY_API_BASE = "https://getpantry.cloud/apiv1/pantry";
+
   // 1. Initial Load: Check if we have an ID
   chrome.storage.sync.get(['luminaPantryId'], (result) => {
     if (result.luminaPantryId) {
@@ -18,19 +20,41 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // 2. Save Button Click
-  saveBtn.addEventListener('click', () => {
-    const newId = pantryIdInput.value.trim(); // Fixed typo here
+  // 2. Save Button Click (Now with Validation)
+  saveBtn.addEventListener('click', async () => {
+    const newId = pantryIdInput.value.trim();
+    
     if (!newId) {
-      showStatus('Please enter a valid ID.', 'error');
+      showStatus('Please enter an ID.', 'error');
       return;
     }
 
-    // Save to Chrome Sync Storage
-    chrome.storage.sync.set({ luminaPantryId: newId }, () => {
-      showStatus('Connected successfully!', 'success');
-      showViewMode(newId);
-    });
+    // UI Feedback: Show loading state
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Verifying...';
+    showStatus('', ''); // Clear previous errors
+
+    try {
+      // Step A: Validate ID by fetching details
+      const isValid = await validatePantryId(newId);
+
+      if (!isValid) {
+        throw new Error('Invalid Pantry ID. Please check and try again.');
+      }
+
+      // Step B: Save if valid
+      chrome.storage.sync.set({ luminaPantryId: newId }, () => {
+        showStatus('Verified & Connected!', 'success');
+        showViewMode(newId);
+      });
+
+    } catch (error) {
+      showStatus(error.message, 'error');
+    } finally {
+      // Reset button state
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Connect Extension';
+    }
   });
 
   // 3. Edit Button Click
@@ -50,21 +74,36 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // --- Helper Functions ---
 
+  async function validatePantryId(pantryId) {
+    try {
+      const response = await fetch(`${PANTRY_API_BASE}/${pantryId}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      return response.ok; // Returns true if 200-299, false if 400/404/500
+    } catch (e) {
+      return false; // Network error
+    }
+  }
+
   function showViewMode(id) {
     viewSection.classList.remove('hidden');
     editSection.classList.add('hidden');
     displayId.textContent = id;
-    statusEl.textContent = ''; // Clear status
+    statusEl.textContent = ''; 
   }
 
   function showEditMode(canCancel) {
     viewSection.classList.add('hidden');
     editSection.classList.remove('hidden');
     
-    // Pre-fill input with current displayed ID if available
+    // Pre-fill input
     pantryIdInput.value = displayId.textContent || '';
+    pantryIdInput.focus(); // Auto-focus input for better UX
     
-    // Toggle Cancel button visibility based on context
+    // Toggle Cancel button
     if (canCancel) {
       cancelBtn.classList.remove('hidden');
     } else {
@@ -77,8 +116,9 @@ document.addEventListener('DOMContentLoaded', () => {
   function showStatus(msg, type) {
     statusEl.textContent = msg;
     statusEl.className = `status ${type}`;
+    // Only auto-clear success messages, keep errors visible
     if (type === 'success') {
-      setTimeout(() => statusEl.textContent = '', 2000);
+      setTimeout(() => statusEl.textContent = '', 2500);
     }
   }
 });

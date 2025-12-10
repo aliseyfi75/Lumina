@@ -20,7 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 2. Save Button Click
   saveBtn.addEventListener('click', () => {
-    const newId =KpantryIdInput.value.trim();
+    const newId = pantryIdInput.value.trim(); // Fixed typo here
     if (!newId) {
       showStatus('Please enter a valid ID.', 'error');
       return;

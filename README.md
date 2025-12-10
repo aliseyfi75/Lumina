@@ -4,6 +4,8 @@
 
 Lumina is a modern, elegant dictionary and flashcard application designed to help you master new words effectively. It bridges the gap between looking up a word and actually remembering it by combining a clean dictionary interface with a spaced-repetition study system.
 
+👉 [Try Lumina Live Here](https://medium.com/r/?url=https%3A%2F%2Faliseyfi75.github.io%2FLumina%2F)
+
 ## Motivation
 
 Learning new vocabulary often feels disjointed. You look up a word, understand it for a moment, and then forget it a day later. Traditional flashcard apps can be clunky to populate, requiring manual entry of definitions.

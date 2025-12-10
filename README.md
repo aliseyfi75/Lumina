@@ -1,3 +1,5 @@
+<img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/e5c54ecf-0760-4251-803d-bb08e0e526cf" />
+
 # Lumina
 
 **Illuminate your vocabulary.**
@@ -5,6 +7,8 @@
 Lumina is a modern, elegant dictionary and flashcard application designed to help you master new words effectively. It bridges the gap between looking up a word and actually remembering it by combining a clean dictionary interface with a spaced-repetition study system.
 
 👉 [Try Lumina Live Here](https://medium.com/r/?url=https%3A%2F%2Faliseyfi75.github.io%2FLumina%2F)
+
+[![Lumina](https://img.youtube.com/vi/zdaJXz-VHzA/0.jpg)](https://www.youtube.com/watch?v=zdaJXz-VHzA)
 
 ## Motivation
 

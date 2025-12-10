@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { width: 300px; padding: 15px; font-family: 'Inter', sans-serif; }
+    h3 { margin-top: 0; color: #0f172a; }
+    input { width: 100%; padding: 8px; margin-bottom: 10px; box-sizing: border-box; border: 1px solid #cbd5e1; rounded: 4px; }
+    button { width: 100%; padding: 8px; background: #0284c7; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
+    button:hover { background: #0369a1; }
+    .status { margin-top: 10px; font-size: 12px; color: #16a34a; display: none; text-align: center; }
+  </style>
+</head>
+<body>
+  <h3>Lumina Sync</h3>
+  <p style="font-size: 12px; color: #64748b;">Enter your Pantry ID (found in the Lumina web app Data Manager):</p>
+  <input type="text" id="pantryId" placeholder="e.g. 94389b..." />
+  <button id="saveBtn">Connect Extension</button>
+  <div id="status" class="status">Connected successfully!</div>
+  <script src="popup.js"></script>
+</body>
+</html>

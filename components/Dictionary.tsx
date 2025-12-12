@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { WordEntry, Flashcard } from '../types';
 import { lookupWord } from '../services/dictionaryService';
 import { getWordSuggestions } from '../services/suggestionService';
+import { trackEvent, TRACKING_ACTION, TRACKING_CATEGORY } from '../services/trackingService';
 import { Search, Plus, Check, Loader2, BookOpen, Clock } from 'lucide-react';
 
 interface DictionaryProps {
@@ -59,6 +60,8 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, existingCards
     setError('');
     setResult(null);
     setShowSuggestions(false); // Hide dropdown immediately
+
+    trackEvent(TRACKING_ACTION.SEARCH, TRACKING_CATEGORY.DICTIONARY, searchQuery);
 
     try {
       const data = await lookupWord(searchQuery);

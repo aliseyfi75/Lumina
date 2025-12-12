@@ -28,6 +28,12 @@ Learning new vocabulary often feels disjointed. You look up a word, understand i
 *   **📂 Data Freedom**: Import/Export your deck as CSV, or sync directly to a local file on your computer (File System Access API).
 *   **🎨 Elegant UI**: A beautiful, distraction-free interface built with React and Tailwind CSS.
 
+## Browser Extension
+
+Enhance your experience with **Lumina Collector**, a Chrome extension that allows you to collect words from any website and add them to your Lumina deck.
+
+👉 [Get Lumina Collector](https://chromewebstore.google.com/detail/lumina-collector/jngpnagbkdaifmokdcokhakfkbpdnlag)
+
 ## How to Use
 
 ### 1. Dictionary & Search

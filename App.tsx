@@ -6,6 +6,7 @@ import { StudySession } from './components/StudySession';
 import { DataManagerModal } from './components/DataManagerModal';
 import { generateCSV, parseCSV, downloadCSV, saveToLocalFile } from './services/csvService';
 import { getDetails, getDeck, updateDeck } from './services/pantryService';
+import { initializeTracking, trackEvent, setTrackingUserId, TRACKING_CATEGORY, TRACKING_ACTION } from './services/trackingService';
 import { Book, Layers, Database, Save, Cloud } from 'lucide-react';
 
 const LOCAL_STORAGE_KEY = 'lumina_cards_v1';
@@ -107,12 +108,20 @@ const App: React.FC = () => {
                   
                   // Only set config (enabling auto-save) after we've attempted the fetch
                   setCloudConfig(config);
+
+                  // Initialize tracking with the pantry ID as User ID
+                  initializeTracking(config.pantryId);
+              } else {
+                  initializeTracking();
               }
           } catch(e) { 
               console.error("Failed to load cloud backup on init", e);
               // Retry loading config even if fetch failed, so user can try again later
               if (savedCloudConfig) setCloudConfig(JSON.parse(savedCloudConfig));
+              initializeTracking();
           }
+      } else {
+        initializeTracking();
       }
     };
 
@@ -197,12 +206,14 @@ const App: React.FC = () => {
     setIsFileSaving(true);
     await saveToLocalFile(fileHandle, cards);
     setIsFileSaving(false);
+    trackEvent(TRACKING_ACTION.MANUAL_SAVE, TRACKING_CATEGORY.DATA);
   };
 
   const handleExportCSV = () => {
     const csvContent = generateCSV(cards);
     const date = new Date().toISOString().split('T')[0];
     downloadCSV(csvContent, `lumina_backup_${date}.csv`);
+    trackEvent(TRACKING_ACTION.EXPORT_CSV, TRACKING_CATEGORY.DATA);
   };
 
   const handleImportCSV = async (file: File) => {
@@ -210,6 +221,7 @@ const App: React.FC = () => {
     const importedCards = parseCSV(text);
     if (importedCards.length === 0) throw new Error("No valid cards found");
     performMerge(importedCards);
+    trackEvent(TRACKING_ACTION.IMPORT_CSV, TRACKING_CATEGORY.DATA, 'card_count', importedCards.length);
   };
 
   // --- Cloud Handlers ---
@@ -228,11 +240,18 @@ const App: React.FC = () => {
     const config = { pantryId };
     setCloudConfig(config);
     localStorage.setItem(CLOUD_CONFIG_KEY, JSON.stringify(config));
+
+    // Update tracking user ID
+    setTrackingUserId(pantryId);
+    trackEvent(TRACKING_ACTION.CONNECT_CLOUD, TRACKING_CATEGORY.CLOUD);
   };
 
   const handleDisconnectCloud = () => {
     setCloudConfig(null);
     localStorage.removeItem(CLOUD_CONFIG_KEY);
+    trackEvent(TRACKING_ACTION.DISCONNECT_CLOUD, TRACKING_CATEGORY.CLOUD);
+    // Note: We don't unset the user ID in tracking to keep the session continuity,
+    // or we could revert to anonymous ID if needed, but usually better to keep linking if possible during session.
   };
 
   const handleCloudPull = async () => {
@@ -241,11 +260,13 @@ const App: React.FC = () => {
     if (cloudCards.length > 0) {
         performMerge(cloudCards);
     }
+    trackEvent(TRACKING_ACTION.CLOUD_PULL, TRACKING_CATEGORY.CLOUD);
   };
 
   const handleCloudPush = async () => {
     if (!cloudConfig) return;
     await updateDeck(cloudConfig.pantryId, cards);
+    trackEvent(TRACKING_ACTION.CLOUD_PUSH, TRACKING_CATEGORY.CLOUD);
   };
 
   // --- App Logic ---
@@ -263,17 +284,25 @@ const App: React.FC = () => {
       createdAt: Date.now(),
     };
     setCards(prev => [newCard, ...prev]);
+    trackEvent(TRACKING_ACTION.ADD_CARD, TRACKING_CATEGORY.FLASHCARDS, entry.word);
   };
 
   const handleUpdateStatus = (id: string, status: FlashcardStatus) => {
     setCards(prev => prev.map(card => 
       card.id === id ? { ...card, status, lastReviewed: Date.now() } : card
     ));
+    trackEvent(TRACKING_ACTION.UPDATE_STATUS, TRACKING_CATEGORY.FLASHCARDS, status);
   };
 
   const handleDeleteCard = (id: string) => {
     setCards(prev => prev.filter(c => c.id !== id));
+    trackEvent(TRACKING_ACTION.DELETE_CARD, TRACKING_CATEGORY.FLASHCARDS);
   };
+
+  // Track View Changes
+  useEffect(() => {
+    trackEvent(TRACKING_ACTION.VIEW_TAB, TRACKING_CATEGORY.ENGAGEMENT, view);
+  }, [view]);
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-800 font-sans">

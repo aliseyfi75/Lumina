@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Lumina Collector",
-  "version": "1.0",
+  "version": "1.2",
   "description": "Highlight a word to add it to your Lumina Flashcards.",
   "permissions": [
     "contextMenus",

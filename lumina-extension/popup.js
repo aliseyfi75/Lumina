@@ -5,6 +5,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const displayId = document.getElementById('displayId');
   const pantryIdInput = document.getElementById('pantryIdInput');
   const saveBtn = document.getElementById('saveBtn');
+  const openAppBtn = document.getElementById('openAppBtn');
   const editBtn = document.getElementById('editBtn');
   const cancelBtn = document.getElementById('cancelBtn');
   const statusEl = document.getElementById('status');
@@ -57,12 +58,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // 3. Edit Button Click
+  // 3. Open App Button Click
+  openAppBtn.addEventListener('click', () => {
+    chrome.tabs.create({ url: 'https://aliseyfi75.github.io/Lumina/' });
+  });
+
+  // 4. Edit Button Click
   editBtn.addEventListener('click', () => {
     showEditMode(true); // true = allow canceling
   });
 
-  // 4. Cancel Button Click
+  // 5. Cancel Button Click
   cancelBtn.addEventListener('click', () => {
     // Re-fetch existing ID and go back to view mode
     chrome.storage.sync.get(['luminaPantryId'], (result) => {

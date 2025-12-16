@@ -28,9 +28,14 @@ jobs:
 
       - name: Deploy to Surge
         id: deploy
+        # Pass secrets as environment variables
+        env:
+          SURGE_LOGIN: ${{ secrets.SURGE_LOGIN }}
+          SURGE_TOKEN: ${{ secrets.SURGE_TOKEN }}
         run: |
           export DEPLOY_DOMAIN=lumina-pr-${{ github.event.number }}.surge.sh
-          npx surge ./dist --domain $DEPLOY_DOMAIN --token ${{ secrets.SURGE_TOKEN }}
+          # The surge CLI automatically picks up the env vars set above
+          npx surge ./dist --domain $DEPLOY_DOMAIN
           echo "url=$DEPLOY_DOMAIN" >> $GITHUB_OUTPUT
 
       - name: Comment on PR

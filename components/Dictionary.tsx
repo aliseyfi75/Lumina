@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { WordEntry, Flashcard } from '../types';
-import { lookupWord } from '../services/dictionaryService';
+import { lookupWord, getSpellingSuggestions } from '../services/dictionaryService';
 import { getWordSuggestions } from '../services/suggestionService';
 import { trackEvent, TRACKING_ACTION, TRACKING_CATEGORY } from '../services/trackingService';
 import { Search, Plus, Check, Loader2, BookOpen, Clock } from 'lucide-react';
@@ -21,7 +21,10 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, existingCards
   const [showSuggestions, setShowSuggestions] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
-  // Debounce logic for suggestions
+  // Typo suggestion state
+  const [typoSuggestion, setTypoSuggestion] = useState<string | null>(null);
+
+  // Debounce logic for autocomplete suggestions
   useEffect(() => {
     const fetchSuggestions = async () => {
       if (query.trim().length < 2) {
@@ -59,6 +62,7 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, existingCards
     setLoading(true);
     setError('');
     setResult(null);
+    setTypoSuggestion(null);
     setShowSuggestions(false); // Hide dropdown immediately
 
     trackEvent(TRACKING_ACTION.SEARCH, TRACKING_CATEGORY.DICTIONARY, searchQuery);
@@ -69,6 +73,12 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, existingCards
         setResult(data);
         setQuery(data.word); // Normalize case in input
       } else {
+        // If not found, try to find suggestions for typos
+        const typoSuggestions = await getSpellingSuggestions(searchQuery);
+        if (typoSuggestions.length > 0) {
+           // Use the first suggestion
+           setTypoSuggestion(typoSuggestions[0]);
+        }
         setError(`Could not find a definition for "${searchQuery}".`);
       }
     } catch (err) {
@@ -148,7 +158,19 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, existingCards
 
       {error && (
         <div className="p-4 bg-red-50 text-red-600 rounded-xl text-center">
-          {error}
+          <p>{error}</p>
+          {typoSuggestion && (
+              <p className="mt-2 text-slate-600">
+                  Did you mean{" "}
+                  <button 
+                      onClick={() => handleSuggestionClick(typoSuggestion)}
+                      className="font-bold text-brand-600 hover:underline"
+                  >
+                      {typoSuggestion}
+                  </button>
+                  ?
+              </p>
+          )}
         </div>
       )}
 

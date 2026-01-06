@@ -116,15 +116,7 @@ export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onD
     }
   };
 
-  const getCategoryStyles = (status: FlashcardStatus, baseColor: string, borderColor: string, textColor: string) => {
-    const isSelected = selectedStatus === status;
-    const isOthersSelected = selectedStatus !== null && !isSelected;
 
-    return `${baseColor} ${borderColor} p-4 rounded-2xl flex items-center justify-between cursor-pointer transition-all duration-200
-      ${isSelected ? 'ring-2 ring-offset-2 ring-offset-slate-50 ring-' + textColor.split('-')[1] + '-400 scale-[1.02] shadow-md' : ''}
-      ${isOthersSelected ? 'opacity-50 grayscale-[0.5]' : 'hover:scale-[1.01] hover:shadow-sm'}
-    `;
-  };
 
   if (cards.length === 0) {
     return (
@@ -184,44 +176,75 @@ export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onD
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div
-            onClick={() => handleStatusClick(FlashcardStatus.New)}
-            className={getCategoryStyles(FlashcardStatus.New, "bg-blue-50", "border border-blue-100", "text-blue-600")}
-          >
-            <div className="flex items-center gap-3 text-blue-600">
-              <div className="p-2 bg-white rounded-lg shadow-sm">
-                <BookOpen className="h-5 w-5" />
-              </div>
-              <span className="font-semibold">New</span>
-            </div>
-            <p className="text-2xl font-bold text-slate-900">{newCount}</p>
-          </div>
+          {[
+            {
+              status: FlashcardStatus.New,
+              label: 'New',
+              icon: BookOpen,
+              count: newCount,
+              styles: {
+                base: 'bg-blue-50 border-blue-100',
+                hover: 'hover:bg-blue-100 hover:border-blue-200',
+                selected: 'bg-blue-100 border-blue-300 ring-blue-400',
+                textData: { base: 'text-blue-600', hover: 'group-hover:text-blue-700', selected: 'text-blue-800' }
+              }
+            },
+            {
+              status: FlashcardStatus.Learning,
+              label: 'Learning',
+              icon: Brain,
+              count: learningCount,
+              styles: {
+                base: 'bg-amber-50 border-amber-100',
+                hover: 'hover:bg-amber-100 hover:border-amber-200',
+                selected: 'bg-amber-100 border-amber-300 ring-amber-400',
+                textData: { base: 'text-amber-600', hover: 'group-hover:text-amber-700', selected: 'text-amber-800' }
+              }
+            },
+            {
+              status: FlashcardStatus.Mastered,
+              label: 'Mastered',
+              icon: CheckCircle,
+              count: masteredCount,
+              styles: {
+                base: 'bg-green-50 border-green-100',
+                hover: 'hover:bg-green-100 hover:border-green-200',
+                selected: 'bg-green-100 border-green-300 ring-green-400',
+                textData: { base: 'text-green-600', hover: 'group-hover:text-green-700', selected: 'text-green-800' }
+              }
+            }
+          ].map((category) => {
+            const isSelected = selectedStatus === category.status;
+            const isOthersSelected = selectedStatus !== null && !isSelected;
 
-          <div
-            onClick={() => handleStatusClick(FlashcardStatus.Learning)}
-            className={getCategoryStyles(FlashcardStatus.Learning, "bg-amber-50", "border border-amber-100", "text-amber-600")}
-          >
-            <div className="flex items-center gap-3 text-amber-600">
-              <div className="p-2 bg-white rounded-lg shadow-sm">
-                <Brain className="h-5 w-5" />
+            return (
+              <div
+                key={category.status}
+                onClick={() => handleStatusClick(category.status)}
+                className={`p-4 rounded-2xl flex items-center justify-between cursor-pointer transition-all duration-200 border group
+                  ${isOthersSelected
+                    ? `${category.styles.base} opacity-50 grayscale-[0.5]`
+                    : isSelected
+                      ? `${category.styles.selected} ring-2 ring-offset-2 ring-offset-slate-50 scale-[1.02] shadow-md`
+                      : `${category.styles.base} ${category.styles.hover} hover:scale-[1.01] hover:shadow-sm`
+                  }
+                `}
+              >
+                <div className={`flex items-center gap-3 transition-colors duration-200
+                  ${isSelected
+                    ? `${category.styles.textData.selected} font-extrabold`
+                    : `${category.styles.textData.base} font-semibold ${category.styles.textData.hover} group-hover:font-bold`
+                  }
+                `}>
+                  <div className="p-2 bg-white rounded-lg shadow-sm">
+                    <category.icon className="h-5 w-5" />
+                  </div>
+                  <span>{category.label}</span>
+                </div>
+                <p className="text-2xl font-bold text-slate-900">{category.count}</p>
               </div>
-              <span className="font-semibold">Learning</span>
-            </div>
-            <p className="text-2xl font-bold text-slate-900">{learningCount}</p>
-          </div>
-
-          <div
-            onClick={() => handleStatusClick(FlashcardStatus.Mastered)}
-            className={getCategoryStyles(FlashcardStatus.Mastered, "bg-green-50", "border border-green-100", "text-green-600")}
-          >
-            <div className="flex items-center gap-3 text-green-600">
-              <div className="p-2 bg-white rounded-lg shadow-sm">
-                <CheckCircle className="h-5 w-5" />
-              </div>
-              <span className="font-semibold">Mastered</span>
-            </div>
-            <p className="text-2xl font-bold text-slate-900">{masteredCount}</p>
-          </div>
+            );
+          })}
         </div>
       </div>
 

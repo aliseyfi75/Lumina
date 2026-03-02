@@ -45,7 +45,7 @@ export interface Flashcard {
   lastQuality?: number;
 }
 
-export type ViewState = 'dictionary' | 'flashcards' | 'study';
+export type ViewState = 'dictionary' | 'flashcards' | 'study' | 'statistics';
 
 // File System Access API Types
 export interface FileSystemFileHandle {
@@ -63,4 +63,10 @@ export interface FileSystemWritableFileStream extends WritableStream {
 // Cloud Sync Types
 export interface CloudConfig {
   pantryId: string;
+}
+
+export interface CloudData {
+  cards: Flashcard[];
+  studyHistory?: Record<string, number>;
+  longestStreak?: number;
 }

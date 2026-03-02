@@ -5,32 +5,24 @@ import { RotateCw, CheckCircle, Brain, ArrowLeft, Volume2 } from 'lucide-react';
 interface StudySessionProps {
   cards: Flashcard[];
   onReviewCard: (id: string, quality: number) => void;
+  onSessionComplete: () => void;
   onExit: () => void;
 }
 
-export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard, onExit }) => {
+export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard, onSessionComplete, onExit }) => {
   const [queue, setQueue] = useState<Flashcard[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
 
   useEffect(() => {
-    // Filter cards that are due for review (or don't have a nextReviewDate yet falling back to old behavior)
-    // We intentionally ignore Mastered status if it's due, but practically Mastered cards will have long intervals
-    const validCards = cards.filter(c =>
-      c.status !== FlashcardStatus.Mastered ||
-      (!c.nextReviewDate || c.nextReviewDate <= Date.now())
-    );
-
-    // If it's pure legacy (no SM-2) and Mastered, we continue skipping it. 
-    // Wait, the easiest filter is just based on due date.
-    // If a card has no nextReviewDate (legacy), we treat it as due if it's not Mastered.
-    // If a card HAS a nextReviewDate, we follow the nextReviewDate strictly.
     const dueCards = cards.filter(c => {
+      if (c.status === FlashcardStatus.Mastered) return false;
+      if (c.status === FlashcardStatus.New) return true;
       if (c.nextReviewDate) {
         return c.nextReviewDate <= Date.now();
       }
-      return c.status !== FlashcardStatus.Mastered;
+      return true;
     });
 
     // Shuffle
@@ -56,7 +48,13 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
 
     // Wait for flip to partially complete before changing content
     setTimeout(() => {
-      setCurrentIndex(prev => prev + 1);
+      setCurrentIndex(prev => {
+        const nextIndex = prev + 1;
+        if (nextIndex >= queue.length) {
+          onSessionComplete();
+        }
+        return nextIndex;
+      });
     }, 300);
   };
 

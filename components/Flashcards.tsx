@@ -145,10 +145,12 @@ export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onD
   const masteredCount = cards.filter(c => c.status === FlashcardStatus.Mastered).length;
 
   const studyQueueCount = cards.filter(c => {
+    if (c.status === FlashcardStatus.Mastered) return false;
+    if (c.status === FlashcardStatus.New) return true;
     if (c.nextReviewDate) {
       return c.nextReviewDate <= Date.now();
     }
-    return c.status !== FlashcardStatus.Mastered;
+    return true;
   }).length;
 
   let filteredCards = selectedStatus

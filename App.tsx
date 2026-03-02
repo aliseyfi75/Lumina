@@ -284,6 +284,10 @@ const App: React.FC = () => {
       status: FlashcardStatus.New,
       lastReviewed: 0,
       createdAt: Date.now(),
+      interval: 0,
+      repetition: 0,
+      easinessFactor: 2.5,
+      nextReviewDate: Date.now(),
     };
     setCards(prev => [newCard, ...prev]);
     trackEvent(TRACKING_ACTION.ADD_CARD, TRACKING_CATEGORY.FLASHCARDS, entry.word);
@@ -294,6 +298,55 @@ const App: React.FC = () => {
       card.id === id ? { ...card, status, lastReviewed: Date.now() } : card
     ));
     trackEvent(TRACKING_ACTION.UPDATE_STATUS, TRACKING_CATEGORY.FLASHCARDS, status);
+  };
+
+  const handleReviewCard = (id: string, quality: number) => {
+    setCards(prev => prev.map(card => {
+      if (card.id !== id) return card;
+
+      let { interval = 0, repetition = 0, easinessFactor = 2.5 } = card;
+      let nextReviewDate = Date.now();
+      let status = FlashcardStatus.Learning;
+
+      if (quality === 1) { // Again
+        repetition = 0;
+        nextReviewDate = Date.now();
+        status = FlashcardStatus.Learning;
+      } else if (quality === 3) { // Learned
+        repetition += 1;
+        status = FlashcardStatus.Learning;
+
+        const now = Date.now();
+        const ONE_DAY = 24 * 60 * 60 * 1000;
+
+        if (repetition === 1) {
+          nextReviewDate = now + ONE_DAY;          // Tomorrow
+        } else if (repetition === 2) {
+          nextReviewDate = now + ONE_DAY * 7;      // 1 Week
+        } else if (repetition === 3) {
+          nextReviewDate = now + ONE_DAY * 14;     // 2 Weeks
+        } else if (repetition === 4) {
+          nextReviewDate = now + ONE_DAY * 30;     // 1 Month
+        } else {
+          status = FlashcardStatus.Mastered;       // Mastered
+          nextReviewDate = now + ONE_DAY * 365;    // Far future, though filtered out
+        }
+      } else if (quality === 5) { // Mastered
+        status = FlashcardStatus.Mastered;
+      }
+
+      return {
+        ...card,
+        interval, // kept for backward compatibility if needed
+        repetition,
+        easinessFactor, // kept for backward compatibility if needed
+        nextReviewDate,
+        status,
+        lastQuality: quality,
+        lastReviewed: Date.now()
+      };
+    }));
+    trackEvent(TRACKING_ACTION.UPDATE_STATUS, TRACKING_CATEGORY.FLASHCARDS, `quality_${quality}`);
   };
 
   const handleDeleteCard = (id: string) => {
@@ -343,8 +396,8 @@ const App: React.FC = () => {
 
       <main className="flex-1 max-w-5xl mx-auto w-full px-4 py-8">
         {view === 'dictionary' && <Dictionary onAddCard={handleAddCard} existingCards={cards} />}
-        {view === 'flashcards' && <Flashcards cards={cards} onStartStudy={() => setView('study')} onDeleteCard={handleDeleteCard} onUpdateStatus={handleUpdateStatus} onOpenImport={() => setIsDataModalOpen(true)} />}
-        {view === 'study' && <StudySession cards={cards} onUpdateStatus={handleUpdateStatus} onExit={() => setView('flashcards')} />}
+        {view === 'flashcards' && <Flashcards cards={cards} onStartStudy={() => setView('study')} onDeleteCard={handleDeleteCard} onReviewCard={handleReviewCard} onOpenImport={() => setIsDataModalOpen(true)} />}
+        {view === 'study' && <StudySession cards={cards} onReviewCard={handleReviewCard} onExit={() => setView('flashcards')} />}
       </main>
 
       {/* Auto-Save Indicators */}

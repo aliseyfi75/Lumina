@@ -36,6 +36,13 @@ export interface Flashcard {
   status: FlashcardStatus;
   lastReviewed: number;
   createdAt: number;
+
+  // SM-2 Algorithm Properties
+  interval?: number;
+  repetition?: number;
+  easinessFactor?: number;
+  nextReviewDate?: number;
+  lastQuality?: number;
 }
 
 export type ViewState = 'dictionary' | 'flashcards' | 'study';

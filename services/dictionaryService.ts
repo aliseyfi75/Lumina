@@ -106,22 +106,76 @@ const lookupDatamuse = async (word: string): Promise<WordEntry | null> => {
   };
 };
 
+const fetchImageForWord = async (word: string): Promise<string | null> => {
+  try {
+    // 1. Try Wikimedia API (REST API - high quality images, free)
+    const wikiResponse = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(word)}`);
+    if (wikiResponse.ok) {
+      const wikiData = await wikiResponse.json();
+      if (wikiData.thumbnail && wikiData.thumbnail.source) {
+        return wikiData.thumbnail.source;
+      }
+      if (wikiData.originalimage && wikiData.originalimage.source) {
+        return wikiData.originalimage.source;
+      }
+    }
+
+    // 2. Fallback to DuckDuckGo API (abstract/instant answer image)
+    const ddgResponse = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(word)}&format=json`);
+    if (ddgResponse.ok) {
+      const ddgData = await ddgResponse.json();
+      if (ddgData.Image) {
+        // DDG images are often relative paths
+        const imageUrl = ddgData.Image.startsWith('http')
+          ? ddgData.Image
+          : `https://duckduckgo.com${ddgData.Image}`;
+        return imageUrl;
+      }
+    }
+  } catch (error) {
+    console.error(`Failed to fetch image for word "${word}":`, error);
+  }
+  return null;
+};
+
 export const lookupWord = async (word: string): Promise<WordEntry | null> => {
   try {
+    let result: WordEntry | null = null;
+
     // Try Primary API first
     const primaryResult = await lookupPrimary(word);
-    if (primaryResult) return primaryResult;
+    if (primaryResult) {
+      result = primaryResult;
+    } else {
+      // Try Fallback API (Datamuse)
+      console.log("Primary API failed, trying fallback...");
+      result = await lookupDatamuse(word);
+    }
 
-    // Try Fallback API (Datamuse)
-    console.log("Primary API failed, trying fallback...");
-    const fallbackResult = await lookupDatamuse(word);
-    return fallbackResult;
+    if (result) {
+      // Fetch visual mnemonic image
+      const image = await fetchImageForWord(result.word);
+      if (image) {
+        result.image = image;
+      }
+      return result;
+    }
+
+    return null;
 
   } catch (error) {
     console.error("Error fetching definition:", error);
     // If primary failed with network error, try fallback
     try {
-      return await lookupDatamuse(word);
+      const fallbackResult = await lookupDatamuse(word);
+      if (fallbackResult) {
+        const image = await fetchImageForWord(fallbackResult.word);
+        if (image) {
+          fallbackResult.image = image;
+        }
+        return fallbackResult;
+      }
+      return null;
     } catch (e) {
       return null;
     }

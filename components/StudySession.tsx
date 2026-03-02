@@ -138,6 +138,18 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onUpdateStatu
                 <span className="inline-block px-3 py-1 bg-brand-900/50 text-brand-300 text-xs font-bold uppercase tracking-widest rounded-full mb-6">
                   {currentCard.partOfSpeech}
                 </span>
+
+                {currentCard.image && (
+                  <div className="mb-6 shrink-0 rounded-2xl overflow-hidden shadow-sm border border-slate-700 h-48 flex justify-center bg-slate-800 items-center w-full max-w-sm mx-auto">
+                    <img
+                      src={currentCard.image}
+                      alt={`Visual mnemonic for ${currentCard.word}`}
+                      className="max-h-full max-w-full object-contain"
+                      loading="lazy"
+                    />
+                  </div>
+                )}
+
                 <p className="text-xl text-slate-50 leading-relaxed font-medium mb-6">
                   {currentCard.mainDefinition}
                 </p>

@@ -58,8 +58,18 @@ const FlashcardItem: React.FC<{
 
         {/* Back of Card */}
         <div className="absolute inset-0 backface-hidden rotate-y-180 bg-slate-900 rounded-2xl shadow-xl p-6 flex flex-col items-center justify-between text-center overflow-hidden border border-slate-800">
-          <div className="overflow-y-auto w-full flex-1 flex flex-col items-center justify-center custom-scrollbar px-2">
-            <p className="text-slate-100 text-lg font-medium leading-relaxed mb-4">
+          <div className="overflow-y-auto w-full flex-1 flex flex-col items-center justify-start custom-scrollbar px-2 py-4">
+            {card.image && (
+              <div className="mb-4 shrink-0 rounded-xl overflow-hidden shadow-sm border border-slate-700 h-32 flex justify-center bg-slate-800 items-center w-full mt-auto">
+                <img
+                  src={card.image}
+                  alt={`Visual mnemonic for ${card.word}`}
+                  className="max-h-full max-w-full object-contain"
+                  loading="lazy"
+                />
+              </div>
+            )}
+            <p className="text-slate-100 text-lg font-medium leading-relaxed mb-auto w-full text-center">
               {card.mainDefinition}
             </p>
             {card.example && (

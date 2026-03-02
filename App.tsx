@@ -277,6 +277,7 @@ const App: React.FC = () => {
       word: entry.word,
       phonetic: entry.phonetic,
       audio: entry.audio,
+      image: entry.image,
       mainDefinition: definition,
       example: example,
       partOfSpeech: partOfSpeech,

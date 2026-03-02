@@ -20,6 +20,7 @@ export interface WordEntry {
   word: string;
   phonetic?: string;
   audio?: string;
+  image?: string;
   meanings: Meaning[];
 }
 
@@ -28,6 +29,7 @@ export interface Flashcard {
   word: string;
   phonetic?: string;
   audio?: string;
+  image?: string;
   mainDefinition: string;
   example?: string;
   partOfSpeech: string;

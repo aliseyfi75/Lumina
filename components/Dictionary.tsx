@@ -195,6 +195,16 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, existingCards
           </div>
 
           <div className="p-8 space-y-8">
+            {result.image && (
+              <div className="mb-6 rounded-2xl overflow-hidden shadow-sm border border-slate-100 max-h-64 flex justify-center bg-slate-50 items-center">
+                <img
+                  src={result.image}
+                  alt={`Visual mnemonic for ${result.word}`}
+                  className="max-h-64 object-contain"
+                  loading="lazy"
+                />
+              </div>
+            )}
             {result.meanings?.map((meaning, idx) => (
               <div key={`${meaning.partOfSpeech}-${idx}`} className="space-y-4">
                 <div className="flex items-center gap-3">

@@ -33,7 +33,7 @@ async function handleAddToLumina(word) {
     // B. Fetch Definition (Logic ported from dictionaryService.ts)
     const dictRes = await fetch(`${DICT_API}/${encodeURIComponent(word)}`);
     if (!dictRes.ok) throw new Error("Word not found in dictionary.");
-    
+
     const dictData = await dictRes.json();
     if (!Array.isArray(dictData) || dictData.length === 0) throw new Error("No definition found.");
 
@@ -46,6 +46,7 @@ async function handleAddToLumina(word) {
       id: crypto.randomUUID(),
       word: entry.word,
       phonetic: entry.phonetic || (entry.phonetics?.find(p => p.text)?.text),
+      audio: entry.phonetics?.find(p => p.audio)?.audio,
       mainDefinition: firstDef.definition,
       example: firstDef.example || "",
       partOfSpeech: firstMeaning.partOfSpeech,
@@ -57,26 +58,26 @@ async function handleAddToLumina(word) {
     // D. Fetch Current Deck & Append (Logic ported from pantryService.ts)
     // Pantry is a KV store, so we must Read -> Append -> Write
     const deckRes = await fetch(`${PANTRY_BASE}/${pantryId}/basket/${BASKET_NAME}`);
-    
+
     let currentCards = [];
     if (deckRes.ok) {
-        const data = await deckRes.json();
-        currentCards = data.cards || [];
+      const data = await deckRes.json();
+      currentCards = data.cards || [];
     }
 
     // Check for duplicates
     if (currentCards.some(c => c.word.toLowerCase() === newCard.word.toLowerCase())) {
-        notify("Duplicate", `"${newCard.word}" is already in your deck.`);
-        return;
+      notify("Duplicate", `"${newCard.word}" is already in your deck.`);
+      return;
     }
 
     // E. Save updated deck
     const updatedCards = [newCard, ...currentCards];
-    
+
     await fetch(`${PANTRY_BASE}/${pantryId}/basket/${BASKET_NAME}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cards: updatedCards }),
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cards: updatedCards }),
     });
 
     notify("Success", `Added "${newCard.word}" to Lumina!`);

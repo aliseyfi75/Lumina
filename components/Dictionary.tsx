@@ -3,7 +3,7 @@ import { WordEntry, Flashcard } from '../types';
 import { lookupWord, getSpellingSuggestions } from '../services/dictionaryService';
 import { getWordSuggestions } from '../services/suggestionService';
 import { trackEvent, TRACKING_ACTION, TRACKING_CATEGORY } from '../services/trackingService';
-import { Search, Plus, Check, Loader2, BookOpen, Clock } from 'lucide-react';
+import { Search, Plus, Check, Loader2, BookOpen, Clock, Volume2 } from 'lucide-react';
 
 interface DictionaryProps {
   onAddCard: (entry: WordEntry, definition: string, example: string, partOfSpeech: string) => void;
@@ -15,7 +15,7 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, existingCards
   const [result, setResult] = useState<WordEntry | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  
+
   // Suggestion State
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -31,7 +31,7 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, existingCards
         setSuggestions([]);
         return;
       }
-      
+
       // Only fetch if we aren't already displaying a result for this exact query
       // (prevents dropdown from popping up after hitting enter)
       if (result && query.toLowerCase() === result.word.toLowerCase()) return;
@@ -76,8 +76,8 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, existingCards
         // If not found, try to find suggestions for typos
         const typoSuggestions = await getSpellingSuggestions(searchQuery);
         if (typoSuggestions.length > 0) {
-           // Use the first suggestion
-           setTypoSuggestion(typoSuggestions[0]);
+          // Use the first suggestion
+          setTypoSuggestion(typoSuggestions[0]);
         }
         setError(`Could not find a definition for "${searchQuery}".`);
       }
@@ -99,8 +99,8 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, existingCards
   };
 
   const isWordSaved = (word: string, def: string) => {
-    return existingCards.some(card => 
-      card.word.toLowerCase() === word.toLowerCase() && 
+    return existingCards.some(card =>
+      card.word.toLowerCase() === word.toLowerCase() &&
       card.mainDefinition === def
     );
   };
@@ -122,14 +122,14 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, existingCards
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onFocus={() => {
-                if (suggestions.length > 0) setShowSuggestions(true);
+              if (suggestions.length > 0) setShowSuggestions(true);
             }}
             placeholder="Lookup a word..."
             className="block w-full pl-11 pr-4 py-4 bg-white border border-slate-200 rounded-2xl text-lg shadow-sm placeholder:text-slate-400 focus:outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 transition-all"
             autoComplete="off"
           />
-          <button 
-            type="submit" 
+          <button
+            type="submit"
             disabled={loading || !query.trim()}
             className="absolute right-2 top-2 bottom-2 bg-slate-900 text-white px-4 rounded-xl font-medium hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
@@ -139,20 +139,20 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, existingCards
 
         {/* Autocomplete Dropdown */}
         {showSuggestions && suggestions.length > 0 && (
-            <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
-                <ul>
-                    {suggestions.map((word, index) => (
-                        <li 
-                            key={index}
-                            onClick={() => handleSuggestionClick(word)}
-                            className="px-4 py-3 flex items-center gap-3 hover:bg-slate-50 cursor-pointer text-slate-700 transition-colors border-b border-slate-50 last:border-none"
-                        >
-                            <Search className="h-4 w-4 text-slate-300" />
-                            <span className="font-medium">{word}</span>
-                        </li>
-                    ))}
-                </ul>
-            </div>
+          <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+            <ul>
+              {suggestions.map((word, index) => (
+                <li
+                  key={index}
+                  onClick={() => handleSuggestionClick(word)}
+                  className="px-4 py-3 flex items-center gap-3 hover:bg-slate-50 cursor-pointer text-slate-700 transition-colors border-b border-slate-50 last:border-none"
+                >
+                  <Search className="h-4 w-4 text-slate-300" />
+                  <span className="font-medium">{word}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </div>
 
@@ -160,16 +160,16 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, existingCards
         <div className="p-4 bg-red-50 text-red-600 rounded-xl text-center">
           <p>{error}</p>
           {typoSuggestion && (
-              <p className="mt-2 text-slate-600">
-                  Did you mean{" "}
-                  <button 
-                      onClick={() => handleSuggestionClick(typoSuggestion)}
-                      className="font-bold text-brand-600 hover:underline"
-                  >
-                      {typoSuggestion}
-                  </button>
-                  ?
-              </p>
+            <p className="mt-2 text-slate-600">
+              Did you mean{" "}
+              <button
+                onClick={() => handleSuggestionClick(typoSuggestion)}
+                className="font-bold text-brand-600 hover:underline"
+              >
+                {typoSuggestion}
+              </button>
+              ?
+            </p>
           )}
         </div>
       )}
@@ -181,6 +181,15 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, existingCards
               <h2 className="text-4xl font-serif font-bold text-slate-900">{result.word}</h2>
               {result.phonetic && (
                 <span className="text-xl text-slate-500 font-serif italic">{result.phonetic}</span>
+              )}
+              {result.audio && (
+                <button
+                  onClick={() => new Audio(result.audio!).play()}
+                  className="p-1.5 text-slate-400 hover:text-brand-500 hover:bg-brand-50 rounded-full transition-colors"
+                  title="Listen to pronunciation"
+                >
+                  <Volume2 className="h-6 w-6" />
+                </button>
               )}
             </div>
           </div>
@@ -198,7 +207,7 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, existingCards
                 <div className="space-y-6">
                   {meaning.definitions?.map((def, dIdx) => {
                     const saved = isWordSaved(result.word, def.definition);
-                    
+
                     return (
                       <div key={dIdx} className="group relative pl-4 border-l-2 border-transparent hover:border-brand-200 transition-colors">
                         <p className="text-slate-800 text-lg leading-relaxed">
@@ -209,14 +218,14 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, existingCards
                             "{def.example}"
                           </p>
                         )}
-                        
+
                         <div className="mt-3">
                           <button
                             onClick={() => !saved && onAddCard(result, def.definition, def.example || '', meaning.partOfSpeech)}
                             disabled={saved}
                             className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all
-                              ${saved 
-                                ? 'bg-green-100 text-green-700 cursor-default' 
+                              ${saved
+                                ? 'bg-green-100 text-green-700 cursor-default'
                                 : 'bg-slate-50 text-slate-600 hover:bg-brand-50 hover:text-brand-600'
                               }`}
                           >

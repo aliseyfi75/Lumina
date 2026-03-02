@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Flashcard, FlashcardStatus } from '../types';
-import { Play, BookOpen, CheckCircle, Brain, Trash2, RotateCw, Upload } from 'lucide-react';
+import { Play, BookOpen, CheckCircle, Brain, Trash2, RotateCw, Upload, Volume2 } from 'lucide-react';
 
 interface FlashcardsProps {
   cards: Flashcard[];
@@ -34,7 +34,21 @@ const FlashcardItem: React.FC<{
 
           <h3 className="text-3xl font-serif font-bold text-slate-900 mb-2">{card.word}</h3>
           <p className="text-slate-500 italic font-serif">{card.partOfSpeech}</p>
-          {card.phonetic && <p className="text-slate-400 text-sm mt-1">{card.phonetic}</p>}
+          <div className="flex items-center gap-2 mt-1">
+            {card.phonetic && <p className="text-slate-400 text-sm">{card.phonetic}</p>}
+            {card.audio && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  new Audio(card.audio!).play();
+                }}
+                className="p-1 text-slate-400 hover:text-brand-500 hover:bg-brand-50 rounded-full transition-colors"
+                title="Listen to pronunciation"
+              >
+                <Volume2 className="h-4 w-4" />
+              </button>
+            )}
+          </div>
 
           <div className="absolute bottom-6 text-slate-300 group-hover:text-brand-400 transition-colors flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider">
             <RotateCw className="h-3.5 w-3.5" />

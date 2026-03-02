@@ -19,6 +19,7 @@ export interface Meaning {
 export interface WordEntry {
   word: string;
   phonetic?: string;
+  audio?: string;
   meanings: Meaning[];
 }
 
@@ -26,6 +27,7 @@ export interface Flashcard {
   id: string;
   word: string;
   phonetic?: string;
+  audio?: string;
   mainDefinition: string;
   example?: string;
   partOfSpeech: string;

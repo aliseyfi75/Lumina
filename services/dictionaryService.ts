@@ -21,7 +21,7 @@ const lookupPrimary = async (word: string): Promise<WordEntry | null> => {
   }
 
   const data = await response.json();
-  
+
   if (!Array.isArray(data) || data.length === 0) return null;
 
   const entry = data[0];
@@ -29,6 +29,7 @@ const lookupPrimary = async (word: string): Promise<WordEntry | null> => {
   const wordEntry: WordEntry = {
     word: entry.word,
     phonetic: entry.phonetic || entry.phonetics?.find((p: any) => p.text)?.text,
+    audio: entry.phonetics?.find((p: any) => p.audio)?.audio,
     meanings: entry.meanings.map((m: any) => ({
       partOfSpeech: m.partOfSpeech,
       definitions: m.definitions.map((d: any) => ({
@@ -48,11 +49,11 @@ const lookupDatamuse = async (word: string): Promise<WordEntry | null> => {
   if (!response.ok) return null;
 
   const data: DatamuseEntry[] = await response.json();
-  
+
   if (!Array.isArray(data) || data.length === 0 || !data[0].defs) return null;
 
   const entry = data[0];
-  
+
   // Extract phonetic from tags (e.g., "pron:/ˈæpəl/")
   let phonetic: string | undefined;
   if (entry.tags) {
@@ -72,11 +73,11 @@ const lookupDatamuse = async (word: string): Promise<WordEntry | null> => {
 
     const posCode = defStr.substring(0, tabIndex);
     const definition = defStr.substring(tabIndex + 1);
-    
+
     // Map Datamuse POS codes to full names if necessary, or just use them
     // Datamuse uses: n, v, adj, adv, u (unknown)
     let partOfSpeech = posCode;
-    switch(posCode) {
+    switch (posCode) {
       case 'n': partOfSpeech = 'noun'; break;
       case 'v': partOfSpeech = 'verb'; break;
       case 'adj': partOfSpeech = 'adjective'; break;
@@ -87,7 +88,7 @@ const lookupDatamuse = async (word: string): Promise<WordEntry | null> => {
     if (!meaningsMap.has(partOfSpeech)) {
       meaningsMap.set(partOfSpeech, []);
     }
-    
+
     meaningsMap.get(partOfSpeech)?.push({ definition });
   });
 
@@ -120,9 +121,9 @@ export const lookupWord = async (word: string): Promise<WordEntry | null> => {
     console.error("Error fetching definition:", error);
     // If primary failed with network error, try fallback
     try {
-        return await lookupDatamuse(word);
+      return await lookupDatamuse(word);
     } catch (e) {
-        return null;
+      return null;
     }
   }
 };
@@ -131,17 +132,17 @@ export const getSpellingSuggestions = async (word: string): Promise<string[]> =>
   try {
     // sp = spelled like (handles typos)
     const response = await fetch(`${DATAMUSE_API_URL}?sp=${encodeURIComponent(word)}&max=5`);
-    
+
     if (!response.ok) return [];
-    
+
     const data: DatamuseEntry[] = await response.json();
-    
+
     // Filter out the word itself if it appears (though if we are here, it likely has no definition)
     // But sometimes a word exists but has no definition in the dictionary.
     return data
       .map(entry => entry.word)
       .filter(w => w.toLowerCase() !== word.toLowerCase());
-      
+
   } catch (error) {
     console.error("Error fetching spelling suggestions:", error);
     return [];

@@ -1,57 +1,60 @@
-import { Flashcard } from '../types';
+import { Flashcard, CloudData } from '../types';
 
 const BASE_URL = 'https://getpantry.cloud/apiv1/pantry';
 const BASKET_NAME = 'Lumina';
 
 // Standard options to avoid CORS/Referrer issues in sensitive browser environments
 const FETCH_OPTIONS: RequestInit = {
-    referrerPolicy: 'no-referrer',
-    mode: 'cors',
-    credentials: 'omit'
+  referrerPolicy: 'no-referrer',
+  mode: 'cors',
+  credentials: 'omit'
 };
 
 export const getDetails = async (pantryId: string) => {
   const response = await fetch(`${BASE_URL}/${pantryId}`, {
-      ...FETCH_OPTIONS,
-      method: 'GET'
+    ...FETCH_OPTIONS,
+    method: 'GET'
   });
-  
+
   if (!response.ok) {
-     throw new Error(`Invalid Pantry ID or network error: ${response.status} ${response.statusText}`);
+    throw new Error(`Invalid Pantry ID or network error: ${response.status} ${response.statusText}`);
   }
   return await response.json();
 };
 
-export const getDeck = async (pantryId: string): Promise<Flashcard[]> => {
+export const getDeck = async (pantryId: string): Promise<CloudData> => {
   try {
     const response = await fetch(`${BASE_URL}/${pantryId}/basket/${BASKET_NAME}`, {
-        ...FETCH_OPTIONS,
-        method: 'GET'
+      ...FETCH_OPTIONS,
+      method: 'GET'
     });
-    
+
     if (!response.ok) {
       // If 400/404, it likely means the basket doesn't exist yet, which is fine.
       // We treat it as a new empty deck.
-      return [];
+      return { cards: [] };
     }
 
     const data = await response.json();
-    // Pantry stores key-value pairs. We expect { "cards": [...] }
-    return Array.isArray(data.cards) ? data.cards : [];
+    return {
+      cards: Array.isArray(data.cards) ? data.cards : [],
+      studyHistory: data.studyHistory || {},
+      longestStreak: data.longestStreak || 0
+    };
   } catch (error) {
     console.warn("Could not fetch deck from Pantry (might be new):", error);
-    return [];
+    return { cards: [] };
   }
 };
 
-export const updateDeck = async (pantryId: string, cards: Flashcard[]) => {
+export const updateDeck = async (pantryId: string, cloudData: CloudData) => {
   const response = await fetch(`${BASE_URL}/${pantryId}/basket/${BASKET_NAME}`, {
     ...FETCH_OPTIONS,
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ cards }),
+    body: JSON.stringify(cloudData),
   });
 
   if (!response.ok) {

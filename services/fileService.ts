@@ -1,4 +1,8 @@
-import { Flashcard, FlashcardStatus, FileSystemFileHandle } from '../types';
+import { Flashcard, FlashcardStatus, FileSystemFileHandle, CloudData } from '../types';
+
+export const generateJSON = (data: CloudData): string => {
+  return JSON.stringify(data, null, 2);
+};
 
 export const generateCSV = (cards: Flashcard[]): string => {
   if (!cards || !Array.isArray(cards)) return '';
@@ -40,13 +44,34 @@ export const generateCSV = (cards: Flashcard[]): string => {
   return [headers.join(','), ...rows].join('\n');
 };
 
+export const parseFileContent = (text: string): CloudData => {
+  if (!text) return { cards: [] };
+
+  try {
+    // Attempt to parse as JSON first (new format)
+    const data = JSON.parse(text);
+    if (data.cards || data.studyHistory || data.longestStreak !== undefined) {
+      return {
+        cards: Array.isArray(data.cards) ? data.cards : [],
+        studyHistory: data.studyHistory || {},
+        longestStreak: data.longestStreak || 0
+      };
+    }
+  } catch (e) {
+    // Fallback to CSV format parsing (old legacy format)
+    return { cards: parseCSV(text) };
+  }
+
+  return { cards: [] };
+};
+
 export const parseCSV = (csvText: string): Flashcard[] => {
   if (!csvText) return [];
   const lines = csvText.split(/\r?\n/);
   if (lines.length < 2) return []; // Only header or empty
 
   const cards: Flashcard[] = [];
-  
+
   // Skip header (index 0)
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i].trim();
@@ -56,24 +81,24 @@ export const parseCSV = (csvText: string): Flashcard[] => {
     const values: string[] = [];
     let currentVal = '';
     let inQuote = false;
-    
-    for (let charIndex = 0; charIndex < line.length; charIndex++) {
-        const char = line[charIndex];
-        const nextChar = line[charIndex + 1];
 
-        if (char === '"') {
-            if (inQuote && nextChar === '"') {
-                currentVal += '"';
-                charIndex++; // skip next quote
-            } else {
-                inQuote = !inQuote;
-            }
-        } else if (char === ',' && !inQuote) {
-            values.push(currentVal);
-            currentVal = '';
+    for (let charIndex = 0; charIndex < line.length; charIndex++) {
+      const char = line[charIndex];
+      const nextChar = line[charIndex + 1];
+
+      if (char === '"') {
+        if (inQuote && nextChar === '"') {
+          currentVal += '"';
+          charIndex++; // skip next quote
         } else {
-            currentVal += char;
+          inQuote = !inQuote;
         }
+      } else if (char === ',' && !inQuote) {
+        values.push(currentVal);
+        currentVal = '';
+      } else {
+        currentVal += char;
+      }
     }
     values.push(currentVal); // Push last value
 
@@ -99,8 +124,8 @@ export const parseCSV = (csvText: string): Flashcard[] => {
   return cards;
 };
 
-export const downloadCSV = (content: string, filename: string) => {
-  const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+export const downloadJSON = (content: string, filename: string) => {
+  const blob = new Blob([content], { type: 'application/json;charset=utf-8;' });
   const link = document.createElement('a');
   if (link.download !== undefined) {
     const url = URL.createObjectURL(blob);
@@ -113,9 +138,9 @@ export const downloadCSV = (content: string, filename: string) => {
   }
 };
 
-export const saveToLocalFile = async (handle: FileSystemFileHandle, cards: Flashcard[]) => {
+export const saveToLocalFile = async (handle: FileSystemFileHandle, data: CloudData) => {
   if (!handle) return;
-  const content = generateCSV(cards);
+  const content = generateJSON(data);
   const writable = await handle.createWritable();
   await writable.write(content);
   await writable.close();

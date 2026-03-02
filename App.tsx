@@ -3,18 +3,23 @@ import { ViewState, Flashcard, WordEntry, FlashcardStatus, FileSystemFileHandle,
 import { Dictionary } from './components/Dictionary';
 import { Flashcards } from './components/Flashcards';
 import { StudySession } from './components/StudySession';
+import { Statistics } from './components/Statistics';
 import { DataManagerModal } from './components/DataManagerModal';
-import { generateCSV, parseCSV, downloadCSV, saveToLocalFile } from './services/csvService';
+import { generateJSON, parseFileContent, downloadJSON, saveToLocalFile } from './services/fileService';
 import { getDetails, getDeck, updateDeck } from './services/pantryService';
 import { initializeTracking, trackEvent, setTrackingUserId, TRACKING_CATEGORY, TRACKING_ACTION } from './services/trackingService';
-import { Book, Layers, Database, Save, Cloud } from 'lucide-react';
+import { Book, Layers, Database, Save, Cloud, BarChart2 } from 'lucide-react';
 
 const LOCAL_STORAGE_KEY = 'lumina_cards_v1';
 const CLOUD_CONFIG_KEY = 'lumina_cloud_config';
+const STUDY_HISTORY_KEY = 'lumina_study_history_v1';
+const LONGEST_STREAK_KEY = 'lumina_longest_streak_v1';
 
 const App: React.FC = () => {
   const [view, setView] = useState<ViewState>('dictionary');
   const [cards, setCards] = useState<Flashcard[]>([]);
+  const [studyHistory, setStudyHistory] = useState<Record<string, number>>({});
+  const [longestStreak, setLongestStreak] = useState(0);
   const [isDataModalOpen, setIsDataModalOpen] = useState(false);
 
   // File System State
@@ -51,7 +56,14 @@ const App: React.FC = () => {
           cardMap.set(c.id, c);
         }
       });
-      return Array.from(cardMap.values()).sort((a, b) => b.createdAt - a.createdAt);
+
+      const now = Date.now();
+      return Array.from(cardMap.values()).map(c => {
+        if (c.status === FlashcardStatus.Learning && c.nextReviewDate && c.nextReviewDate < now) {
+          return { ...c, nextReviewDate: now };
+        }
+        return c;
+      }).sort((a, b) => b.createdAt - a.createdAt);
     });
   }, []);
 
@@ -73,21 +85,29 @@ const App: React.FC = () => {
         }
       }
 
-      // Step B: Load Default CSV if Local is empty
+      // Step B: Load Default JSON/CSV if Local is empty
       if (initialCards.length === 0) {
         try {
           const response = await fetch('./database/cards.csv');
           if (response.ok) {
             const text = await response.text();
-            const defaultCards = parseCSV(text);
-            if (defaultCards.length > 0) {
-              initialCards = defaultCards;
+            const defaultData = parseFileContent(text);
+            if (defaultData.cards.length > 0) {
+              initialCards = defaultData.cards;
             }
           }
         } catch (e) {
-          console.warn("No default CSV database found.", e);
+          console.warn("No default database found.", e);
         }
       }
+
+      const now = Date.now();
+      initialCards = initialCards.map(c => {
+        if (c.status === FlashcardStatus.Learning && c.nextReviewDate && c.nextReviewDate < now) {
+          return { ...c, nextReviewDate: now };
+        }
+        return c;
+      });
 
       // Set what we have locally so far
       setCards(initialCards);
@@ -99,11 +119,26 @@ const App: React.FC = () => {
           const config = JSON.parse(savedCloudConfig);
           if (config.pantryId) {
             // Fetch latest from cloud
-            const cloudCards = await getDeck(config.pantryId);
+            const cloudData = await getDeck(config.pantryId);
 
-            if (cloudCards && cloudCards.length > 0) {
+            if (cloudData.cards && cloudData.cards.length > 0) {
               // Merge cloud data into our local/default data
-              performMerge(cloudCards);
+              performMerge(cloudData.cards);
+            }
+
+            // Merge study history safely
+            if (cloudData.studyHistory) {
+              setStudyHistory(prev => {
+                const merged = { ...prev };
+                for (const [date, count] of Object.entries(cloudData.studyHistory!)) {
+                  merged[date] = Math.max(merged[date] || 0, count);
+                }
+                return merged;
+              });
+            }
+
+            if (cloudData.longestStreak) {
+              setLongestStreak(prev => Math.max(prev, cloudData.longestStreak!));
             }
 
             // Only set config (enabling auto-save) after we've attempted the fetch
@@ -123,6 +158,21 @@ const App: React.FC = () => {
       } else {
         initializeTracking();
       }
+
+      // Step D: Load Study History & Streak
+      const savedHistory = localStorage.getItem(STUDY_HISTORY_KEY);
+      if (savedHistory) {
+        try {
+          const parsed = JSON.parse(savedHistory);
+          setStudyHistory(parsed);
+        } catch (e) {
+          console.error("Failed to parse study history", e);
+        }
+      }
+      const savedLongestStreak = localStorage.getItem(LONGEST_STREAK_KEY);
+      if (savedLongestStreak) {
+        setLongestStreak(parseInt(savedLongestStreak, 10) || 0);
+      }
     };
 
     initData();
@@ -134,13 +184,21 @@ const App: React.FC = () => {
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(cards));
   }, [cards]);
 
+  useEffect(() => {
+    localStorage.setItem(STUDY_HISTORY_KEY, JSON.stringify(studyHistory));
+  }, [studyHistory]);
+
+  useEffect(() => {
+    localStorage.setItem(LONGEST_STREAK_KEY, longestStreak.toString());
+  }, [longestStreak]);
+
   // 3. Auto-Save to Local File
   useEffect(() => {
     if (!fileHandle) return;
     const timeoutId = setTimeout(async () => {
       setIsFileSaving(true);
       try {
-        await saveToLocalFile(fileHandle, cards);
+        await saveToLocalFile(fileHandle, { cards, studyHistory, longestStreak });
       } catch (error) {
         console.error("Auto-save file failed:", error);
       } finally {
@@ -148,7 +206,7 @@ const App: React.FC = () => {
       }
     }, 1000);
     return () => clearTimeout(timeoutId);
-  }, [cards, fileHandle]);
+  }, [cards, studyHistory, longestStreak, fileHandle]);
 
   // 4. Auto-Save to Cloud
   useEffect(() => {
@@ -158,7 +216,7 @@ const App: React.FC = () => {
     const timeoutId = setTimeout(async () => {
       setIsCloudSaving(true);
       try {
-        await updateDeck(cloudConfig.pantryId, cards);
+        await updateDeck(cloudConfig.pantryId, { cards, studyHistory, longestStreak });
       } catch (error) {
         console.error("Auto-save cloud failed:", error);
       } finally {
@@ -180,16 +238,22 @@ const App: React.FC = () => {
     try {
       // @ts-ignore
       const [handle] = await window.showOpenFilePicker({
-        types: [{ description: 'CSV File', accept: { 'text/csv': ['.csv'] } }],
+        types: [
+          { description: 'Lumina JSON Data', accept: { 'application/json': ['.json'] } },
+          { description: 'CSV Backup', accept: { 'text/csv': ['.csv'] } }
+        ],
         multiple: false
       });
       if (handle) {
         const file = await handle.getFile();
         const text = await file.text();
-        const loadedCards = parseCSV(text);
-        if (loadedCards.length > 0) {
-          performMerge(loadedCards);
+        const loadedData = parseFileContent(text);
+        if (loadedData.cards.length > 0) {
+          performMerge(loadedData.cards);
         }
+        if (loadedData.studyHistory) setStudyHistory(prev => ({ ...prev, ...loadedData.studyHistory }));
+        if (loadedData.longestStreak) setLongestStreak(prev => Math.max(prev, loadedData.longestStreak!));
+
         setFileHandle(handle);
       }
     } catch (err: any) {
@@ -204,24 +268,26 @@ const App: React.FC = () => {
   const handleManualFileSave = async () => {
     if (!fileHandle) return;
     setIsFileSaving(true);
-    await saveToLocalFile(fileHandle, cards);
+    await saveToLocalFile(fileHandle, { cards, studyHistory, longestStreak });
     setIsFileSaving(false);
     trackEvent(TRACKING_ACTION.MANUAL_SAVE, TRACKING_CATEGORY.DATA);
   };
 
   const handleExportCSV = () => {
-    const csvContent = generateCSV(cards);
+    const jsonContent = generateJSON({ cards, studyHistory, longestStreak });
     const date = new Date().toISOString().split('T')[0];
-    downloadCSV(csvContent, `lumina_backup_${date}.csv`);
+    downloadJSON(jsonContent, `lumina_backup_${date}.json`);
     trackEvent(TRACKING_ACTION.EXPORT_CSV, TRACKING_CATEGORY.DATA);
   };
 
   const handleImportCSV = async (file: File) => {
     const text = await file.text();
-    const importedCards = parseCSV(text);
-    if (importedCards.length === 0) throw new Error("No valid cards found");
-    performMerge(importedCards);
-    trackEvent(TRACKING_ACTION.IMPORT_CSV, TRACKING_CATEGORY.DATA, 'card_count', importedCards.length);
+    const importedData = parseFileContent(text);
+    if (importedData.cards.length === 0) throw new Error("No valid data found");
+    performMerge(importedData.cards);
+    if (importedData.studyHistory) setStudyHistory(prev => ({ ...prev, ...importedData.studyHistory }));
+    if (importedData.longestStreak) setLongestStreak(prev => Math.max(prev, importedData.longestStreak!));
+    trackEvent(TRACKING_ACTION.IMPORT_CSV, TRACKING_CATEGORY.DATA, 'card_count', importedData.cards.length);
   };
 
   // --- Cloud Handlers ---
@@ -231,10 +297,12 @@ const App: React.FC = () => {
     await getDetails(pantryId);
 
     // 2. Fetch existing data (Merge)
-    const cloudCards = await getDeck(pantryId);
-    if (cloudCards.length > 0) {
-      performMerge(cloudCards);
+    const cloudData = await getDeck(pantryId);
+    if (cloudData.cards && cloudData.cards.length > 0) {
+      performMerge(cloudData.cards);
     }
+    if (cloudData.studyHistory) setStudyHistory(prev => ({ ...prev, ...cloudData.studyHistory }));
+    if (cloudData.longestStreak) setLongestStreak(prev => Math.max(prev, cloudData.longestStreak!));
     // If cloud is empty but we have local cards, we will push them via auto-save momentarily.
 
     const config = { pantryId };
@@ -256,16 +324,18 @@ const App: React.FC = () => {
 
   const handleCloudPull = async () => {
     if (!cloudConfig) return;
-    const cloudCards = await getDeck(cloudConfig.pantryId);
-    if (cloudCards.length > 0) {
-      performMerge(cloudCards);
+    const cloudData = await getDeck(cloudConfig.pantryId);
+    if (cloudData.cards && cloudData.cards.length > 0) {
+      performMerge(cloudData.cards);
     }
+    if (cloudData.studyHistory) setStudyHistory(prev => ({ ...prev, ...cloudData.studyHistory }));
+    if (cloudData.longestStreak) setLongestStreak(prev => Math.max(prev, cloudData.longestStreak!));
     trackEvent(TRACKING_ACTION.CLOUD_PULL, TRACKING_CATEGORY.CLOUD);
   };
 
   const handleCloudPush = async () => {
     if (!cloudConfig) return;
-    await updateDeck(cloudConfig.pantryId, cards);
+    await updateDeck(cloudConfig.pantryId, { cards, studyHistory, longestStreak });
     trackEvent(TRACKING_ACTION.CLOUD_PUSH, TRACKING_CATEGORY.CLOUD);
   };
 
@@ -298,6 +368,52 @@ const App: React.FC = () => {
       card.id === id ? { ...card, status, lastReviewed: Date.now() } : card
     ));
     trackEvent(TRACKING_ACTION.UPDATE_STATUS, TRACKING_CATEGORY.FLASHCARDS, status);
+  };
+
+  // Helper to re-calculate current streak to update longest streak
+  const getLocalDateString = (d: Date) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const calculateCurrentStreak = (history: Record<string, number>) => {
+    let streak = 0;
+    let currentDate = new Date();
+    const todayStr = getLocalDateString(currentDate);
+
+    // Check if we studied today or yesterday to continue streak
+    if (!history[todayStr] || history[todayStr] === 0) {
+      currentDate.setDate(currentDate.getDate() - 1);
+      const yesterdayStr = getLocalDateString(currentDate);
+
+      if (!history[yesterdayStr] || history[yesterdayStr] === 0) {
+        return 0; // No activity today or yesterday, streak is 0
+      }
+    }
+
+    while (history[getLocalDateString(currentDate)] > 0) {
+      streak++;
+      currentDate.setDate(currentDate.getDate() - 1);
+    }
+    return streak;
+  };
+
+  const handleSessionComplete = () => {
+    // Record that a study session was completed today to increment streak
+    const today = getLocalDateString(new Date());
+    setStudyHistory(prev => {
+      const updatedHistory = {
+        ...prev,
+        [today]: (prev[today] || 0) + 1
+      };
+
+      const newCurrentStreak = calculateCurrentStreak(updatedHistory);
+      setLongestStreak(prevStreak => Math.max(prevStreak, newCurrentStreak));
+
+      return updatedHistory;
+    });
   };
 
   const handleReviewCard = (id: string, quality: number) => {
@@ -381,6 +497,10 @@ const App: React.FC = () => {
                 <span className="hidden sm:inline">Flashcards</span>
                 {cards.length > 0 && <span className="bg-slate-200 text-slate-600 text-[10px] px-1.5 py-0.5 rounded-full min-w-[20px] text-center">{cards.length}</span>}
               </button>
+              <button onClick={() => setView('statistics')} className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${view === 'statistics' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>
+                <BarChart2 className="h-4 w-4" />
+                <span className="hidden sm:inline">Statistics</span>
+              </button>
             </nav>
 
             <button
@@ -397,7 +517,8 @@ const App: React.FC = () => {
       <main className="flex-1 max-w-5xl mx-auto w-full px-4 py-8">
         {view === 'dictionary' && <Dictionary onAddCard={handleAddCard} existingCards={cards} />}
         {view === 'flashcards' && <Flashcards cards={cards} onStartStudy={() => setView('study')} onDeleteCard={handleDeleteCard} onReviewCard={handleReviewCard} onOpenImport={() => setIsDataModalOpen(true)} />}
-        {view === 'study' && <StudySession cards={cards} onReviewCard={handleReviewCard} onExit={() => setView('flashcards')} />}
+        {view === 'study' && <StudySession cards={cards} onReviewCard={handleReviewCard} onSessionComplete={handleSessionComplete} onExit={() => setView('flashcards')} />}
+        {view === 'statistics' && <Statistics cards={cards} studyHistory={studyHistory} longestStreak={longestStreak} />}
       </main>
 
       {/* Auto-Save Indicators */}

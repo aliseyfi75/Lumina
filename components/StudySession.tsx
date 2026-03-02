@@ -4,22 +4,37 @@ import { RotateCw, CheckCircle, Brain, ArrowLeft, Volume2 } from 'lucide-react';
 
 interface StudySessionProps {
   cards: Flashcard[];
-  onUpdateStatus: (id: string, status: FlashcardStatus) => void;
+  onReviewCard: (id: string, quality: number) => void;
   onExit: () => void;
 }
 
-export const StudySession: React.FC<StudySessionProps> = ({ cards, onUpdateStatus, onExit }) => {
+export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard, onExit }) => {
   const [queue, setQueue] = useState<Flashcard[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
 
   useEffect(() => {
-    // Filter out Mastered cards so they don't appear in the session
-    const validCards = cards.filter(c => c.status !== FlashcardStatus.Mastered);
+    // Filter cards that are due for review (or don't have a nextReviewDate yet falling back to old behavior)
+    // We intentionally ignore Mastered status if it's due, but practically Mastered cards will have long intervals
+    const validCards = cards.filter(c =>
+      c.status !== FlashcardStatus.Mastered ||
+      (!c.nextReviewDate || c.nextReviewDate <= Date.now())
+    );
+
+    // If it's pure legacy (no SM-2) and Mastered, we continue skipping it. 
+    // Wait, the easiest filter is just based on due date.
+    // If a card has no nextReviewDate (legacy), we treat it as due if it's not Mastered.
+    // If a card HAS a nextReviewDate, we follow the nextReviewDate strictly.
+    const dueCards = cards.filter(c => {
+      if (c.nextReviewDate) {
+        return c.nextReviewDate <= Date.now();
+      }
+      return c.status !== FlashcardStatus.Mastered;
+    });
 
     // Shuffle
-    const studySet = [...validCards].sort(() => Math.random() - 0.5);
+    const studySet = [...dueCards].sort(() => Math.random() - 0.5);
 
     setQueue(studySet);
     setIsInitialized(true);
@@ -31,10 +46,10 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onUpdateStatu
 
   const currentCard = queue[currentIndex];
 
-  const handleNext = (status: FlashcardStatus) => {
+  const handleNext = (quality: number) => {
     if (!currentCard) return;
 
-    onUpdateStatus(currentCard.id, status);
+    onReviewCard(currentCard.id, quality);
 
     // Flip back first
     setIsFlipped(false);
@@ -161,21 +176,29 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onUpdateStatu
               </div>
 
               {/* Integrated Controls */}
-              <div className="pt-6 mt-4 border-t border-slate-800 grid grid-cols-2 gap-4 w-full" onClick={(e) => e.stopPropagation()}>
+              <div className="pt-6 mt-4 border-t border-slate-800 grid grid-cols-3 gap-3 w-full" onClick={(e) => e.stopPropagation()}>
                 <button
-                  onClick={() => handleNext(FlashcardStatus.Learning)}
-                  className="group/btn flex flex-col items-center justify-center gap-2 p-4 rounded-xl bg-slate-800 hover:bg-amber-900/20 border border-slate-700 hover:border-amber-700/50 transition-all"
+                  onClick={() => handleNext(1)}
+                  className="group/btn flex flex-col items-center justify-center p-3 rounded-xl bg-slate-800 hover:bg-red-900/20 border border-slate-700 hover:border-red-700/50 transition-all text-center"
                 >
-                  <Brain className="h-6 w-6 text-slate-400 group-hover/btn:text-amber-400 transition-colors" />
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-400 group-hover/btn:text-amber-400">Needs Work</span>
+                  <span className="text-sm font-bold uppercase tracking-wider text-slate-300 group-hover/btn:text-red-400 mb-1">Again</span>
+                  <span className="text-[9px] text-slate-500 leading-tight">Study again<br />today</span>
                 </button>
 
                 <button
-                  onClick={() => handleNext(FlashcardStatus.Mastered)}
-                  className="group/btn flex flex-col items-center justify-center gap-2 p-4 rounded-xl bg-slate-800 hover:bg-green-900/20 border border-slate-700 hover:border-green-700/50 transition-all"
+                  onClick={() => handleNext(3)}
+                  className="group/btn flex flex-col items-center justify-center p-3 rounded-xl bg-slate-800 hover:bg-blue-900/20 border border-slate-700 hover:border-blue-700/50 transition-all text-center"
                 >
-                  <CheckCircle className="h-6 w-6 text-slate-400 group-hover/btn:text-green-400 transition-colors" />
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-400 group-hover/btn:text-green-400">Mastered</span>
+                  <span className="text-sm font-bold uppercase tracking-wider text-slate-300 group-hover/btn:text-blue-400 mb-1">Learned</span>
+                  <span className="text-[9px] text-slate-500 leading-tight">Pushes to<br />tomorrow/next week</span>
+                </button>
+
+                <button
+                  onClick={() => handleNext(5)}
+                  className="group/btn flex flex-col items-center justify-center p-3 rounded-xl bg-slate-800 hover:bg-green-900/20 border border-slate-700 hover:border-green-700/50 transition-all text-center"
+                >
+                  <span className="text-sm font-bold uppercase tracking-wider text-slate-300 group-hover/btn:text-green-400 mb-1">Mastered</span>
+                  <span className="text-[9px] text-slate-500 leading-tight">Remove from<br />study sessions</span>
                 </button>
               </div>
             </div>

@@ -1,20 +1,20 @@
 import React, { useState } from 'react';
 import { Flashcard, FlashcardStatus } from '../types';
-import { Play, BookOpen, CheckCircle, Brain, Trash2, RotateCw, Upload, Volume2 } from 'lucide-react';
+import { Play, BookOpen, CheckCircle, Brain, Trash2, RotateCw, Upload, Volume2, ThumbsUp, Zap } from 'lucide-react';
 
 interface FlashcardsProps {
   cards: Flashcard[];
   onStartStudy: () => void;
   onDeleteCard: (id: string) => void;
-  onUpdateStatus: (id: string, status: FlashcardStatus) => void;
+  onReviewCard: (id: string, quality: number) => void;
   onOpenImport: () => void;
 }
 
 const FlashcardItem: React.FC<{
   card: Flashcard;
   onDelete: (id: string) => void;
-  onUpdate: (id: string, status: FlashcardStatus) => void;
-}> = ({ card, onDelete, onUpdate }) => {
+  onReview: (id: string, quality: number) => void;
+}> = ({ card, onDelete, onReview }) => {
   const [isFlipped, setIsFlipped] = useState(false);
 
   return (
@@ -25,12 +25,20 @@ const FlashcardItem: React.FC<{
       <div className={`relative w-full h-full duration-500 preserve-3d transition-transform ${isFlipped ? 'rotate-y-180' : ''}`} style={{ transformStyle: 'preserve-3d' }}>
         {/* Front of Card */}
         <div className="absolute inset-0 backface-hidden bg-white rounded-2xl shadow-sm border border-slate-200 p-6 flex flex-col items-center justify-center text-center hover:shadow-md hover:border-brand-200 transition-all">
-          <span className={`absolute top-4 right-4 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider
-            ${card.status === FlashcardStatus.New ? 'bg-blue-100 text-blue-700' :
-              card.status === FlashcardStatus.Learning ? 'bg-amber-100 text-amber-700' :
-                'bg-green-100 text-green-700'}`}>
-            {card.status}
-          </span>
+          <div className="absolute top-4 right-4 flex items-center gap-1.5 pl-2">
+            {/* Added logic for displaying the due string for Learning cards */}
+            {card.status === FlashcardStatus.Learning && card.nextReviewDate && (
+              <span className="text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-md">
+                {card.nextReviewDate <= Date.now() ? 'Due Today' : `in ${Math.max(1, Math.ceil((card.nextReviewDate - Date.now()) / (1000 * 60 * 60 * 24)))} days`}
+              </span>
+            )}
+            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider
+              ${card.status === FlashcardStatus.New ? 'bg-blue-100 text-blue-700' :
+                card.status === FlashcardStatus.Learning ? 'bg-amber-100 text-amber-700' :
+                  'bg-green-100 text-green-700'}`}>
+              {card.status}
+            </span>
+          </div>
 
           <h3 className="text-3xl font-serif font-bold text-slate-900 mb-2">{card.word}</h3>
           <p className="text-slate-500 italic font-serif">{card.partOfSpeech}</p>
@@ -79,40 +87,49 @@ const FlashcardItem: React.FC<{
             )}
           </div>
 
-          <div className="pt-4 w-full flex items-center justify-center gap-3 border-t border-slate-800 mt-2" onClick={(e) => e.stopPropagation()}>
+          <div className="pt-4 w-full grid grid-cols-4 gap-1 border-t border-slate-800 mt-2" onClick={(e) => e.stopPropagation()}>
             <button
-              onClick={() => onUpdate(card.id, FlashcardStatus.Learning)}
-              className={`flex-1 flex flex-col items-center gap-1 p-2 rounded-lg transition-colors
-                ${card.status === FlashcardStatus.Learning
-                  ? 'bg-amber-500/20 text-amber-400'
-                  : 'text-slate-500 hover:bg-slate-800 hover:text-amber-400'}`}
-              title="Needs work"
+              onClick={() => onReview(card.id, 1)}
+              className={`flex flex-col items-center justify-center gap-1 p-1.5 rounded-lg transition-colors 
+                ${card.lastQuality === 1
+                  ? 'bg-red-500/20 text-red-400'
+                  : 'text-slate-500 hover:bg-slate-800 hover:text-red-400'}`}
+              title="Again"
             >
-              <Brain className="h-5 w-5" />
-              <span className="text-[10px] font-bold uppercase">Needs Work</span>
+              <RotateCw className="h-4 w-4" />
+              <span className="text-[8px] font-bold uppercase">Again</span>
             </button>
-
             <button
-              onClick={() => onUpdate(card.id, FlashcardStatus.Mastered)}
-              className={`flex-1 flex flex-col items-center gap-1 p-2 rounded-lg transition-colors
-                ${card.status === FlashcardStatus.Mastered
+              onClick={() => onReview(card.id, 3)}
+              className={`flex flex-col items-center justify-center gap-1 p-1.5 rounded-lg transition-colors
+                ${card.lastQuality === 3
+                  ? 'bg-blue-500/20 text-blue-400'
+                  : 'text-slate-500 hover:bg-slate-800 hover:text-blue-400'}`}
+              title="Learned"
+            >
+              <Brain className="h-4 w-4" />
+              <span className="text-[8px] font-bold uppercase">Learned</span>
+            </button>
+            <button
+              onClick={() => onReview(card.id, 5)}
+              className={`flex flex-col items-center justify-center gap-1 p-1.5 rounded-lg transition-colors
+                ${card.lastQuality === 5
                   ? 'bg-green-500/20 text-green-400'
                   : 'text-slate-500 hover:bg-slate-800 hover:text-green-400'}`}
               title="Mastered"
             >
-              <CheckCircle className="h-5 w-5" />
-              <span className="text-[10px] font-bold uppercase">Mastered</span>
+              <CheckCircle className="h-4 w-4" />
+              <span className="text-[8px] font-bold uppercase">Mastered</span>
             </button>
-
-            <div className="w-px h-8 bg-slate-800 mx-1"></div>
-
-            <button
-              onClick={() => onDelete(card.id)}
-              className="p-2 text-slate-600 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
-              title="Delete Card"
-            >
-              <Trash2 className="h-5 w-5" />
-            </button>
+            <div className="flex border-l border-slate-700 justify-center items-center ml-1 pl-1">
+              <button
+                onClick={() => onDelete(card.id)}
+                className="p-1.5 text-slate-600 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                title="Delete Card"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -120,13 +137,19 @@ const FlashcardItem: React.FC<{
   );
 };
 
-export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onDeleteCard, onUpdateStatus, onOpenImport }) => {
+export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onDeleteCard, onReviewCard, onOpenImport }) => {
   const [selectedStatus, setSelectedStatus] = useState<FlashcardStatus | null>(null);
 
   const newCount = cards.filter(c => c.status === FlashcardStatus.New).length;
   const learningCount = cards.filter(c => c.status === FlashcardStatus.Learning).length;
   const masteredCount = cards.filter(c => c.status === FlashcardStatus.Mastered).length;
-  const studyQueueCount = newCount + learningCount;
+
+  const studyQueueCount = cards.filter(c => {
+    if (c.nextReviewDate) {
+      return c.nextReviewDate <= Date.now();
+    }
+    return c.status !== FlashcardStatus.Mastered;
+  }).length;
 
   const filteredCards = selectedStatus
     ? cards.filter(c => c.status === selectedStatus)
@@ -280,7 +303,7 @@ export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onD
               key={card.id}
               card={card}
               onDelete={onDeleteCard}
-              onUpdate={onUpdateStatus}
+              onReview={onReviewCard}
             />
           ))}
         </div>

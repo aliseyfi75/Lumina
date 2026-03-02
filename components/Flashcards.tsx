@@ -151,9 +151,17 @@ export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onD
     return c.status !== FlashcardStatus.Mastered;
   }).length;
 
-  const filteredCards = selectedStatus
+  let filteredCards = selectedStatus
     ? cards.filter(c => c.status === selectedStatus)
     : cards;
+
+  if (selectedStatus === FlashcardStatus.Learning) {
+    filteredCards = [...filteredCards].sort((a, b) => {
+      const dateA = a.nextReviewDate || Infinity;
+      const dateB = b.nextReviewDate || Infinity;
+      return dateA - dateB;
+    });
+  }
 
   const handleStatusClick = (status: FlashcardStatus) => {
     if (selectedStatus === status) {

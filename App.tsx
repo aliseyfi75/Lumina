@@ -367,6 +367,7 @@ const App: React.FC = () => {
       nextReviewDate: Date.now(),
     };
     setCards(prev => [newCard, ...prev]);
+    recordActivity();
     trackEvent(TRACKING_ACTION.ADD_CARD, TRACKING_CATEGORY.FLASHCARDS, entry.word);
   };
 
@@ -374,6 +375,7 @@ const App: React.FC = () => {
     setCards(prev => prev.map(card =>
       card.id === id ? { ...card, status, lastReviewed: Date.now() } : card
     ));
+    recordActivity();
     trackEvent(TRACKING_ACTION.UPDATE_STATUS, TRACKING_CATEGORY.FLASHCARDS, status);
   };
 
@@ -407,8 +409,7 @@ const App: React.FC = () => {
     return streak;
   };
 
-  const handleSessionComplete = () => {
-    // Record that a study session was completed today to increment streak
+  const recordActivity = () => {
     const today = getLocalDateString(new Date());
     setStudyHistory(prev => {
       const updatedHistory = {
@@ -421,6 +422,11 @@ const App: React.FC = () => {
 
       return updatedHistory;
     });
+  };
+
+  const handleSessionComplete = () => {
+    // Record that a study session was completed today to increment streak
+    recordActivity();
   };
 
   const handleReviewCard = (id: string, quality: number) => {
@@ -469,6 +475,7 @@ const App: React.FC = () => {
         lastReviewed: Date.now()
       };
     }));
+    recordActivity();
     trackEvent(TRACKING_ACTION.UPDATE_STATUS, TRACKING_CATEGORY.FLASHCARDS, `quality_${quality}`);
   };
 

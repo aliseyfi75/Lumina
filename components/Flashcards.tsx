@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Flashcard, FlashcardStatus } from '../types';
 import { Play, BookOpen, CheckCircle, Brain, Trash2, RotateCw, Upload, Volume2, ThumbsUp, Zap } from 'lucide-react';
+import { motion } from 'framer-motion';
 
 interface FlashcardsProps {
   cards: Flashcard[];
@@ -22,9 +23,18 @@ const FlashcardItem: React.FC<{
       className="group h-80 w-full perspective-1000 cursor-pointer"
       onClick={() => setIsFlipped(!isFlipped)}
     >
-      <div className={`relative w-full h-full duration-500 preserve-3d transition-transform ${isFlipped ? 'rotate-y-180' : ''}`} style={{ transformStyle: 'preserve-3d' }}>
+      <motion.div
+        className="relative w-full h-full preserve-3d"
+        style={{ transformStyle: 'preserve-3d' }}
+        initial={false}
+        animate={{ rotateY: isFlipped ? 180 : 0 }}
+        transition={{ type: "spring", stiffness: 260, damping: 20 }}
+      >
         {/* Front of Card */}
-        <div className="absolute inset-0 backface-hidden bg-white rounded-2xl shadow-sm border border-slate-200 p-6 flex flex-col items-center justify-center text-center hover:shadow-md hover:border-brand-200 transition-all">
+        <div
+          className="absolute inset-0 backface-hidden bg-white rounded-2xl shadow-sm border border-slate-200 p-6 flex flex-col items-center justify-center text-center hover:shadow-md hover:border-brand-200 transition-all"
+          style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}
+        >
           <div className="absolute top-4 right-4 flex items-center gap-1.5 pl-2">
             {/* Added logic for displaying the due string for Learning cards */}
             {card.status === FlashcardStatus.Learning && card.nextReviewDate && (
@@ -65,7 +75,10 @@ const FlashcardItem: React.FC<{
         </div>
 
         {/* Back of Card */}
-        <div className="absolute inset-0 backface-hidden rotate-y-180 bg-slate-900 rounded-2xl shadow-xl p-6 flex flex-col items-center justify-between text-center overflow-hidden border border-slate-800">
+        <div
+          className="absolute inset-0 backface-hidden rotate-y-180 bg-slate-900 rounded-2xl shadow-xl p-6 flex flex-col items-center justify-between text-center overflow-hidden border border-slate-800"
+          style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
+        >
           <div className="overflow-y-auto w-full flex-1 flex flex-col items-center justify-start custom-scrollbar px-2 py-4">
             {card.image && (
               <div className="mb-4 shrink-0 rounded-xl overflow-hidden shadow-sm border border-slate-700 h-32 flex justify-center bg-slate-800 items-center w-full mt-auto">
@@ -132,7 +145,7 @@ const FlashcardItem: React.FC<{
             </div>
           </div>
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 };

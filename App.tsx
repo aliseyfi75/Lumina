@@ -9,6 +9,8 @@ import { generateJSON, parseFileContent, downloadJSON, saveToLocalFile } from '.
 import { getDetails, getDeck, updateDeck } from './services/pantryService';
 import { initializeTracking, trackEvent, setTrackingUserId, TRACKING_CATEGORY, TRACKING_ACTION } from './services/trackingService';
 import { Book, Layers, Database, Save, Cloud, BarChart2 } from 'lucide-react';
+import Confetti from 'react-confetti';
+import { useWindowSize } from 'react-use';
 
 const LOCAL_STORAGE_KEY = 'lumina_cards_v1';
 const CLOUD_CONFIG_KEY = 'lumina_cloud_config';
@@ -29,6 +31,11 @@ const App: React.FC = () => {
   // Cloud Sync State
   const [cloudConfig, setCloudConfig] = useState<CloudConfig | null>(null);
   const [isCloudSaving, setIsCloudSaving] = useState(false);
+
+  // Confetti State
+  const { width, height } = useWindowSize();
+  const [showConfetti, setShowConfetti] = useState(false);
+  const [prevMasteredCount, setPrevMasteredCount] = useState(0);
 
   // Helper: Merge incoming cards with existing state
   const performMerge = useCallback((incoming: Flashcard[]) => {
@@ -475,8 +482,43 @@ const App: React.FC = () => {
     trackEvent(TRACKING_ACTION.VIEW_TAB, TRACKING_CATEGORY.ENGAGEMENT, view);
   }, [view]);
 
+  // Milestone Confetti Logic
+  useEffect(() => {
+    const masteredCount = cards.filter(c => c.status === FlashcardStatus.Mastered).length;
+
+    // Check if we crossed a century milestone (100, 200, 300...)
+    if (masteredCount > 0 &&
+      masteredCount % 100 === 0 &&
+      masteredCount > prevMasteredCount) {
+
+      setShowConfetti(true);
+
+      // Stop confetti after 5 seconds
+      setTimeout(() => {
+        setShowConfetti(false);
+      }, 5000);
+
+      trackEvent('milestone_reached', TRACKING_CATEGORY.ENGAGEMENT, `mastered_${masteredCount}`);
+    }
+
+    // Always update the prev count so we only trigger when moving UP to a milestone,
+    // not when deleting cards and dropping back down.
+    setPrevMasteredCount(masteredCount);
+  }, [cards, prevMasteredCount]);
+
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-800 font-sans">
+      {showConfetti && (
+        <div className="fixed inset-0 z-[100] pointer-events-none">
+          <Confetti
+            width={width}
+            height={height}
+            recycle={true}
+            numberOfPieces={500}
+            gravity={0.15}
+          />
+        </div>
+      )}
       <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-200">
         <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2 cursor-pointer" onClick={() => setView('dictionary')}>

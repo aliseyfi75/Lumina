@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Flashcard, FlashcardStatus } from '../types';
 import { RotateCw, CheckCircle, Brain, ArrowLeft, Volume2 } from 'lucide-react';
+import Confetti from 'react-confetti';
+import { useWindowSize } from 'react-use';
+import { motion } from 'framer-motion';
 
 interface StudySessionProps {
   cards: Flashcard[];
@@ -14,6 +17,9 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
+
+  const { width, height } = useWindowSize();
+  const [showConfetti, setShowConfetti] = useState(false);
 
   useEffect(() => {
     const dueCards = cards.filter(c => {
@@ -51,6 +57,7 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
       setCurrentIndex(prev => {
         const nextIndex = prev + 1;
         if (nextIndex >= queue.length) {
+          setShowConfetti(true);
           onSessionComplete();
         }
         return nextIndex;
@@ -65,6 +72,17 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
 
     return (
       <div className="flex flex-col items-center justify-center h-[60vh] space-y-6 animate-in fade-in slide-in-from-bottom-4">
+        {showConfetti && (
+          <div className="fixed inset-0 z-[100] pointer-events-none">
+            <Confetti
+              width={width}
+              height={height}
+              recycle={false}
+              numberOfPieces={500}
+              gravity={0.15}
+            />
+          </div>
+        )}
         <div className="p-6 bg-green-50 rounded-full">
           <CheckCircle className="h-16 w-16 text-green-500" />
         </div>
@@ -78,7 +96,7 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
         </div>
         <button
           onClick={onExit}
-          className="px-8 py-3 bg-slate-900 text-white rounded-xl font-medium hover:bg-slate-800 transition-colors shadow-lg shadow-slate-900/20"
+          className="px-8 py-3 bg-slate-900 text-white rounded-xl font-medium hover:bg-slate-800 transition-colors shadow-lg shadow-slate-900/20 z-10"
         >
           Return to Dashboard
         </button>
@@ -118,10 +136,19 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
           className="relative w-full h-full cursor-pointer group perspective-1000"
           onClick={() => setIsFlipped(!isFlipped)}
         >
-          <div className={`relative w-full h-full duration-500 preserve-3d transition-transform ${isFlipped ? 'rotate-y-180' : ''}`} style={{ transformStyle: 'preserve-3d' }}>
+          <motion.div
+            className="relative w-full h-full preserve-3d"
+            style={{ transformStyle: 'preserve-3d' }}
+            initial={false}
+            animate={{ rotateY: isFlipped ? 180 : 0 }}
+            transition={{ type: "spring", stiffness: 260, damping: 20 }}
+          >
 
             {/* Front of Card - Minimal Design (Word Only) */}
-            <div className="absolute inset-0 backface-hidden bg-white rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100 flex flex-col items-center justify-center p-8 text-center hover:shadow-2xl transition-shadow">
+            <div
+              className="absolute inset-0 backface-hidden bg-white rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100 flex flex-col items-center justify-center p-8 text-center hover:shadow-2xl transition-shadow"
+              style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}
+            >
               <h2 className="text-5xl font-serif font-bold text-slate-900 mb-6">{currentCard.word}</h2>
               <div className="flex items-center gap-3">
                 {currentCard.phonetic && <p className="text-2xl text-slate-400 font-serif italic">{currentCard.phonetic}</p>}
@@ -146,7 +173,10 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
             </div>
 
             {/* Back of Card - Definition & Controls */}
-            <div className="absolute inset-0 backface-hidden rotate-y-180 bg-slate-900 rounded-3xl shadow-xl flex flex-col p-8 text-center overflow-hidden">
+            <div
+              className="absolute inset-0 backface-hidden rotate-y-180 bg-slate-900 rounded-3xl shadow-xl flex flex-col p-8 text-center overflow-hidden"
+              style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
+            >
               <div className="flex-1 flex flex-col items-center justify-center overflow-y-auto custom-scrollbar w-full">
                 <span className="inline-block px-3 py-1 bg-brand-900/50 text-brand-300 text-xs font-bold uppercase tracking-widest rounded-full mb-6">
                   {currentCard.partOfSpeech}
@@ -200,7 +230,7 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
                 </button>
               </div>
             </div>
-          </div>
+          </motion.div>
         </div>
       </div>
     </div>

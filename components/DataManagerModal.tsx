@@ -237,7 +237,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                 <div className="flex-1">
                   <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
                     <Save className="h-4 w-4" />
-                    {isFileConnected ? 'Local CSV Connected' : 'Local CSV Auto-Save'}
+                    {isFileConnected ? 'Local JSON Connected' : 'Local JSON Auto-Save'}
                   </h3>
                   {isFileConnected && (
                     <p className="text-xs text-green-700 mt-1 truncate max-w-[200px]" title={connectedFileName}>
@@ -278,7 +278,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
               disabled={cardCount === 0}
               className="py-2.5 bg-white border border-slate-200 text-slate-700 text-sm font-medium rounded-xl hover:bg-slate-50 hover:text-brand-600 hover:border-brand-200 transition-colors shadow-sm disabled:opacity-50"
             >
-              Export CSV
+              Export JSON
             </button>
 
             <div className="relative">
@@ -286,12 +286,12 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                 onClick={() => fileInputRef.current?.click()}
                 className="w-full py-2.5 bg-brand-600 text-white text-sm font-medium rounded-xl hover:bg-brand-700 transition-colors shadow-sm shadow-brand-500/30"
               >
-                Import CSV
+                Import JSON
               </button>
               <input
                 type="file"
                 ref={fileInputRef}
-                accept=".csv"
+                accept=".json,.csv"
                 className="hidden"
                 onChange={handleFileChange}
               />

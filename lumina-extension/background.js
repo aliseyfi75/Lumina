@@ -60,9 +60,13 @@ async function handleAddToLumina(word) {
     const deckRes = await fetch(`${PANTRY_BASE}/${pantryId}/basket/${BASKET_NAME}`);
 
     let currentCards = [];
+    let currentStudyHistory = {};
+    let currentLongestStreak = 0;
     if (deckRes.ok) {
       const data = await deckRes.json();
       currentCards = data.cards || [];
+      currentStudyHistory = data.studyHistory || {};
+      currentLongestStreak = data.longestStreak || 0;
     }
 
     // Check for duplicates
@@ -77,7 +81,11 @@ async function handleAddToLumina(word) {
     await fetch(`${PANTRY_BASE}/${pantryId}/basket/${BASKET_NAME}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cards: updatedCards }),
+      body: JSON.stringify({
+        cards: updatedCards,
+        studyHistory: currentStudyHistory,
+        longestStreak: currentLongestStreak
+      }),
     });
 
     notify("Success", `Added "${newCard.word}" to Lumina!`);

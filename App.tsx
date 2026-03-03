@@ -14,8 +14,6 @@ import { useWindowSize } from 'react-use';
 
 const LOCAL_STORAGE_KEY = 'lumina_cards_v1';
 const CLOUD_CONFIG_KEY = 'lumina_cloud_config';
-const STUDY_HISTORY_KEY = 'lumina_study_history_v1';
-const LONGEST_STREAK_KEY = 'lumina_longest_streak_v1';
 
 const App: React.FC = () => {
   const [view, setView] = useState<ViewState>('dictionary');
@@ -92,15 +90,21 @@ const App: React.FC = () => {
         }
       }
 
-      // Step B: Load Default JSON/CSV if Local is empty
+      // Step B: Load Default JSON if Local is empty
       if (initialCards.length === 0) {
         try {
-          const response = await fetch('./database/cards.csv');
+          const response = await fetch('./database/data.json');
           if (response.ok) {
             const text = await response.text();
             const defaultData = parseFileContent(text);
             if (defaultData.cards.length > 0) {
               initialCards = defaultData.cards;
+            }
+            if (Object.keys(studyHistory).length === 0 && defaultData.studyHistory) {
+              setStudyHistory(defaultData.studyHistory);
+            }
+            if (longestStreak === 0 && defaultData.longestStreak) {
+              setLongestStreak(defaultData.longestStreak);
             }
           }
         } catch (e) {
@@ -166,20 +170,7 @@ const App: React.FC = () => {
         initializeTracking();
       }
 
-      // Step D: Load Study History & Streak
-      const savedHistory = localStorage.getItem(STUDY_HISTORY_KEY);
-      if (savedHistory) {
-        try {
-          const parsed = JSON.parse(savedHistory);
-          setStudyHistory(parsed);
-        } catch (e) {
-          console.error("Failed to parse study history", e);
-        }
-      }
-      const savedLongestStreak = localStorage.getItem(LONGEST_STREAK_KEY);
-      if (savedLongestStreak) {
-        setLongestStreak(parseInt(savedLongestStreak, 10) || 0);
-      }
+
     };
 
     initData();
@@ -191,13 +182,7 @@ const App: React.FC = () => {
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(cards));
   }, [cards]);
 
-  useEffect(() => {
-    localStorage.setItem(STUDY_HISTORY_KEY, JSON.stringify(studyHistory));
-  }, [studyHistory]);
 
-  useEffect(() => {
-    localStorage.setItem(LONGEST_STREAK_KEY, longestStreak.toString());
-  }, [longestStreak]);
 
   // 3. Auto-Save to Local File
   useEffect(() => {
@@ -231,7 +216,7 @@ const App: React.FC = () => {
       }
     }, 2000); // 2s debounce for cloud to save API calls
     return () => clearTimeout(timeoutId);
-  }, [cards, cloudConfig]);
+  }, [cards, studyHistory, longestStreak, cloudConfig]);
 
 
   // --- File Handlers ---

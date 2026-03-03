@@ -405,7 +405,7 @@ export const Statistics: React.FC<StatisticsProps> = ({ cards, studyHistory, lon
                                 {heatmapDays.map((day) => (
                                     <div
                                         key={day.dateStr}
-                                        title={`${day.dateStr}: ${day.count} interactions`}
+                                        title={`${day.dateStr}: ${day.count} interaction${day.count === 1 ? '' : 's'}`}
                                         className={cn(
                                             "w-full h-full rounded-[3px] transition-colors duration-200 hover:ring-2 ring-slate-400 ring-offset-1 cursor-crosshair",
                                             day.level === 0 && "bg-slate-200",

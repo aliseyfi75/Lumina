@@ -1,0 +1,17 @@
+{
+    "cards": [
+        {
+            "id": "welcome-card",
+            "word": "Welcome",
+            "phonetic": "/ˈwelkəm/",
+            "mainDefinition": "The greeting given to a new arrival.",
+            "example": "Welcome to Lumina! This is your first card.",
+            "partOfSpeech": "noun",
+            "status": "New",
+            "lastReviewed": 0,
+            "createdAt": 1715421200000
+        }
+    ],
+    "studyHistory": {},
+    "longestStreak": 0
+}

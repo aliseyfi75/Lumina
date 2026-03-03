@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Flashcard, FlashcardStatus } from '../types';
-import { RotateCw, CheckCircle, Brain, ArrowLeft, Volume2 } from 'lucide-react';
+import { RotateCw, CheckCircle, Brain, ArrowLeft, Volume2, MoveUp, MoveDown, MoveLeft, MoveRight } from 'lucide-react';
 import Confetti from 'react-confetti';
 import { useWindowSize } from 'react-use';
-import { motion } from 'framer-motion';
+import { motion, useMotionValue, useTransform, PanInfo, AnimatePresence } from 'framer-motion';
 
 interface StudySessionProps {
   cards: Flashcard[];
@@ -20,6 +20,7 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
 
   const { width, height } = useWindowSize();
   const [showConfetti, setShowConfetti] = useState(false);
+  const [actionToast, setActionToast] = useState<{ message: string; colorClass: string; bgColorClass: string } | null>(null);
 
   useEffect(() => {
     const dueCards = cards.filter(c => {
@@ -44,10 +45,40 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
 
   const currentCard = queue[currentIndex];
 
-  const handleNext = (quality: number) => {
+  const x = useMotionValue(0);
+  const y = useMotionValue(0);
+  const rotate = useTransform(x, [-200, 200], [-10, 10]);
+
+  const swipeRightOpacity = useTransform(x, [50, 150], [0, 1]);
+  const swipeLeftOpacity = useTransform(x, [-50, -150], [0, 1]);
+  const swipeDownOpacity = useTransform(y, [50, 150], [0, 1]);
+  const swipeUpOpacity = useTransform(y, [-50, -150], [0, 1]);
+
+  const handleNext = useCallback((quality: number | null) => {
     if (!currentCard) return;
 
-    onReviewCard(currentCard.id, quality);
+    if (quality !== null) {
+      onReviewCard(currentCard.id, quality);
+
+      let toastMsg = "";
+      let toastColor = "";
+      let toastBg = "";
+
+      if (quality === 1) {
+        toastMsg = "Again"; toastColor = "text-red-500"; toastBg = "bg-red-500/10 border-red-500/20";
+      } else if (quality === 3) {
+        toastMsg = "Learned"; toastColor = "text-blue-500"; toastBg = "bg-blue-500/10 border-blue-500/20";
+      } else if (quality === 5) {
+        toastMsg = "Mastered"; toastColor = "text-green-500"; toastBg = "bg-green-500/10 border-green-500/20";
+      }
+
+      setActionToast({ message: toastMsg, colorClass: toastColor, bgColorClass: toastBg });
+      setTimeout(() => setActionToast(null), 2000);
+    }
+
+    // Reset position instantly
+    x.set(0);
+    y.set(0);
 
     // Flip back first
     setIsFlipped(false);
@@ -63,6 +94,41 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
         return nextIndex;
       });
     }, 300);
+  }, [currentCard, onReviewCard, queue.length, onSessionComplete, x, y]);
+
+  // Keyboard support for desktop
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!currentCard) return;
+      if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
+
+      switch (e.key) {
+        case 'ArrowLeft':
+          handleNext(1);
+          break;
+        case 'ArrowRight':
+          handleNext(5);
+          break;
+        case 'ArrowDown':
+        case 'ArrowUp':
+          handleNext(3);
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleNext, currentCard]);
+
+  const handleDragEnd = (event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
+    const threshold = 100;
+    if (info.offset.x > threshold) {
+      handleNext(5);
+    } else if (info.offset.x < -threshold) {
+      handleNext(1);
+    } else if (info.offset.y > threshold || info.offset.y < -threshold) {
+      handleNext(3);
+    }
   };
 
   if (!isInitialized) return null;
@@ -131,14 +197,57 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
         </span>
       </div>
 
-      <div className="flex-1 relative perspective-1000 mb-8">
-        <div
-          className="relative w-full h-full cursor-pointer group perspective-1000"
-          onClick={() => setIsFlipped(!isFlipped)}
-        >
+      {/* Action Toast */}
+      <div className="absolute top-24 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
+        <AnimatePresence>
+          {actionToast && (
+            <motion.div
+              initial={{ opacity: 0, y: -20, scale: 0.9 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -10, scale: 0.9 }}
+              transition={{ duration: 0.2 }}
+              className={`px-4 py-2 rounded-full border backdrop-blur-sm shadow-sm font-bold tracking-wider uppercase text-sm flex items-center gap-2 ${actionToast.colorClass} ${actionToast.bgColorClass}`}
+            >
+              {actionToast.message}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      <div className="flex-1 relative perspective-1000 mb-8 sm:px-12 flex justify-center items-center">
+        {/* Swipe Indicators */}
+        <motion.div style={{ opacity: swipeRightOpacity, pointerEvents: 'none' }} className="absolute right-0 top-1/2 -translate-y-1/2 z-0 hidden sm:flex flex-col items-center text-green-500">
+          <MoveRight className="h-10 w-10" />
+          <span className="font-bold tracking-widest uppercase mt-2 text-xs">Mastered</span>
+        </motion.div>
+        <motion.div style={{ opacity: swipeLeftOpacity, pointerEvents: 'none' }} className="absolute left-0 top-1/2 -translate-y-1/2 z-0 hidden sm:flex flex-col items-center text-red-500">
+          <MoveLeft className="h-10 w-10" />
+          <span className="font-bold tracking-widest uppercase mt-2 text-xs">Again</span>
+        </motion.div>
+        <motion.div style={{ opacity: swipeDownOpacity, pointerEvents: 'none' }} className="absolute bottom-[-10px] left-1/2 -translate-x-1/2 z-0 hidden sm:flex flex-col items-center text-blue-500">
+          <MoveDown className="h-10 w-10" />
+          <span className="font-bold tracking-widest uppercase mt-2 text-xs">Learned</span>
+        </motion.div>
+        <motion.div style={{ opacity: swipeUpOpacity, pointerEvents: 'none' }} className="absolute top-[-20px] left-1/2 -translate-x-1/2 z-0 hidden sm:flex flex-col items-center text-blue-500">
+          <MoveUp className="h-10 w-10" />
+          <span className="font-bold tracking-widest uppercase mt-2 text-xs">Learned</span>
+        </motion.div>
+
+        <div className="relative w-full h-full cursor-pointer group perspective-1000 z-10 mx-auto max-w-sm">
           <motion.div
             className="relative w-full h-full preserve-3d"
-            style={{ transformStyle: 'preserve-3d' }}
+            style={{
+              transformStyle: 'preserve-3d',
+              x,
+              y,
+              rotateZ: rotate
+            }}
+            drag
+            dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
+            dragElastic={0.8}
+            onDragEnd={handleDragEnd}
+            onClick={() => setIsFlipped(!isFlipped)}
+            whileDrag={{ scale: 1.05, cursor: "grabbing" }}
             initial={false}
             animate={{ rotateY: isFlipped ? 180 : 0 }}
             transition={{ type: "spring", stiffness: 260, damping: 20 }}
@@ -207,26 +316,29 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
               <div className="pt-6 mt-4 border-t border-slate-800 grid grid-cols-3 gap-3 w-full" onClick={(e) => e.stopPropagation()}>
                 <button
                   onClick={() => handleNext(1)}
-                  className="group/btn flex flex-col items-center justify-center p-3 rounded-xl bg-slate-800 hover:bg-red-900/20 border border-slate-700 hover:border-red-700/50 transition-all text-center"
+                  className="group/btn flex flex-col items-center justify-center p-3 rounded-xl bg-slate-800 hover:bg-red-900/20 border border-slate-700 hover:border-red-700/50 transition-all text-center relative overflow-hidden"
                 >
-                  <span className="text-sm font-bold uppercase tracking-wider text-slate-300 group-hover/btn:text-red-400 mb-1">Again</span>
-                  <span className="text-[9px] text-slate-500 leading-tight">Study again<br />today</span>
+                  <span className="text-sm font-bold uppercase tracking-wider text-slate-300 group-hover/btn:text-red-400 mb-1 z-10 transition-colors">Again</span>
+                  <span className="text-[9px] text-slate-500 leading-tight mb-2 z-10 transition-colors">Study again<br />today</span>
+                  <div className="hidden sm:flex text-[10px] items-center gap-1 text-slate-600 bg-slate-900/50 px-2 py-0.5 rounded border border-slate-700/50 z-10 transition-colors"><MoveLeft className="w-3 h-3" /> Swipe</div>
                 </button>
 
                 <button
                   onClick={() => handleNext(3)}
-                  className="group/btn flex flex-col items-center justify-center p-3 rounded-xl bg-slate-800 hover:bg-blue-900/20 border border-slate-700 hover:border-blue-700/50 transition-all text-center"
+                  className="group/btn flex flex-col items-center justify-center p-3 rounded-xl bg-slate-800 hover:bg-blue-900/20 border border-slate-700 hover:border-blue-700/50 transition-all text-center relative overflow-hidden"
                 >
-                  <span className="text-sm font-bold uppercase tracking-wider text-slate-300 group-hover/btn:text-blue-400 mb-1">Learned</span>
-                  <span className="text-[9px] text-slate-500 leading-tight">Pushes to<br />tomorrow/next week</span>
+                  <span className="text-sm font-bold uppercase tracking-wider text-slate-300 group-hover/btn:text-blue-400 mb-1 z-10 transition-colors">Learned</span>
+                  <span className="text-[9px] text-slate-500 leading-tight mb-2 z-10 transition-colors">Pushes to<br />tomorrow</span>
+                  <div className="hidden sm:flex text-[10px] items-center gap-1 text-slate-600 bg-slate-900/50 px-2 py-0.5 rounded border border-slate-700/50 z-10 transition-colors"><MoveDown className="w-3 h-3" /> Swipe</div>
                 </button>
 
                 <button
                   onClick={() => handleNext(5)}
-                  className="group/btn flex flex-col items-center justify-center p-3 rounded-xl bg-slate-800 hover:bg-green-900/20 border border-slate-700 hover:border-green-700/50 transition-all text-center"
+                  className="group/btn flex flex-col items-center justify-center p-3 rounded-xl bg-slate-800 hover:bg-green-900/20 border border-slate-700 hover:border-green-700/50 transition-all text-center relative overflow-hidden"
                 >
-                  <span className="text-sm font-bold uppercase tracking-wider text-slate-300 group-hover/btn:text-green-400 mb-1">Mastered</span>
-                  <span className="text-[9px] text-slate-500 leading-tight">Remove from<br />study sessions</span>
+                  <span className="text-sm font-bold uppercase tracking-wider text-slate-300 group-hover/btn:text-green-400 mb-1 z-10 transition-colors">Mastered</span>
+                  <span className="text-[9px] text-slate-500 leading-tight mb-2 z-10 transition-colors">Remove from<br />sessions</span>
+                  <div className="hidden sm:flex text-[10px] items-center gap-1 text-slate-600 bg-slate-900/50 px-2 py-0.5 rounded border border-slate-700/50 z-10 transition-colors"><MoveRight className="w-3 h-3" /> Swipe</div>
                 </button>
               </div>
             </div>

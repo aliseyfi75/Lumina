@@ -9,13 +9,15 @@ interface DictionaryProps {
   onAddCard: (entry: WordEntry, definition: string, example: string, partOfSpeech: string) => void;
   onRemoveCard: (id: string) => void;
   existingCards: Flashcard[];
+  initialQuery?: string;
 }
 
-export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard, existingCards }) => {
-  const [query, setQuery] = useState('');
+export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard, existingCards, initialQuery }) => {
+  const [query, setQuery] = useState(initialQuery || '');
   const [result, setResult] = useState<WordEntry | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const showToast = (message: string) => {
@@ -94,6 +96,14 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
       setLoading(false);
     }
   };
+
+  // Auto-search when an initialQuery is provided (e.g. navigating from Dashboard)
+  useEffect(() => {
+    if (initialQuery && initialQuery.trim()) {
+      performSearch(initialQuery.trim());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialQuery]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ViewState, Flashcard, WordEntry, FlashcardStatus, FileSystemFileHandle, CloudConfig } from './types';
+import { Dashboard } from './components/Dashboard';
 import { Dictionary } from './components/Dictionary';
 import { Flashcards } from './components/Flashcards';
 import { StudySession } from './components/StudySession';
@@ -8,7 +9,7 @@ import { DataManagerModal } from './components/DataManagerModal';
 import { generateJSON, parseFileContent, downloadJSON, saveToLocalFile } from './services/fileService';
 import { getDetails, getDeck, updateDeck } from './services/pantryService';
 import { initializeTracking, trackEvent, setTrackingUserId, TRACKING_CATEGORY, TRACKING_ACTION } from './services/trackingService';
-import { Book, Layers, Database, Save, Cloud, BarChart2 } from 'lucide-react';
+import { Book, Layers, Database, Save, Cloud, BarChart2, Home } from 'lucide-react';
 import Confetti from 'react-confetti';
 import { useWindowSize } from 'react-use';
 
@@ -16,11 +17,13 @@ const LOCAL_STORAGE_KEY = 'lumina_cards_v1';
 const CLOUD_CONFIG_KEY = 'lumina_cloud_config';
 
 const App: React.FC = () => {
-  const [view, setView] = useState<ViewState>('dictionary');
+  const [view, setView] = useState<ViewState>('dashboard');
   const [cards, setCards] = useState<Flashcard[]>([]);
   const [studyHistory, setStudyHistory] = useState<Record<string, number>>({});
   const [longestStreak, setLongestStreak] = useState(0);
   const [isDataModalOpen, setIsDataModalOpen] = useState(false);
+  // query passed from Dashboard search → Dictionary
+  const [dictionaryQuery, setDictionaryQuery] = useState<string | undefined>(undefined);
 
   // File System State
   const [fileHandle, setFileHandle] = useState<FileSystemFileHandle | null>(null);
@@ -414,6 +417,12 @@ const App: React.FC = () => {
     recordActivity();
   };
 
+  // Called from Dashboard search bar — navigate to Dictionary with a pre-filled query
+  const handleQuickSearch = (word: string) => {
+    setDictionaryQuery(word);
+    setView('dictionary');
+  };
+
   const handleReviewCard = (id: string, quality: number) => {
     setCards(prev => prev.map(card => {
       if (card.id !== id) return card;
@@ -513,7 +522,7 @@ const App: React.FC = () => {
       )}
       <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-200">
         <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2 cursor-pointer" onClick={() => setView('dictionary')}>
+          <div className="flex items-center gap-2 cursor-pointer" onClick={() => setView('dashboard')}>
             <div className="w-8 h-8 bg-brand-600 rounded-lg flex items-center justify-center text-white font-serif font-bold text-xl shadow-lg shadow-brand-500/30">
               L
             </div>
@@ -522,6 +531,10 @@ const App: React.FC = () => {
 
           <div className="flex items-center gap-2">
             <nav className="flex items-center gap-1 bg-slate-100/50 p-1 rounded-xl mr-2">
+              <button onClick={() => setView('dashboard')} className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${view === 'dashboard' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>
+                <Home className="h-4 w-4" />
+                <span className="hidden sm:inline">Home</span>
+              </button>
               <button onClick={() => setView('dictionary')} className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${view === 'dictionary' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>
                 <Book className="h-4 w-4" />
                 <span className="hidden sm:inline">Dictionary</span>
@@ -549,7 +562,8 @@ const App: React.FC = () => {
       </header>
 
       <main className="flex-1 max-w-5xl mx-auto w-full px-4 py-8">
-        {view === 'dictionary' && <Dictionary onAddCard={handleAddCard} onRemoveCard={handleDeleteCard} existingCards={cards} />}
+        {view === 'dashboard' && <Dashboard cards={cards} studyHistory={studyHistory} longestStreak={longestStreak} onNavigate={setView} onQuickSearch={handleQuickSearch} />}
+        {view === 'dictionary' && <Dictionary onAddCard={handleAddCard} onRemoveCard={handleDeleteCard} existingCards={cards} initialQuery={dictionaryQuery} />}
         {view === 'flashcards' && <Flashcards cards={cards} onStartStudy={() => setView('study')} onDeleteCard={handleDeleteCard} onReviewCard={handleReviewCard} onOpenImport={() => setIsDataModalOpen(true)} />}
         {view === 'study' && <StudySession cards={cards} onReviewCard={handleReviewCard} onSessionComplete={handleSessionComplete} onExit={() => setView('flashcards')} />}
         {view === 'statistics' && <Statistics cards={cards} studyHistory={studyHistory} longestStreak={longestStreak} />}

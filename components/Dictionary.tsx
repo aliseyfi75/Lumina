@@ -7,14 +7,21 @@ import { Search, Plus, Check, Loader2, BookOpen, Clock, Volume2 } from 'lucide-r
 
 interface DictionaryProps {
   onAddCard: (entry: WordEntry, definition: string, example: string, partOfSpeech: string) => void;
+  onRemoveCard: (id: string) => void;
   existingCards: Flashcard[];
 }
 
-export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, existingCards }) => {
+export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard, existingCards }) => {
   const [query, setQuery] = useState('');
   const [result, setResult] = useState<WordEntry | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = (message: string) => {
+    setToastMessage(message);
+    setTimeout(() => setToastMessage(null), 3000);
+  };
 
   // Suggestion State
   const [suggestions, setSuggestions] = useState<string[]>([]);
@@ -98,8 +105,8 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, existingCards
     performSearch(word);
   };
 
-  const isWordSaved = (word: string, def: string) => {
-    return existingCards.some(card =>
+  const getSavedCard = (word: string, def: string) => {
+    return existingCards.find(card =>
       card.word.toLowerCase() === word.toLowerCase() &&
       card.mainDefinition === def
     );
@@ -216,7 +223,8 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, existingCards
 
                 <div className="space-y-6">
                   {meaning.definitions?.map((def, dIdx) => {
-                    const saved = isWordSaved(result.word, def.definition);
+                    const savedCard = getSavedCard(result.word, def.definition);
+                    const isSaved = !!savedCard;
 
                     return (
                       <div key={dIdx} className="group relative pl-4 border-l-2 border-transparent hover:border-brand-200 transition-colors">
@@ -231,15 +239,22 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, existingCards
 
                         <div className="mt-3">
                           <button
-                            onClick={() => !saved && onAddCard(result, def.definition, def.example || '', meaning.partOfSpeech)}
-                            disabled={saved}
+                            onClick={() => {
+                              if (isSaved && savedCard) {
+                                onRemoveCard(savedCard.id);
+                                showToast(`"${result.word}" removed from deck`);
+                              } else {
+                                onAddCard(result, def.definition, def.example || '', meaning.partOfSpeech);
+                                showToast(`"${result.word}" added to deck`);
+                              }
+                            }}
                             className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all
-                              ${saved
-                                ? 'bg-green-100 text-green-700 cursor-default'
+                              ${isSaved
+                                ? 'bg-green-100 text-green-700 hover:bg-green-200'
                                 : 'bg-slate-50 text-slate-600 hover:bg-brand-50 hover:text-brand-600'
                               }`}
                           >
-                            {saved ? (
+                            {isSaved ? (
                               <>
                                 <Check className="h-4 w-4" />
                                 Added to Deck
@@ -266,6 +281,13 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, existingCards
         <div className="text-center py-20 opacity-50">
           <BookOpen className="h-16 w-16 mx-auto text-slate-300 mb-4" />
           <p className="text-slate-400 text-lg">Search for a word to get started</p>
+        </div>
+      )}
+
+      {/* Toast Message */}
+      {toastMessage && (
+        <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 bg-slate-900 text-white px-6 py-3 rounded-full shadow-lg z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
+          {toastMessage}
         </div>
       )}
     </div>

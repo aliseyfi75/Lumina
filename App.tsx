@@ -557,7 +557,7 @@ const App: React.FC = () => {
       </header>
 
       <main className="flex-1 max-w-5xl mx-auto w-full px-4 py-8">
-        {view === 'dictionary' && <Dictionary onAddCard={handleAddCard} existingCards={cards} />}
+        {view === 'dictionary' && <Dictionary onAddCard={handleAddCard} onRemoveCard={handleDeleteCard} existingCards={cards} />}
         {view === 'flashcards' && <Flashcards cards={cards} onStartStudy={() => setView('study')} onDeleteCard={handleDeleteCard} onReviewCard={handleReviewCard} onOpenImport={() => setIsDataModalOpen(true)} />}
         {view === 'study' && <StudySession cards={cards} onReviewCard={handleReviewCard} onSessionComplete={handleSessionComplete} onExit={() => setView('flashcards')} />}
         {view === 'statistics' && <Statistics cards={cards} studyHistory={studyHistory} longestStreak={longestStreak} />}

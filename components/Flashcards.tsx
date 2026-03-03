@@ -32,26 +32,26 @@ const FlashcardItem: React.FC<{
       >
         {/* Front of Card */}
         <div
-          className="absolute inset-0 backface-hidden bg-white rounded-2xl shadow-sm border border-slate-200 p-6 flex flex-col items-center justify-center text-center hover:shadow-md hover:border-brand-200 transition-all"
+          className="absolute inset-0 backface-hidden bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 flex flex-col items-center justify-center text-center hover:shadow-md hover:border-brand-200 transition-all"
           style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}
         >
           <div className="absolute top-4 right-4 flex items-center gap-1.5 pl-2">
             {/* Added logic for displaying the due string for Learning cards */}
             {card.status === FlashcardStatus.Learning && card.nextReviewDate && (
-              <span className="text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-md">
+              <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded-md">
                 {card.nextReviewDate <= Date.now() ? 'Due Today' : `in ${Math.max(1, Math.ceil((card.nextReviewDate - Date.now()) / (1000 * 60 * 60 * 24)))} days`}
               </span>
             )}
             <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider
-              ${card.status === FlashcardStatus.New ? 'bg-blue-100 text-blue-700' :
-                card.status === FlashcardStatus.Learning ? 'bg-amber-100 text-amber-700' :
-                  'bg-green-100 text-green-700'}`}>
+              ${card.status === FlashcardStatus.New ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300' :
+                card.status === FlashcardStatus.Learning ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300' :
+                  'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300'}`}>
               {card.status}
             </span>
           </div>
 
-          <h3 className="text-3xl font-serif font-bold text-slate-900 mb-2">{card.word}</h3>
-          <p className="text-slate-500 italic font-serif">{card.partOfSpeech}</p>
+          <h3 className="text-3xl font-serif font-bold text-slate-900 dark:text-white mb-2">{card.word}</h3>
+          <p className="text-slate-500 dark:text-slate-400 italic font-serif">{card.partOfSpeech}</p>
           <div className="flex items-center gap-2 mt-1">
             {card.phonetic && <p className="text-slate-400 text-sm">{card.phonetic}</p>}
             {card.audio && (
@@ -68,7 +68,7 @@ const FlashcardItem: React.FC<{
             )}
           </div>
 
-          <div className="absolute bottom-6 text-slate-300 group-hover:text-brand-400 transition-colors flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider">
+          <div className="absolute bottom-6 text-slate-300 dark:text-slate-600 group-hover:text-brand-400 transition-colors flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider">
             <RotateCw className="h-3.5 w-3.5" />
             Tap to reveal
           </div>
@@ -191,19 +191,19 @@ export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onD
   if (cards.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-[60vh] text-center space-y-6 animate-in fade-in zoom-in duration-500">
-        <div className="bg-slate-100 p-6 rounded-full">
+        <div className="bg-slate-100 dark:bg-slate-800 p-6 rounded-full">
           <BookOpen className="h-12 w-12 text-slate-400" />
         </div>
         <div className="space-y-4">
           <div>
-            <h2 className="text-2xl font-bold text-slate-900">Your deck is empty</h2>
-            <p className="text-slate-500 max-w-sm mx-auto mt-2">
+            <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Your deck is empty</h2>
+            <p className="text-slate-500 dark:text-slate-400 max-w-sm mx-auto mt-2">
               Search for words in the dictionary to add them, or import a previous backup.
             </p>
           </div>
           <button
             onClick={onOpenImport}
-            className="inline-flex items-center gap-2 px-5 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-700 font-medium hover:bg-slate-50 hover:text-brand-600 hover:border-brand-200 transition-all shadow-sm"
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-xl text-slate-700 dark:text-slate-200 font-medium hover:bg-slate-50 dark:hover:bg-slate-700 hover:text-brand-600 dark:hover:text-brand-400 hover:border-brand-200 transition-all shadow-sm"
           >
             <Upload className="h-4 w-4" />
             Import CSV
@@ -219,8 +219,8 @@ export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onD
       <div className="space-y-6">
         <div className="flex flex-col md:flex-row gap-6 justify-between items-end">
           <div>
-            <h1 className="text-3xl font-serif font-bold text-slate-900">My Deck</h1>
-            <p className="text-slate-500 mt-1">{cards.length} cards total</p>
+            <h1 className="text-3xl font-serif font-bold text-slate-900 dark:text-white">My Deck</h1>
+            <p className="text-slate-500 dark:text-slate-400 mt-1">{cards.length} cards total</p>
           </div>
           <button
             onClick={onStartStudy}
@@ -228,7 +228,7 @@ export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onD
             className={`flex items-center gap-2 px-6 py-3 rounded-xl font-medium shadow-lg transition-all 
               ${studyQueueCount > 0
                 ? 'bg-brand-600 hover:bg-brand-700 text-white shadow-brand-500/30 hover:scale-105 active:scale-95'
-                : 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
+                : 'bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-500 cursor-not-allowed shadow-none'
               }`}
           >
             {studyQueueCount > 0 ? (
@@ -253,10 +253,10 @@ export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onD
               icon: BookOpen,
               count: newCount,
               styles: {
-                base: 'bg-blue-50 border-blue-100',
-                hover: 'hover:bg-blue-100 hover:border-blue-200',
-                selected: 'bg-blue-100 border-blue-300 ring-blue-400',
-                textData: { base: 'text-blue-600', hover: 'group-hover:text-blue-700', selected: 'text-blue-800' }
+                base: 'bg-blue-50 dark:bg-blue-900/20 border-blue-100 dark:border-blue-800/40',
+                hover: 'hover:bg-blue-100 dark:hover:bg-blue-900/30 hover:border-blue-200',
+                selected: 'bg-blue-100 dark:bg-blue-900/30 border-blue-300 ring-blue-400',
+                textData: { base: 'text-blue-600 dark:text-blue-400', hover: 'group-hover:text-blue-700', selected: 'text-blue-800 dark:text-blue-300' }
               }
             },
             {
@@ -265,10 +265,10 @@ export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onD
               icon: Brain,
               count: learningCount,
               styles: {
-                base: 'bg-amber-50 border-amber-100',
-                hover: 'hover:bg-amber-100 hover:border-amber-200',
-                selected: 'bg-amber-100 border-amber-300 ring-amber-400',
-                textData: { base: 'text-amber-600', hover: 'group-hover:text-amber-700', selected: 'text-amber-800' }
+                base: 'bg-amber-50 dark:bg-amber-900/20 border-amber-100 dark:border-amber-800/40',
+                hover: 'hover:bg-amber-100 dark:hover:bg-amber-900/30 hover:border-amber-200',
+                selected: 'bg-amber-100 dark:bg-amber-900/30 border-amber-300 ring-amber-400',
+                textData: { base: 'text-amber-600 dark:text-amber-400', hover: 'group-hover:text-amber-700', selected: 'text-amber-800 dark:text-amber-300' }
               }
             },
             {
@@ -277,10 +277,10 @@ export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onD
               icon: CheckCircle,
               count: masteredCount,
               styles: {
-                base: 'bg-green-50 border-green-100',
-                hover: 'hover:bg-green-100 hover:border-green-200',
-                selected: 'bg-green-100 border-green-300 ring-green-400',
-                textData: { base: 'text-green-600', hover: 'group-hover:text-green-700', selected: 'text-green-800' }
+                base: 'bg-green-50 dark:bg-green-900/20 border-green-100 dark:border-green-800/40',
+                hover: 'hover:bg-green-100 dark:hover:bg-green-900/30 hover:border-green-200',
+                selected: 'bg-green-100 dark:bg-green-900/30 border-green-300 ring-green-400',
+                textData: { base: 'text-green-600 dark:text-green-400', hover: 'group-hover:text-green-700', selected: 'text-green-800 dark:text-green-300' }
               }
             }
           ].map((category) => {
@@ -295,7 +295,7 @@ export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onD
                   ${isOthersSelected
                     ? `${category.styles.base} opacity-50 grayscale-[0.5]`
                     : isSelected
-                      ? `${category.styles.selected} ring-2 ring-offset-2 ring-offset-slate-50 scale-[1.02] shadow-md`
+                      ? `${category.styles.selected} ring-2 ring-offset-2 ring-offset-slate-50 dark:ring-offset-slate-900 scale-[1.02] shadow-md`
                       : `${category.styles.base} ${category.styles.hover} hover:scale-[1.01] hover:shadow-sm`
                   }
                 `}
@@ -306,12 +306,12 @@ export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onD
                     : `${category.styles.textData.base} font-semibold ${category.styles.textData.hover} group-hover:font-bold`
                   }
                 `}>
-                  <div className="p-2 bg-white rounded-lg shadow-sm">
+                  <div className="p-2 bg-white dark:bg-slate-700 rounded-lg shadow-sm">
                     <category.icon className="h-5 w-5" />
                   </div>
                   <span>{category.label}</span>
                 </div>
-                <p className="text-2xl font-bold text-slate-900">{category.count}</p>
+                <p className="text-2xl font-bold text-slate-900 dark:text-white">{category.count}</p>
               </div>
             );
           })}
@@ -331,12 +331,12 @@ export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onD
           ))}
         </div>
       ) : (
-        <div className="flex flex-col items-center justify-center py-20 text-slate-400">
+        <div className="flex flex-col items-center justify-center py-20 text-slate-400 dark:text-slate-600">
           <BookOpen className="h-10 w-10 mb-4 opacity-20" />
           <p>No cards found in this category</p>
           <button
             onClick={() => setSelectedStatus(null)}
-            className="mt-4 text-brand-600 font-medium hover:underline"
+            className="mt-4 text-brand-600 dark:text-brand-400 font-medium hover:underline"
           >
             Show all cards
           </button>

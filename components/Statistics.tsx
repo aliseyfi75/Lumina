@@ -164,28 +164,28 @@ export const Statistics: React.FC<StatisticsProps> = ({ cards, studyHistory, lon
         <div className="space-y-8 animate-in fade-in duration-500 pb-20">
             <div className="flex flex-col md:flex-row gap-6 justify-between items-end">
                 <div>
-                    <h1 className="text-3xl font-serif font-bold text-slate-900">Statistics</h1>
-                    <p className="text-slate-500 mt-1">Track your learning progress and vocabulary growth</p>
+                    <h1 className="text-3xl font-serif font-bold text-slate-900 dark:text-white">Statistics</h1>
+                    <p className="text-slate-500 dark:text-slate-400 mt-1">Track your learning progress and vocabulary growth</p>
                 </div>
 
                 <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-3 bg-white px-5 py-3 rounded-2xl shadow-sm border border-slate-200">
-                        <div className="p-2 bg-slate-100 rounded-xl">
-                            <Target className="h-6 w-6 text-slate-500" />
+                    <div className="flex items-center gap-3 bg-white dark:bg-slate-800 px-5 py-3 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700">
+                        <div className="p-2 bg-slate-100 dark:bg-slate-700 rounded-xl">
+                            <Target className="h-6 w-6 text-slate-500 dark:text-slate-400" />
                         </div>
                         <div>
-                            <p className="text-sm font-medium text-slate-500">Longest Streak</p>
-                            <p className="text-2xl font-bold text-slate-900">{longestStreak} <span className="text-base font-medium text-slate-500">{longestStreak === 1 ? 'Day' : 'Days'}</span></p>
+                            <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Longest Streak</p>
+                            <p className="text-2xl font-bold text-slate-900 dark:text-white">{longestStreak} <span className="text-base font-medium text-slate-500 dark:text-slate-400">{longestStreak === 1 ? 'Day' : 'Days'}</span></p>
                         </div>
                     </div>
-                    <div className="flex items-center gap-3 bg-white px-5 py-3 rounded-2xl shadow-sm border border-orange-200 ring-1 ring-orange-100 relative overflow-hidden">
+                    <div className="flex items-center gap-3 bg-white dark:bg-slate-800 px-5 py-3 rounded-2xl shadow-sm border border-orange-200 dark:border-orange-800/50 ring-1 ring-orange-100 dark:ring-orange-900/50 relative overflow-hidden">
                         <div className="absolute top-0 right-0 w-16 h-16 bg-gradient-to-br from-orange-400/20 to-transparent blur-xl"></div>
-                        <div className="p-2 bg-orange-100 rounded-xl relative overflow-hidden group">
+                        <div className="p-2 bg-orange-100 dark:bg-orange-900/40 rounded-xl relative overflow-hidden group">
                             <div className="absolute inset-0 bg-orange-300 opacity-0 group-hover:opacity-30 transition-opacity blur-md"></div>
                             <Flame className="h-6 w-6 text-orange-500 relative z-10" />
                         </div>
                         <div className="relative z-10">
-                            <p className="text-sm font-medium text-slate-500">Current Streak</p>
+                            <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Current Streak</p>
                             <p className="text-2xl font-bold text-orange-600">{currentStreak} <span className="text-base font-medium text-orange-400">{currentStreak === 1 ? 'Day' : 'Days'}</span></p>
                         </div>
                     </div>
@@ -193,66 +193,66 @@ export const Statistics: React.FC<StatisticsProps> = ({ cards, studyHistory, lon
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4 hover:shadow-md transition-shadow">
-                    <div className="p-3 bg-slate-100 rounded-xl text-slate-600"><BookOpen className="h-6 w-6" /></div>
+                <div className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm flex items-center gap-4 hover:shadow-md transition-shadow">
+                    <div className="p-3 bg-slate-100 dark:bg-slate-700 rounded-xl text-slate-600 dark:text-slate-300"><BookOpen className="h-6 w-6" /></div>
                     <div>
-                        <p className="text-2xl font-bold text-slate-900">{totalCards}</p>
-                        <p className="text-sm text-slate-500 font-medium">Total Cards</p>
+                        <p className="text-2xl font-bold text-slate-900 dark:text-white">{totalCards}</p>
+                        <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">Total Cards</p>
                     </div>
                 </div>
-                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4 hover:shadow-md transition-shadow">
-                    <div className="p-3 bg-blue-100 rounded-xl text-blue-600"><Activity className="h-6 w-6" /></div>
+                <div className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm flex items-center gap-4 hover:shadow-md transition-shadow">
+                    <div className="p-3 bg-blue-100 dark:bg-blue-900/40 rounded-xl text-blue-600 dark:text-blue-400"><Activity className="h-6 w-6" /></div>
                     <div>
-                        <p className="text-2xl font-bold text-slate-900">{newCount}</p>
-                        <p className="text-sm text-slate-500 font-medium">New</p>
+                        <p className="text-2xl font-bold text-slate-900 dark:text-white">{newCount}</p>
+                        <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">New</p>
                     </div>
                 </div>
-                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4 hover:shadow-md transition-shadow">
-                    <div className="p-3 bg-amber-100 rounded-xl text-amber-600"><Brain className="h-6 w-6" /></div>
+                <div className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm flex items-center gap-4 hover:shadow-md transition-shadow">
+                    <div className="p-3 bg-amber-100 dark:bg-amber-900/40 rounded-xl text-amber-600 dark:text-amber-400"><Brain className="h-6 w-6" /></div>
                     <div>
-                        <p className="text-2xl font-bold text-slate-900">{learningCount}</p>
-                        <p className="text-sm text-slate-500 font-medium">Learning</p>
+                        <p className="text-2xl font-bold text-slate-900 dark:text-white">{learningCount}</p>
+                        <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">Learning</p>
                     </div>
                 </div>
-                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4 hover:shadow-md transition-shadow">
-                    <div className="p-3 bg-green-100 rounded-xl text-green-600"><CheckCircle className="h-6 w-6" /></div>
+                <div className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm flex items-center gap-4 hover:shadow-md transition-shadow">
+                    <div className="p-3 bg-green-100 dark:bg-green-900/40 rounded-xl text-green-600 dark:text-green-400"><CheckCircle className="h-6 w-6" /></div>
                     <div>
-                        <p className="text-2xl font-bold text-slate-900">{masteredCount}</p>
-                        <p className="text-sm text-slate-500 font-medium">Mastered</p>
+                        <p className="text-2xl font-bold text-slate-900 dark:text-white">{masteredCount}</p>
+                        <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">Mastered</p>
                     </div>
                 </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex flex-col hover:border-brand-200 transition-colors">
+                <div className="lg:col-span-2 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm p-6 flex flex-col hover:border-brand-200 transition-colors">
                     <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
-                        <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                        <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
                             <TrendingUp className="h-5 w-5 text-brand-500" />
                             Progress Charts
                         </h2>
 
-                        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
+                        <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-700 p-1 rounded-xl">
                             <button
                                 onClick={() => setActiveChartTab('growth')}
-                                className={cn("px-3 py-1.5 text-xs font-medium rounded-lg transition-colors", activeChartTab === 'growth' ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700")}
+                                className={cn("px-3 py-1.5 text-xs font-medium rounded-lg transition-colors", activeChartTab === 'growth' ? "bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm" : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200")}
                             >
                                 Mastered
                             </button>
                             <button
                                 onClick={() => setActiveChartTab('building')}
-                                className={cn("px-3 py-1.5 text-xs font-medium rounded-lg transition-colors", activeChartTab === 'building' ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700")}
+                                className={cn("px-3 py-1.5 text-xs font-medium rounded-lg transition-colors", activeChartTab === 'building' ? "bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm" : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200")}
                             >
                                 Total Built
                             </button>
                             <button
                                 onClick={() => setActiveChartTab('remaining')}
-                                className={cn("px-3 py-1.5 text-xs font-medium rounded-lg transition-colors", activeChartTab === 'remaining' ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700")}
+                                className={cn("px-3 py-1.5 text-xs font-medium rounded-lg transition-colors", activeChartTab === 'remaining' ? "bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm" : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200")}
                             >
                                 Remaining
                             </button>
                             <button
                                 onClick={() => setActiveChartTab('future')}
-                                className={cn("px-3 py-1.5 text-xs font-medium rounded-lg transition-colors flex items-center gap-1", activeChartTab === 'future' ? "bg-brand-50 text-brand-700 shadow-sm border border-brand-100" : "text-slate-500 hover:text-brand-600 hover:bg-brand-50/50")}
+                                className={cn("px-3 py-1.5 text-xs font-medium rounded-lg transition-colors flex items-center gap-1", activeChartTab === 'future' ? "bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-400 shadow-sm border border-brand-100 dark:border-brand-800" : "text-slate-500 dark:text-slate-400 hover:text-brand-600 hover:bg-brand-50/50")}
                             >
                                 <Clock className="h-3 w-3" />
                                 Reminders
@@ -262,22 +262,22 @@ export const Statistics: React.FC<StatisticsProps> = ({ cards, studyHistory, lon
 
                     {activeChartTab !== 'future' && (
                         <div className="flex justify-end mb-4">
-                            <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-lg border border-slate-200">
+                            <div className="flex items-center gap-1 bg-slate-50 dark:bg-slate-700 p-1 rounded-lg border border-slate-200 dark:border-slate-600">
                                 <button
                                     onClick={() => setTimeframe('weekly')}
-                                    className={cn("px-3 py-1.5 text-xs font-medium rounded-md transition-colors", timeframe === 'weekly' ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700")}
+                                    className={cn("px-3 py-1.5 text-xs font-medium rounded-md transition-colors", timeframe === 'weekly' ? "bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm border border-slate-200 dark:border-slate-500" : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200")}
                                 >
                                     1W
                                 </button>
                                 <button
                                     onClick={() => setTimeframe('monthly')}
-                                    className={cn("px-3 py-1.5 text-xs font-medium rounded-md transition-colors", timeframe === 'monthly' ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700")}
+                                    className={cn("px-3 py-1.5 text-xs font-medium rounded-md transition-colors", timeframe === 'monthly' ? "bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm border border-slate-200 dark:border-slate-500" : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200")}
                                 >
                                     1M
                                 </button>
                                 <button
                                     onClick={() => setTimeframe('yearly')}
-                                    className={cn("px-3 py-1.5 text-xs font-medium rounded-md transition-colors", timeframe === 'yearly' ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700")}
+                                    className={cn("px-3 py-1.5 text-xs font-medium rounded-md transition-colors", timeframe === 'yearly' ? "bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm border border-slate-200 dark:border-slate-500" : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200")}
                                 >
                                     1Y
                                 </button>
@@ -374,23 +374,23 @@ export const Statistics: React.FC<StatisticsProps> = ({ cards, studyHistory, lon
                                 )}
                             </ResponsiveContainer>
                         ) : (
-                            <div className="h-full w-full flex items-center justify-center text-slate-400 font-medium">
+                            <div className="h-full w-full flex items-center justify-center text-slate-400 dark:text-slate-500 font-medium">
                                 Start adding cards to see your growth
                             </div>
                         )}
                     </div>
                 </div>
 
-                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex flex-col hover:border-brand-200 transition-colors">
+                <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm p-6 flex flex-col hover:border-brand-200 transition-colors">
                     <div className="flex items-center justify-between mb-6">
-                        <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                        <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
                             <Calendar className="h-5 w-5 text-brand-500" />
                             Activity (Last 90 Days)
                         </h2>
                     </div>
 
                     <div className="flex-1 flex flex-col justify-center gap-6">
-                        <div className="bg-slate-50/50 p-4 justify-center items-center flex rounded-xl border border-slate-100 overflow-x-auto">
+                        <div className="bg-slate-50/50 dark:bg-slate-900/50 p-4 justify-center items-center flex rounded-xl border border-slate-100 dark:border-slate-700 overflow-x-auto">
                             <div
                                 className="grid gap-[3px]"
                                 style={{
@@ -419,10 +419,10 @@ export const Statistics: React.FC<StatisticsProps> = ({ cards, studyHistory, lon
                             </div>
                         </div>
 
-                        <div className="flex items-center justify-between text-xs text-slate-500 font-medium px-2">
+                        <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 font-medium px-2">
                             <span>Less</span>
                             <div className="flex gap-1.5">
-                                <div className="w-3.5 h-3.5 rounded-[3px] bg-slate-200" />
+                                <div className="w-3.5 h-3.5 rounded-[3px] bg-slate-200 dark:bg-slate-700" />
                                 <div className="w-3.5 h-3.5 rounded-[3px] bg-brand-200" />
                                 <div className="w-3.5 h-3.5 rounded-[3px] bg-brand-300" />
                                 <div className="w-3.5 h-3.5 rounded-[3px] bg-brand-500" />
@@ -431,8 +431,8 @@ export const Statistics: React.FC<StatisticsProps> = ({ cards, studyHistory, lon
                             <span>More</span>
                         </div>
 
-                        <div className="mt-auto bg-brand-50 rounded-xl p-4 border border-brand-100">
-                            <p className="text-sm text-brand-800 font-medium text-center">
+                        <div className="mt-auto bg-brand-50 dark:bg-brand-900/20 rounded-xl p-4 border border-brand-100 dark:border-brand-800/40">
+                            <p className="text-sm text-brand-800 dark:text-brand-300 font-medium text-center">
                                 Consistency is key. Studying a few cards every day helps build long-term retention.
                             </p>
                         </div>

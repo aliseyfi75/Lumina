@@ -149,20 +149,20 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
             />
           </div>
         )}
-        <div className="p-6 bg-green-50 rounded-full">
+        <div className="p-6 bg-green-50 dark:bg-green-900/20 rounded-full">
           <CheckCircle className="h-16 w-16 text-green-500" />
         </div>
         <div className="text-center space-y-2">
-          <h2 className="text-3xl font-serif font-bold text-slate-900">
+          <h2 className="text-3xl font-serif font-bold text-slate-900 dark:text-white">
             {isAllMastered ? "All Cards Mastered!" : "Session Complete!"}
           </h2>
-          <p className="text-slate-500">
+          <p className="text-slate-500 dark:text-slate-400">
             {isAllMastered ? "Great job! You've mastered all your cards." : "You've reviewed all your cards for now."}
           </p>
         </div>
         <button
           onClick={onExit}
-          className="px-8 py-3 bg-slate-900 text-white rounded-xl font-medium hover:bg-slate-800 transition-colors shadow-lg shadow-slate-900/20 z-10"
+          className="px-8 py-3 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 rounded-xl font-medium hover:bg-slate-800 dark:hover:bg-white transition-colors shadow-lg shadow-slate-900/20 z-10"
         >
           Return to Dashboard
         </button>
@@ -182,17 +182,17 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
       <div className="flex items-center justify-between mb-8 px-4">
         <button
           onClick={onExit}
-          className="p-2 -ml-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-full transition-colors"
+          className="p-2 -ml-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"
         >
           <ArrowLeft className="h-6 w-6" />
         </button>
-        <div className="flex-1 mx-8 bg-slate-200 rounded-full h-2">
+        <div className="flex-1 mx-8 bg-slate-200 dark:bg-slate-700 rounded-full h-2">
           <div
             className="bg-brand-500 h-2 rounded-full transition-all duration-300"
             style={{ width: `${progress}%` }}
           />
         </div>
-        <span className="text-sm font-medium text-slate-500 tabular-nums">
+        <span className="text-sm font-medium text-slate-500 dark:text-slate-400 tabular-nums">
           {currentIndex + 1} / {queue.length}
         </span>
       </div>
@@ -255,19 +255,19 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
 
             {/* Front of Card - Minimal Design (Word Only) */}
             <div
-              className="absolute inset-0 backface-hidden bg-white rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100 flex flex-col items-center justify-center p-8 text-center hover:shadow-2xl transition-shadow"
+              className="absolute inset-0 backface-hidden bg-white dark:bg-slate-800 rounded-3xl shadow-xl shadow-slate-200/50 dark:shadow-none border border-slate-100 dark:border-slate-700 flex flex-col items-center justify-center p-8 text-center hover:shadow-2xl transition-shadow"
               style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}
             >
-              <h2 className="text-5xl font-serif font-bold text-slate-900 mb-6">{currentCard.word}</h2>
+              <h2 className="text-5xl font-serif font-bold text-slate-900 dark:text-white mb-6">{currentCard.word}</h2>
               <div className="flex items-center gap-3">
-                {currentCard.phonetic && <p className="text-2xl text-slate-400 font-serif italic">{currentCard.phonetic}</p>}
+                {currentCard.phonetic && <p className="text-2xl text-slate-400 dark:text-slate-500 font-serif italic">{currentCard.phonetic}</p>}
                 {currentCard.audio && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
                       new Audio(currentCard.audio!).play();
                     }}
-                    className="p-2 text-slate-400 hover:text-brand-500 hover:bg-brand-50 rounded-full transition-colors z-10 relative"
+                    className="p-2 text-slate-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded-full transition-colors z-10 relative"
                     title="Listen to pronunciation"
                   >
                     <Volume2 className="h-6 w-6" />
@@ -275,7 +275,7 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
                 )}
               </div>
 
-              <div className="absolute bottom-10 text-slate-300 flex items-center gap-2 opacity-50 group-hover:opacity-100 transition-opacity">
+              <div className="absolute bottom-10 text-slate-300 dark:text-slate-600 flex items-center gap-2 opacity-50 group-hover:opacity-100 transition-opacity">
                 <RotateCw className="h-4 w-4" />
                 <span className="text-xs uppercase tracking-widest font-medium">Click to reveal</span>
               </div>

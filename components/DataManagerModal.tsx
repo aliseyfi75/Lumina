@@ -135,16 +135,16 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
         {/* Header */}
-        <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50 shrink-0">
+        <div className="p-6 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/30 shrink-0">
           <div className="flex items-center gap-2">
-            <div className="p-2 bg-brand-100 text-brand-600 rounded-lg">
+            <div className="p-2 bg-brand-100 dark:bg-brand-900/40 text-brand-600 dark:text-brand-400 rounded-lg">
               <Database className="h-5 w-5" />
             </div>
-            <h2 className="text-xl font-serif font-bold text-slate-900">Data Manager</h2>
+            <h2 className="text-xl font-serif font-bold text-slate-900 dark:text-white">Data Manager</h2>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -152,14 +152,14 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
         <div className="p-6 space-y-6 overflow-y-auto custom-scrollbar">
 
           {/* Cloud Sync Section */}
-          <div className={`p-5 rounded-xl border transition-colors ${cloudConfig ? 'bg-sky-50/50 border-sky-100' : 'bg-slate-50 border-slate-200'}`}>
+          <div className={`p-5 rounded-xl border transition-colors ${cloudConfig ? 'bg-sky-50/50 dark:bg-sky-900/10 border-sky-100 dark:border-sky-800/40' : 'bg-slate-50 dark:bg-slate-900/30 border-slate-200 dark:border-slate-700'}`}>
             <div className="flex items-start justify-between mb-4">
               <div>
-                <h3 className="text-slate-900 font-semibold flex items-center gap-2">
+                <h3 className="text-slate-900 dark:text-white font-semibold flex items-center gap-2">
                   <Cloud className={`h-5 w-5 ${cloudConfig ? 'text-sky-500' : 'text-slate-400'}`} />
                   Cloud Sync (Pantry)
                 </h3>
-                <p className="text-xs text-slate-500 mt-1">
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                   Free unlimited storage for your flashcards.
                 </p>
               </div>
@@ -178,7 +178,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                     placeholder="Your Pantry ID"
                     value={pantryIdInput}
                     onChange={(e) => setPantryIdInput(e.target.value)}
-                    className="w-full text-sm px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent"
+                    className="w-full text-sm px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent"
                   />
                   <div className="mt-2 text-[10px] text-slate-500 flex flex-wrap gap-1">
                     <span>Don't have one?</span>
@@ -190,7 +190,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                 <button
                   type="submit"
                   disabled={isProcessing}
-                  className="w-full py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 disabled:opacity-50 transition-colors"
+                  className="w-full py-2 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 text-sm font-medium rounded-lg hover:bg-slate-800 dark:hover:bg-white disabled:opacity-50 transition-colors"
                 >
                   {isProcessing ? 'Connecting...' : 'Connect Storage'}
                 </button>
@@ -201,7 +201,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                   <button
                     onClick={() => handleCloudAction('pull')}
                     disabled={isProcessing}
-                    className="flex flex-col items-center justify-center gap-1 p-3 bg-white border border-slate-200 rounded-lg hover:border-sky-300 hover:text-sky-600 transition-colors"
+                    className="flex flex-col items-center justify-center gap-1 p-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg hover:border-sky-300 hover:text-sky-600 dark:text-slate-200 dark:hover:text-sky-400 transition-colors"
                   >
                     <Download className="h-4 w-4" />
                     <span className="text-xs font-medium">Load from Cloud</span>
@@ -209,14 +209,14 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                   <button
                     onClick={() => handleCloudAction('push')}
                     disabled={isProcessing}
-                    className="flex flex-col items-center justify-center gap-1 p-3 bg-white border border-slate-200 rounded-lg hover:border-sky-300 hover:text-sky-600 transition-colors"
+                    className="flex flex-col items-center justify-center gap-1 p-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg hover:border-sky-300 hover:text-sky-600 dark:text-slate-200 dark:hover:text-sky-400 transition-colors"
                   >
                     <Upload className="h-4 w-4" />
                     <span className="text-xs font-medium">Save to Cloud</span>
                   </button>
                 </div>
                 <div className="flex items-center justify-between pt-3 border-t border-sky-200/50">
-                  <div className="text-xs text-sky-700 flex items-center gap-1.5">
+                  <div className="text-xs text-sky-700 dark:text-sky-400 flex items-center gap-1.5">
                     <RefreshCw className="h-3 w-3 animate-spin" style={{ animationDuration: '3s' }} />
                     Auto-sync enabled
                   </div>
@@ -228,14 +228,14 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
             )}
           </div>
 
-          <div className="h-px bg-slate-100"></div>
+          <div className="h-px bg-slate-100 dark:bg-slate-700"></div>
 
           {/* Local File Sync Section */}
-          <div className={`p-4 rounded-xl border ${isFileConnected ? 'border-green-100 bg-green-50/50' : 'border-slate-200 bg-slate-50'}`}>
+          <div className={`p-4 rounded-xl border ${isFileConnected ? 'border-green-100 dark:border-green-800/40 bg-green-50/50 dark:bg-green-900/10' : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/30'}`}>
             {isFileSystemAvailable ? (
               <div className="flex items-center justify-between gap-4">
                 <div className="flex-1">
-                  <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
                     <Save className="h-4 w-4" />
                     {isFileConnected ? 'Local JSON Connected' : 'Local JSON Auto-Save'}
                   </h3>
@@ -256,7 +256,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                 ) : (
                   <button
                     onClick={handleConnectLocal}
-                    className="px-3 py-1.5 bg-white border border-slate-300 text-slate-700 text-xs font-medium rounded-lg hover:bg-slate-50"
+                    className="px-3 py-1.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 text-xs font-medium rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600"
                   >
                     Connect File
                   </button>
@@ -276,7 +276,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
             <button
               onClick={onExport}
               disabled={cardCount === 0}
-              className="py-2.5 bg-white border border-slate-200 text-slate-700 text-sm font-medium rounded-xl hover:bg-slate-50 hover:text-brand-600 hover:border-brand-200 transition-colors shadow-sm disabled:opacity-50"
+              className="py-2.5 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 text-sm font-medium rounded-xl hover:bg-slate-50 dark:hover:bg-slate-600 hover:text-brand-600 dark:hover:text-brand-400 hover:border-brand-200 transition-colors shadow-sm disabled:opacity-50"
             >
               Export JSON
             </button>

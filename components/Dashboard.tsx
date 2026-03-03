@@ -74,10 +74,10 @@ const getCurrentStreak = (history: Record<string, number>): number => {
 const StatusPill: React.FC<{ status: FlashcardStatus }> = ({ status }) => {
     const styles =
         status === FlashcardStatus.New
-            ? 'bg-blue-100 text-blue-700'
+            ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300'
             : status === FlashcardStatus.Learning
-                ? 'bg-amber-100 text-amber-700'
-                : 'bg-green-100 text-green-700';
+                ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300'
+                : 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300';
     return (
         <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${styles}`}>
             {status}
@@ -194,7 +194,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         {/* Close button */}
                         <button
                             onClick={closeCard}
-                            className="absolute -top-4 -right-4 z-10 bg-white rounded-full p-2 shadow-lg text-slate-500 hover:text-slate-800 transition-colors"
+                            className="absolute -top-4 -right-4 z-10 bg-white dark:bg-slate-700 rounded-full p-2 shadow-lg text-slate-500 dark:text-slate-300 hover:text-slate-800 dark:hover:text-white transition-colors"
                         >
                             <X className="h-4 w-4" />
                         </button>
@@ -213,13 +213,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             >
                                 {/* Front */}
                                 <div
-                                    className="absolute inset-0 bg-white rounded-2xl shadow-xl p-6 flex flex-col items-center justify-center text-center"
+                                    className="absolute inset-0 bg-white dark:bg-slate-800 rounded-2xl shadow-xl p-6 flex flex-col items-center justify-center text-center"
                                     style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}
                                 >
                                     <div className="absolute top-4 right-4">
                                         <StatusPill status={selectedCard.status} />
                                     </div>
-                                    <h3 className="text-3xl font-serif font-bold text-slate-900 mb-1">{selectedCard.word}</h3>
+                                    <h3 className="text-3xl font-serif font-bold text-slate-900 dark:text-white mb-1">{selectedCard.word}</h3>
                                     {selectedCard.phonetic && (
                                         <p className="text-slate-400 text-sm font-serif italic">{selectedCard.phonetic}</p>
                                     )}
@@ -231,8 +231,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                             <Volume2 className="h-4 w-4" />
                                         </button>
                                     )}
-                                    <p className="text-slate-500 italic text-sm mt-1">{selectedCard.partOfSpeech}</p>
-                                    <div className="absolute bottom-5 flex items-center gap-1.5 text-slate-300 text-xs font-medium uppercase tracking-wider">
+                                    <p className="text-slate-500 dark:text-slate-400 italic text-sm mt-1">{selectedCard.partOfSpeech}</p>
+                                    <div className="absolute bottom-5 flex items-center gap-1.5 text-slate-300 dark:text-slate-600 text-xs font-medium uppercase tracking-wider">
                                         <RotateCw className="h-3.5 w-3.5" /> Tap to reveal
                                     </div>
                                 </div>
@@ -264,7 +264,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-16">
 
                     {/* ── Hero / Search ───────────────────────────────────────────────── */}
-                    <div className="relative rounded-3xl bg-gradient-to-br from-slate-900 via-brand-950 to-slate-900 p-8 md:p-12 text-white shadow-2xl shadow-brand-900/20">
+                    <div className="relative rounded-3xl bg-gradient-to-br from-slate-900 via-brand-950 to-slate-900 dark:from-slate-700 dark:via-slate-800 dark:to-slate-700 dark:border dark:border-slate-600/50 p-8 md:p-12 text-white shadow-2xl shadow-brand-900/20 dark:shadow-slate-900/50">
                         {/* Decorative blobs */}
                         <div className="pointer-events-none absolute -top-20 -right-20 w-80 h-80 rounded-full bg-brand-500/10 blur-3xl" />
                         <div className="pointer-events-none absolute -bottom-16 -left-16 w-64 h-64 rounded-full bg-indigo-500/10 blur-3xl" />
@@ -313,15 +313,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
                                 {/* Autocomplete Dropdown */}
                                 {showSuggestions && suggestions.length > 0 && (
-                                    <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl shadow-2xl border border-slate-100 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150 z-30">
+                                    <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-100 dark:border-slate-700 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150 z-30">
                                         <ul>
                                             {suggestions.map((word, i) => (
                                                 <li
                                                     key={i}
                                                     onClick={() => handleSuggestionClick(word)}
-                                                    className="px-4 py-3 flex items-center gap-3 hover:bg-slate-50 cursor-pointer text-slate-700 transition-colors border-b border-slate-50 last:border-none"
+                                                    className="px-4 py-3 flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200 transition-colors border-b border-slate-50 dark:border-slate-700 last:border-none"
                                                 >
-                                                    <Search className="h-4 w-4 text-slate-300" />
+                                                    <Search className="h-4 w-4 text-slate-300 dark:text-slate-500" />
                                                     <span className="font-medium">{word}</span>
                                                 </li>
                                             ))}
@@ -354,8 +354,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 value: dueCount,
                                 icon: Calendar,
                                 color: dueCount > 0 ? 'text-amber-600' : 'text-green-600',
-                                bg: dueCount > 0 ? 'bg-amber-50 border-amber-100' : 'bg-green-50 border-green-100',
-                                iconBg: dueCount > 0 ? 'bg-amber-100' : 'bg-green-100',
+                                bg: dueCount > 0 ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-100 dark:border-amber-800/40' : 'bg-green-50 dark:bg-green-900/20 border-green-100 dark:border-green-800/40',
+                                iconBg: dueCount > 0 ? 'bg-amber-100 dark:bg-amber-900/40' : 'bg-green-100 dark:bg-green-900/40',
                             },
                             {
                                 label: 'Current Streak',
@@ -363,24 +363,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 suffix: currentStreak === 1 ? ' day' : ' days',
                                 icon: Flame,
                                 color: currentStreak > 0 ? 'text-orange-600' : 'text-slate-500',
-                                bg: currentStreak > 0 ? 'bg-orange-50 border-orange-100' : 'bg-slate-50 border-slate-100',
-                                iconBg: currentStreak > 0 ? 'bg-orange-100' : 'bg-slate-100',
+                                bg: currentStreak > 0 ? 'bg-orange-50 dark:bg-orange-900/20 border-orange-100 dark:border-orange-800/40' : 'bg-slate-50 dark:bg-slate-800 border-slate-100 dark:border-slate-700',
+                                iconBg: currentStreak > 0 ? 'bg-orange-100 dark:bg-orange-900/40' : 'bg-slate-100 dark:bg-slate-700',
                             },
                             {
                                 label: 'Mastered',
                                 value: masteredCount,
                                 icon: CheckCircle,
                                 color: 'text-green-600',
-                                bg: 'bg-green-50 border-green-100',
-                                iconBg: 'bg-green-100',
+                                bg: 'bg-green-50 dark:bg-green-900/20 border-green-100 dark:border-green-800/40',
+                                iconBg: 'bg-green-100 dark:bg-green-900/40',
                             },
                             {
                                 label: 'Total Cards',
                                 value: cards.length,
                                 icon: Layers,
                                 color: 'text-brand-600',
-                                bg: 'bg-brand-50 border-brand-100',
-                                iconBg: 'bg-brand-100',
+                                bg: 'bg-brand-50 dark:bg-brand-900/20 border-brand-100 dark:border-brand-800/40',
+                                iconBg: 'bg-brand-100 dark:bg-brand-900/40',
                             },
                         ].map(({ label, value, suffix, icon: Icon, color, bg, iconBg }) => (
                             <div key={label} className={`p-5 rounded-2xl border ${bg} flex flex-col gap-3`}>
@@ -388,10 +388,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                     <Icon className={`h-5 w-5 ${color}`} />
                                 </div>
                                 <div>
-                                    <p className="text-2xl font-bold text-slate-900 leading-none">
+                                    <p className="text-2xl font-bold text-slate-900 dark:text-white leading-none">
                                         {value}{suffix}
                                     </p>
-                                    <p className="text-sm text-slate-500 mt-1">{label}</p>
+                                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">{label}</p>
                                 </div>
                             </div>
                         ))}
@@ -401,17 +401,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
                         {/* Word of the Day */}
-                        <div className="bg-white rounded-3xl border border-slate-100 shadow-sm shadow-slate-100 overflow-hidden flex flex-col">
-                            <div className="px-6 pt-6 pb-4 border-b border-slate-50 flex items-center gap-2">
+                        <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm shadow-slate-100 dark:shadow-none overflow-hidden flex flex-col">
+                            <div className="px-6 pt-6 pb-4 border-b border-slate-50 dark:border-slate-700 flex items-center gap-2">
                                 <Star className="h-4 w-4 text-amber-500 fill-current" />
-                                <h2 className="font-semibold text-slate-800 text-sm uppercase tracking-wider">Word of the Day</h2>
+                                <h2 className="font-semibold text-slate-800 dark:text-slate-100 text-sm uppercase tracking-wider">Word of the Day</h2>
                             </div>
 
                             {wordOfTheDay ? (
                                 <div className="p-6 flex flex-col flex-1 gap-4">
                                     <div className="flex items-start justify-between gap-4">
                                         <div>
-                                            <h3 className="text-3xl font-serif font-bold text-slate-900">{wordOfTheDay.word}</h3>
+                                            <h3 className="text-3xl font-serif font-bold text-slate-900 dark:text-white">{wordOfTheDay.word}</h3>
                                             <div className="flex items-center gap-2 mt-1 flex-wrap">
                                                 {wordOfTheDay.phonetic && (
                                                     <span className="text-slate-400 text-sm font-serif italic">{wordOfTheDay.phonetic}</span>
@@ -419,7 +419,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                                 {wordOfTheDay.audio && (
                                                     <button
                                                         onClick={() => new Audio(wordOfTheDay.audio!).play()}
-                                                        className="p-1 text-slate-400 hover:text-brand-500 hover:bg-brand-50 rounded-full transition-colors"
+                                                        className="p-1 text-slate-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded-full transition-colors"
                                                         title="Listen"
                                                     >
                                                         <Volume2 className="h-4 w-4" />
@@ -430,7 +430,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                             <p className="text-xs text-slate-400 mt-0.5 italic">{wordOfTheDay.partOfSpeech}</p>
                                         </div>
                                         {wordOfTheDay.image && (
-                                            <div className="w-20 h-20 rounded-xl overflow-hidden border border-slate-100 bg-slate-50 flex items-center justify-center shrink-0">
+                                            <div className="w-20 h-20 rounded-xl overflow-hidden border border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 flex items-center justify-center shrink-0">
                                                 <img
                                                     src={wordOfTheDay.image}
                                                     alt={wordOfTheDay.word}
@@ -441,12 +441,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                         )}
                                     </div>
 
-                                    <p className="text-slate-700 leading-relaxed text-sm flex-1">
+                                    <p className="text-slate-700 dark:text-slate-300 leading-relaxed text-sm flex-1">
                                         {wordOfTheDay.mainDefinition}
                                     </p>
 
                                     {wordOfTheDay.example && (
-                                        <p className="text-slate-400 italic text-sm font-serif border-t border-slate-50 pt-3">
+                                        <p className="text-slate-400 italic text-sm font-serif border-t border-slate-50 dark:border-slate-700 pt-3">
                                             "{wordOfTheDay.example}"
                                         </p>
                                     )}
@@ -461,7 +461,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 </div>
                             ) : (
                                 <div className="flex-1 flex flex-col items-center justify-center p-10 text-center gap-3">
-                                    <BookOpen className="h-10 w-10 text-slate-200" />
+                                    <BookOpen className="h-10 w-10 text-slate-200 dark:text-slate-700" />
                                     <p className="text-slate-400 text-sm">
                                         Add words to your deck to get a Word of the Day.
                                     </p>
@@ -476,16 +476,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         </div>
 
                         {/* Progress Breakdown */}
-                        <div className="bg-white rounded-3xl border border-slate-100 shadow-sm shadow-slate-100 overflow-hidden flex flex-col">
-                            <div className="px-6 pt-6 pb-4 border-b border-slate-50 flex items-center gap-2">
+                        <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm shadow-slate-100 dark:shadow-none overflow-hidden flex flex-col">
+                            <div className="px-6 pt-6 pb-4 border-b border-slate-50 dark:border-slate-700 flex items-center gap-2">
                                 <TrendingUp className="h-4 w-4 text-brand-500" />
-                                <h2 className="font-semibold text-slate-800 text-sm uppercase tracking-wider">Progress</h2>
+                                <h2 className="font-semibold text-slate-800 dark:text-slate-100 text-sm uppercase tracking-wider">Progress</h2>
                             </div>
 
                             <div className="p-6 flex flex-col gap-4 flex-1">
                                 {cards.length === 0 ? (
                                     <div className="flex-1 flex flex-col items-center justify-center text-center gap-3">
-                                        <Brain className="h-10 w-10 text-slate-200" />
+                                        <Brain className="h-10 w-10 text-slate-200 dark:text-slate-700" />
                                         <p className="text-slate-400 text-sm">Start adding cards to track progress.</p>
                                     </div>
                                 ) : (
@@ -497,11 +497,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                             { label: 'Mastered', count: masteredCount, total: cards.length, color: 'bg-green-500' },
                                         ].map(({ label, count, total, color }) => (
                                             <div key={label} className="space-y-1.5">
-                                                <div className="flex justify-between text-xs text-slate-500 font-medium">
+                                                <div className="flex justify-between text-xs text-slate-500 dark:text-slate-400 font-medium">
                                                     <span>{label}</span>
-                                                    <span className="text-slate-700 font-semibold">{count} <span className="text-slate-400 font-normal">/ {total}</span></span>
+                                                    <span className="text-slate-700 dark:text-slate-200 font-semibold">{count} <span className="text-slate-400 font-normal">/ {total}</span></span>
                                                 </div>
-                                                <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                                                <div className="h-2 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
                                                     <div
                                                         className={`h-full ${color} rounded-full transition-all duration-700`}
                                                         style={{ width: total > 0 ? `${(count / total) * 100}%` : '0%' }}
@@ -511,15 +511,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                         ))}
 
                                         {/* Streak info */}
-                                        <div className="mt-2 pt-4 border-t border-slate-50 grid grid-cols-2 gap-4">
+                                        <div className="mt-2 pt-4 border-t border-slate-50 dark:border-slate-700 grid grid-cols-2 gap-4">
                                             <div className="text-center">
-                                                <p className="text-2xl font-bold text-slate-900">{currentStreak}</p>
+                                                <p className="text-2xl font-bold text-slate-900 dark:text-white">{currentStreak}</p>
                                                 <p className="text-xs text-slate-400 mt-0.5 flex items-center justify-center gap-1">
                                                     <Flame className="h-3 w-3 text-orange-400" /> Current Streak
                                                 </p>
                                             </div>
-                                            <div className="text-center border-l border-slate-100">
-                                                <p className="text-2xl font-bold text-slate-900">{longestStreak}</p>
+                                            <div className="text-center border-l border-slate-100 dark:border-slate-700">
+                                                <p className="text-2xl font-bold text-slate-900 dark:text-white">{longestStreak}</p>
                                                 <p className="text-xs text-slate-400 mt-0.5 flex items-center justify-center gap-1">
                                                     <Star className="h-3 w-3 text-amber-400" /> Longest Streak
                                                 </p>
@@ -541,11 +541,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
                     {/* ── Recently Added ──────────────────────────────────────────────── */}
                     {recentCards.length > 0 && (
-                        <div className="bg-white rounded-3xl border border-slate-100 shadow-sm shadow-slate-100 overflow-hidden">
-                            <div className="px-6 pt-6 pb-4 border-b border-slate-50 flex items-center justify-between">
+                        <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm shadow-slate-100 dark:shadow-none overflow-hidden">
+                            <div className="px-6 pt-6 pb-4 border-b border-slate-50 dark:border-slate-700 flex items-center justify-between">
                                 <div className="flex items-center gap-2">
                                     <Clock className="h-4 w-4 text-slate-400" />
-                                    <h2 className="font-semibold text-slate-800 text-sm uppercase tracking-wider">Recently Added</h2>
+                                    <h2 className="font-semibold text-slate-800 dark:text-slate-100 text-sm uppercase tracking-wider">Recently Added</h2>
                                 </div>
                                 <button
                                     onClick={() => onNavigate('flashcards')}
@@ -562,9 +562,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                         <button
                                             key={card.id}
                                             onClick={() => openCard(card)}
-                                            className="group bg-slate-50 hover:bg-brand-50 border border-slate-100 hover:border-brand-200 rounded-2xl p-4 text-left transition-all hover:shadow-sm"
+                                            className="group bg-slate-50 dark:bg-slate-900/50 hover:bg-brand-50 dark:hover:bg-brand-900/20 border border-slate-100 dark:border-slate-700 hover:border-brand-200 dark:hover:border-brand-700 rounded-2xl p-4 text-left transition-all hover:shadow-sm"
                                         >
-                                            <p className="font-serif font-bold text-slate-900 text-base truncate group-hover:text-brand-700 transition-colors">
+                                            <p className="font-serif font-bold text-slate-900 dark:text-white text-base truncate group-hover:text-brand-700 dark:group-hover:text-brand-400 transition-colors">
                                                 {card.word}
                                             </p>
                                             <p className="text-slate-400 text-xs italic truncate mt-0.5">{card.partOfSpeech}</p>

@@ -128,8 +128,8 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
   return (
     <div className="max-w-2xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="text-center space-y-4">
-        <h1 className="text-5xl font-serif font-bold text-slate-900 tracking-tight">Lumina</h1>
-        <p className="text-slate-500 text-lg">Illuminate your vocabulary.</p>
+        <h1 className="text-5xl font-serif font-bold text-slate-900 dark:text-white tracking-tight">Lumina</h1>
+        <p className="text-slate-500 dark:text-slate-400 text-lg">Illuminate your vocabulary.</p>
       </div>
 
       <div ref={wrapperRef} className="relative group z-20">
@@ -145,13 +145,13 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
               if (suggestions.length > 0) setShowSuggestions(true);
             }}
             placeholder="Lookup a word..."
-            className="block w-full pl-11 pr-4 py-4 bg-white border border-slate-200 rounded-2xl text-lg shadow-sm placeholder:text-slate-400 focus:outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 transition-all"
+            className="block w-full pl-11 pr-4 py-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-2xl text-lg text-slate-900 dark:text-white shadow-sm placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 transition-all"
             autoComplete="off"
           />
           <button
             type="submit"
             disabled={loading || !query.trim()}
-            className="absolute right-2 top-2 bottom-2 bg-slate-900 text-white px-4 rounded-xl font-medium hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="absolute right-2 top-2 bottom-2 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-4 rounded-xl font-medium hover:bg-slate-800 dark:hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Search'}
           </button>
@@ -159,15 +159,15 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
 
         {/* Autocomplete Dropdown */}
         {showSuggestions && suggestions.length > 0 && (
-          <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-100 dark:border-slate-700 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
             <ul>
               {suggestions.map((word, index) => (
                 <li
                   key={index}
                   onClick={() => handleSuggestionClick(word)}
-                  className="px-4 py-3 flex items-center gap-3 hover:bg-slate-50 cursor-pointer text-slate-700 transition-colors border-b border-slate-50 last:border-none"
+                  className="px-4 py-3 flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200 transition-colors border-b border-slate-50 dark:border-slate-700 last:border-none"
                 >
-                  <Search className="h-4 w-4 text-slate-300" />
+                  <Search className="h-4 w-4 text-slate-300 dark:text-slate-500" />
                   <span className="font-medium">{word}</span>
                 </li>
               ))}
@@ -177,14 +177,14 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
       </div>
 
       {error && (
-        <div className="p-4 bg-red-50 text-red-600 rounded-xl text-center">
+        <div className="p-4 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-xl text-center">
           <p>{error}</p>
           {typoSuggestion && (
-            <p className="mt-2 text-slate-600">
+            <p className="mt-2 text-slate-600 dark:text-slate-300">
               Did you mean{" "}
               <button
                 onClick={() => handleSuggestionClick(typoSuggestion)}
-                className="font-bold text-brand-600 hover:underline"
+                className="font-bold text-brand-600 dark:text-brand-400 hover:underline"
               >
                 {typoSuggestion}
               </button>
@@ -195,17 +195,17 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
       )}
 
       {result && (
-        <div className="bg-white rounded-3xl shadow-xl shadow-slate-200/50 overflow-hidden border border-slate-100">
-          <div className="p-8 border-b border-slate-100 bg-slate-50/50">
+        <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-xl shadow-slate-200/50 dark:shadow-none overflow-hidden border border-slate-100 dark:border-slate-700">
+          <div className="p-8 border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/30">
             <div className="flex items-baseline gap-4 flex-wrap">
-              <h2 className="text-4xl font-serif font-bold text-slate-900">{result.word}</h2>
+              <h2 className="text-4xl font-serif font-bold text-slate-900 dark:text-white">{result.word}</h2>
               {result.phonetic && (
-                <span className="text-xl text-slate-500 font-serif italic">{result.phonetic}</span>
+                <span className="text-xl text-slate-500 dark:text-slate-400 font-serif italic">{result.phonetic}</span>
               )}
               {result.audio && (
                 <button
                   onClick={() => new Audio(result.audio!).play()}
-                  className="p-1.5 text-slate-400 hover:text-brand-500 hover:bg-brand-50 rounded-full transition-colors"
+                  className="p-1.5 text-slate-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded-full transition-colors"
                   title="Listen to pronunciation"
                 >
                   <Volume2 className="h-6 w-6" />
@@ -216,7 +216,7 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
 
           <div className="p-8 space-y-8">
             {result.image && (
-              <div className="mb-6 rounded-2xl overflow-hidden shadow-sm border border-slate-100 max-h-64 flex justify-center bg-slate-50 items-center">
+              <div className="mb-6 rounded-2xl overflow-hidden shadow-sm border border-slate-100 dark:border-slate-700 max-h-64 flex justify-center bg-slate-50 dark:bg-slate-900 items-center">
                 <img
                   src={result.image}
                   alt={`Visual mnemonic for ${result.word}`}
@@ -228,10 +228,10 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
             {result.meanings?.map((meaning, idx) => (
               <div key={`${meaning.partOfSpeech}-${idx}`} className="space-y-4">
                 <div className="flex items-center gap-3">
-                  <span className="px-3 py-1 bg-slate-100 text-slate-600 text-sm font-semibold rounded-full uppercase tracking-wider">
+                  <span className="px-3 py-1 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-sm font-semibold rounded-full uppercase tracking-wider">
                     {meaning.partOfSpeech}
                   </span>
-                  <div className="h-px bg-slate-100 flex-grow"></div>
+                  <div className="h-px bg-slate-100 dark:bg-slate-700 flex-grow"></div>
                 </div>
 
                 <div className="space-y-6">
@@ -241,11 +241,11 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
 
                     return (
                       <div key={dIdx} className="group relative pl-4 border-l-2 border-transparent hover:border-brand-200 transition-colors">
-                        <p className="text-slate-800 text-lg leading-relaxed">
+                        <p className="text-slate-800 dark:text-slate-200 text-lg leading-relaxed">
                           {def.definition}
                         </p>
                         {def.example && (
-                          <p className="mt-2 text-slate-500 italic font-serif">
+                          <p className="mt-2 text-slate-500 dark:text-slate-400 italic font-serif">
                             "{def.example}"
                           </p>
                         )}
@@ -262,9 +262,9 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
                               }
                             }}
                             className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all
-                              ${isSaved
-                                ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                                : 'bg-slate-50 text-slate-600 hover:bg-brand-50 hover:text-brand-600'
+                                  ${isSaved
+                                ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-900/50'
+                                : 'bg-slate-50 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-brand-50 dark:hover:bg-brand-900/30 hover:text-brand-600 dark:hover:text-brand-400'
                               }`}
                           >
                             {isSaved ? (
@@ -292,8 +292,8 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
 
       {!result && !loading && !error && (
         <div className="text-center py-20 opacity-50">
-          <BookOpen className="h-16 w-16 mx-auto text-slate-300 mb-4" />
-          <p className="text-slate-400 text-lg">Search for a word to get started</p>
+          <BookOpen className="h-16 w-16 mx-auto text-slate-300 dark:text-slate-600 mb-4" />
+          <p className="text-slate-400 dark:text-slate-500 text-lg">Search for a word to get started</p>
         </div>
       )}
 

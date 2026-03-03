@@ -45,7 +45,7 @@ export interface Flashcard {
   lastQuality?: number;
 }
 
-export type ViewState = 'dictionary' | 'flashcards' | 'study' | 'statistics';
+export type ViewState = 'dashboard' | 'dictionary' | 'flashcards' | 'study' | 'statistics';
 
 // File System Access API Types
 export interface FileSystemFileHandle {

@@ -40,22 +40,22 @@ const App: React.FC = () => {
   const [studyHistory, setStudyHistory] = useState<Record<string, number>>({});
   const [longestStreak, setLongestStreak] = useState(0);
 
-  // Dark Mode
-  const [isDark, setIsDark] = useState(() => {
-    try { return localStorage.getItem('lumina_theme') === 'dark'; }
-    catch { return false; }
-  });
+  // Dark Mode — follow device theme in real-time
+  const [isDark, setIsDark] = useState(() =>
+    window.matchMedia('(prefers-color-scheme: dark)').matches
+  );
 
   useEffect(() => {
-    const root = document.documentElement;
-    if (isDark) {
-      root.classList.add('dark');
-      localStorage.setItem('lumina_theme', 'dark');
-    } else {
-      root.classList.remove('dark');
-      localStorage.setItem('lumina_theme', 'light');
-    }
+    document.documentElement.classList.toggle('dark', isDark);
   }, [isDark]);
+
+  // Keep in sync whenever the OS switches light/dark
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const handler = (e: MediaQueryListEvent) => setIsDark(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
   const [isDataModalOpen, setIsDataModalOpen] = useState(false);
 
   // File System State

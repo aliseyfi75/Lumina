@@ -22,15 +22,10 @@
     rel="stylesheet">
 
   <script>
-    // Apply dark class before first paint to prevent flash
-    (function () {
-      try {
-        var theme = localStorage.getItem('lumina_theme');
-        if (theme === 'dark' || (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-          document.documentElement.classList.add('dark');
-        }
-      } catch (e) { }
-    })();
+    // Apply dark class before first paint based on system preference
+    if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      document.documentElement.classList.add('dark');
+    }
   </script>
   <style>
     /* Smooth theme transitions */

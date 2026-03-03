@@ -390,12 +390,13 @@ export const Statistics: React.FC<StatisticsProps> = ({ cards, studyHistory, lon
                     </div>
 
                     <div className="flex-1 flex flex-col justify-center gap-6">
-                        <div className="bg-slate-50/50 p-4 justify-center items-center flex rounded-xl border border-slate-100">
+                        <div className="bg-slate-50/50 p-4 justify-center items-center flex rounded-xl border border-slate-100 overflow-x-auto">
                             <div
-                                className="grid gap-[3px] rotate-90 sm:rotate-0"
+                                className="grid gap-[3px]"
                                 style={{
+                                    gridAutoFlow: 'column',
+                                    gridTemplateRows: 'repeat(7, minmax(0, 1fr))',
                                     gridTemplateColumns: 'repeat(13, minmax(0, 1fr))',
-                                    gridAutoRows: 'minmax(0, 1fr)',
                                     aspectRatio: '13 / 7',
                                     width: '100%',
                                     maxWidth: '320px'

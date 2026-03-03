@@ -34,6 +34,15 @@ export const TRACKING_ACTION = {
   CLOUD_PUSH: 'cloud_push',
 };
 
+// Human-readable page titles for GA reports
+export const PAGE_TITLES: Record<string, string> = {
+  '/': 'Home – Dashboard',
+  '/dictionary': 'Dictionary',
+  '/flashcards': 'Flashcards',
+  '/study': 'Study Session',
+  '/statistics': 'Statistics',
+};
+
 const ANONYMOUS_ID_KEY = 'lumina_anonymous_id';
 
 /**
@@ -55,7 +64,7 @@ export const initializeTracking = (userId?: string) => {
         anonId = crypto.randomUUID();
       } catch (e) {
         // Fallback for non-secure contexts where crypto.randomUUID is not available
-        anonId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        anonId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
           const r = Math.random() * 16 | 0;
           const v = c === 'x' ? r : (r & 0x3 | 0x8);
           return v.toString(16);
@@ -101,5 +110,21 @@ export const trackEvent = (
     event_category: category,
     event_label: label,
     value: value,
+  });
+};
+
+/**
+ * Tracks a page view when the route changes.
+ * Called from the RouteTracker component on every location change.
+ * @param path  The route path, e.g. '/flashcards'
+ * @param title Human-readable page title for GA reports
+ */
+export const trackPageView = (path: string, title: string) => {
+  if (typeof window.gtag !== 'function') return;
+
+  window.gtag('event', 'page_view', {
+    page_path: path,
+    page_title: title,
+    page_location: window.location.href,
   });
 };

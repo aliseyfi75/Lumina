@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import { WordEntry, Flashcard } from '../types';
 import { lookupWord, getSpellingSuggestions } from '../services/dictionaryService';
 import { getWordSuggestions } from '../services/suggestionService';
@@ -9,10 +10,11 @@ interface DictionaryProps {
   onAddCard: (entry: WordEntry, definition: string, example: string, partOfSpeech: string) => void;
   onRemoveCard: (id: string) => void;
   existingCards: Flashcard[];
-  initialQuery?: string;
 }
 
-export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard, existingCards, initialQuery }) => {
+export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard, existingCards }) => {
+  const location = useLocation();
+  const initialQuery: string | undefined = (location.state as { query?: string } | null)?.query;
   const [query, setQuery] = useState(initialQuery || '');
   const [result, setResult] = useState<WordEntry | null>(null);
   const [loading, setLoading] = useState(false);
@@ -97,13 +99,14 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
     }
   };
 
-  // Auto-search when an initialQuery is provided (e.g. navigating from Dashboard)
+  // Auto-search when navigated from Dashboard with a pre-filled query in router state
   useEffect(() => {
     if (initialQuery && initialQuery.trim()) {
       performSearch(initialQuery.trim());
     }
+    // Only run on mount — location.state doesn't change after initial render
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialQuery]);
+  }, []);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();

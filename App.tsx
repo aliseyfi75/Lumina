@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ViewState, Flashcard, WordEntry, FlashcardStatus, FileSystemFileHandle, CloudConfig } from './types';
+import { Routes, Route, NavLink, useNavigate, useLocation } from 'react-router-dom';
+import { Flashcard, WordEntry, FlashcardStatus, FileSystemFileHandle, CloudConfig } from './types';
 import { Dashboard } from './components/Dashboard';
 import { Dictionary } from './components/Dictionary';
 import { Flashcards } from './components/Flashcards';
@@ -8,7 +9,7 @@ import { Statistics } from './components/Statistics';
 import { DataManagerModal } from './components/DataManagerModal';
 import { generateJSON, parseFileContent, downloadJSON, saveToLocalFile } from './services/fileService';
 import { getDetails, getDeck, updateDeck } from './services/pantryService';
-import { initializeTracking, trackEvent, setTrackingUserId, TRACKING_CATEGORY, TRACKING_ACTION } from './services/trackingService';
+import { initializeTracking, trackEvent, setTrackingUserId, trackPageView, PAGE_TITLES, TRACKING_CATEGORY, TRACKING_ACTION } from './services/trackingService';
 import { Book, Layers, Database, Save, Cloud, BarChart2, Home } from 'lucide-react';
 import Confetti from 'react-confetti';
 import { useWindowSize } from 'react-use';
@@ -16,14 +17,29 @@ import { useWindowSize } from 'react-use';
 const LOCAL_STORAGE_KEY = 'lumina_cards_v1';
 const CLOUD_CONFIG_KEY = 'lumina_cloud_config';
 
+// ── RouteTracker ────────────────────────────────────────────────────────────
+// Fires a GA page_view event every time the hash route changes.
+const RouteTracker: React.FC = () => {
+  const location = useLocation();
+
+  useEffect(() => {
+    const title = PAGE_TITLES[location.pathname] ?? 'Lumina';
+    document.title = `Lumina – ${title}`;
+    trackPageView(location.pathname, title);
+  }, [location.pathname]);
+
+  return null;
+};
+
+// ── Main App ────────────────────────────────────────────────────────────────
 const App: React.FC = () => {
-  const [view, setView] = useState<ViewState>('dashboard');
+  const navigate = useNavigate();
+  const location = useLocation();
+
   const [cards, setCards] = useState<Flashcard[]>([]);
   const [studyHistory, setStudyHistory] = useState<Record<string, number>>({});
   const [longestStreak, setLongestStreak] = useState(0);
   const [isDataModalOpen, setIsDataModalOpen] = useState(false);
-  // query passed from Dashboard search → Dictionary
-  const [dictionaryQuery, setDictionaryQuery] = useState<string | undefined>(undefined);
 
   // File System State
   const [fileHandle, setFileHandle] = useState<FileSystemFileHandle | null>(null);
@@ -45,8 +61,6 @@ const App: React.FC = () => {
       prev.forEach(c => cardMap.set(c.id, c));
 
       incoming.forEach(c => {
-        // Check for duplicate by content (Word + Def) to prevent duplicates if IDs differ
-        // (e.g. from different devices creating same word)
         const duplicateId = Array.from(cardMap.keys()).find(key => {
           const existing = cardMap.get(key)!;
           return existing.word.toLowerCase() === c.word.toLowerCase() &&
@@ -55,12 +69,8 @@ const App: React.FC = () => {
 
         if (duplicateId) {
           const existing = cardMap.get(duplicateId)!;
-          // Merge strategy: Incoming data overwrites fields, but we keep the ID of the matched card
-          // unless we want to strictly enforce the incoming ID. 
-          // Here we merge properties onto the existing card.
           cardMap.set(duplicateId, { ...existing, ...c, id: duplicateId });
         } else {
-          // If ID exists directly (UUID match), overwrite. Else add new.
           cardMap.set(c.id, c);
         }
       });
@@ -123,7 +133,6 @@ const App: React.FC = () => {
         return c;
       });
 
-      // Set what we have locally so far
       setCards(initialCards);
 
       // Step C: Check Cloud Config and Merge
@@ -132,15 +141,12 @@ const App: React.FC = () => {
         try {
           const config = JSON.parse(savedCloudConfig);
           if (config.pantryId) {
-            // Fetch latest from cloud
             const cloudData = await getDeck(config.pantryId);
 
             if (cloudData.cards && cloudData.cards.length > 0) {
-              // Merge cloud data into our local/default data
               performMerge(cloudData.cards);
             }
 
-            // Merge study history safely
             if (cloudData.studyHistory) {
               setStudyHistory(prev => {
                 const merged = { ...prev };
@@ -155,37 +161,29 @@ const App: React.FC = () => {
               setLongestStreak(prev => Math.max(prev, cloudData.longestStreak!));
             }
 
-            // Only set config (enabling auto-save) after we've attempted the fetch
             setCloudConfig(config);
-
-            // Initialize tracking with the pantry ID as User ID
             initializeTracking(config.pantryId);
           } else {
             initializeTracking();
           }
         } catch (e) {
           console.error("Failed to load cloud backup on init", e);
-          // Retry loading config even if fetch failed, so user can try again later
           if (savedCloudConfig) setCloudConfig(JSON.parse(savedCloudConfig));
           initializeTracking();
         }
       } else {
         initializeTracking();
       }
-
-
     };
 
     initData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [performMerge]);
 
-  // 2. Persist to Local Storage (Always backup locally)
+  // 2. Persist to Local Storage
   useEffect(() => {
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(cards));
   }, [cards]);
-
-
 
   // 3. Auto-Save to Local File
   useEffect(() => {
@@ -205,9 +203,7 @@ const App: React.FC = () => {
 
   // 4. Auto-Save to Cloud
   useEffect(() => {
-    // Only auto-save if we have a config and data.
     if (!cloudConfig || !cards.length) return;
-
     const timeoutId = setTimeout(async () => {
       setIsCloudSaving(true);
       try {
@@ -217,10 +213,9 @@ const App: React.FC = () => {
       } finally {
         setIsCloudSaving(false);
       }
-    }, 2000); // 2s debounce for cloud to save API calls
+    }, 2000);
     return () => clearTimeout(timeoutId);
   }, [cards, studyHistory, longestStreak, cloudConfig]);
-
 
   // --- File Handlers ---
 
@@ -248,7 +243,6 @@ const App: React.FC = () => {
         }
         if (loadedData.studyHistory) setStudyHistory(prev => ({ ...prev, ...loadedData.studyHistory }));
         if (loadedData.longestStreak) setLongestStreak(prev => Math.max(prev, loadedData.longestStreak!));
-
         setFileHandle(handle);
       }
     } catch (err: any) {
@@ -288,23 +282,17 @@ const App: React.FC = () => {
   // --- Cloud Handlers ---
 
   const handleConnectCloud = async (pantryId: string) => {
-    // 1. Validate ID
     await getDetails(pantryId);
-
-    // 2. Fetch existing data (Merge)
     const cloudData = await getDeck(pantryId);
     if (cloudData.cards && cloudData.cards.length > 0) {
       performMerge(cloudData.cards);
     }
     if (cloudData.studyHistory) setStudyHistory(prev => ({ ...prev, ...cloudData.studyHistory }));
     if (cloudData.longestStreak) setLongestStreak(prev => Math.max(prev, cloudData.longestStreak!));
-    // If cloud is empty but we have local cards, we will push them via auto-save momentarily.
 
     const config = { pantryId };
     setCloudConfig(config);
     localStorage.setItem(CLOUD_CONFIG_KEY, JSON.stringify(config));
-
-    // Update tracking user ID
     setTrackingUserId(pantryId);
     trackEvent(TRACKING_ACTION.CONNECT_CLOUD, TRACKING_CATEGORY.CLOUD);
   };
@@ -313,8 +301,6 @@ const App: React.FC = () => {
     setCloudConfig(null);
     localStorage.removeItem(CLOUD_CONFIG_KEY);
     trackEvent(TRACKING_ACTION.DISCONNECT_CLOUD, TRACKING_CATEGORY.CLOUD);
-    // Note: We don't unset the user ID in tracking to keep the session continuity,
-    // or we could revert to anonymous ID if needed, but usually better to keep linking if possible during session.
   };
 
   const handleCloudPull = async () => {
@@ -367,7 +353,6 @@ const App: React.FC = () => {
     trackEvent(TRACKING_ACTION.UPDATE_STATUS, TRACKING_CATEGORY.FLASHCARDS, status);
   };
 
-  // Helper to re-calculate current streak to update longest streak
   const getLocalDateString = (d: Date) => {
     const year = d.getFullYear();
     const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -380,13 +365,11 @@ const App: React.FC = () => {
     let currentDate = new Date();
     const todayStr = getLocalDateString(currentDate);
 
-    // Check if we studied today or yesterday to continue streak
     if (!history[todayStr] || history[todayStr] === 0) {
       currentDate.setDate(currentDate.getDate() - 1);
       const yesterdayStr = getLocalDateString(currentDate);
-
       if (!history[yesterdayStr] || history[yesterdayStr] === 0) {
-        return 0; // No activity today or yesterday, streak is 0
+        return 0;
       }
     }
 
@@ -404,23 +387,19 @@ const App: React.FC = () => {
         ...prev,
         [today]: (prev[today] || 0) + 1
       };
-
       const newCurrentStreak = calculateCurrentStreak(updatedHistory);
       setLongestStreak(prevStreak => Math.max(prevStreak, newCurrentStreak));
-
       return updatedHistory;
     });
   };
 
   const handleSessionComplete = () => {
-    // Record that a study session was completed today to increment streak
     recordActivity();
   };
 
-  // Called from Dashboard search bar — navigate to Dictionary with a pre-filled query
+  // Navigate from Dashboard search → Dictionary, passing query via router state
   const handleQuickSearch = (word: string) => {
-    setDictionaryQuery(word);
-    setView('dictionary');
+    navigate('/dictionary', { state: { query: word } });
   };
 
   const handleReviewCard = (id: string, quality: number) => {
@@ -443,16 +422,16 @@ const App: React.FC = () => {
         const ONE_DAY = 24 * 60 * 60 * 1000;
 
         if (repetition === 1) {
-          nextReviewDate = now + ONE_DAY;          // Tomorrow
+          nextReviewDate = now + ONE_DAY;
         } else if (repetition === 2) {
-          nextReviewDate = now + ONE_DAY * 7;      // 1 Week
+          nextReviewDate = now + ONE_DAY * 7;
         } else if (repetition === 3) {
-          nextReviewDate = now + ONE_DAY * 14;     // 2 Weeks
+          nextReviewDate = now + ONE_DAY * 14;
         } else if (repetition === 4) {
-          nextReviewDate = now + ONE_DAY * 30;     // 1 Month
+          nextReviewDate = now + ONE_DAY * 30;
         } else {
-          status = FlashcardStatus.Mastered;       // Mastered
-          nextReviewDate = now + ONE_DAY * 365;    // Far future, though filtered out
+          status = FlashcardStatus.Mastered;
+          nextReviewDate = now + ONE_DAY * 365;
         }
       } else if (quality === 5) { // Mastered
         status = FlashcardStatus.Mastered;
@@ -460,9 +439,9 @@ const App: React.FC = () => {
 
       return {
         ...card,
-        interval, // kept for backward compatibility if needed
+        interval,
         repetition,
-        easinessFactor, // kept for backward compatibility if needed
+        easinessFactor,
         nextReviewDate,
         status,
         lastQuality: quality,
@@ -478,23 +457,15 @@ const App: React.FC = () => {
     trackEvent(TRACKING_ACTION.DELETE_CARD, TRACKING_CATEGORY.FLASHCARDS);
   };
 
-  // Track View Changes
-  useEffect(() => {
-    trackEvent(TRACKING_ACTION.VIEW_TAB, TRACKING_CATEGORY.ENGAGEMENT, view);
-  }, [view]);
-
   // Milestone Confetti Logic
   useEffect(() => {
     const masteredCount = cards.filter(c => c.status === FlashcardStatus.Mastered).length;
 
-    // Check if we crossed a century milestone (100, 200, 300...)
     if (masteredCount > 0 &&
       masteredCount % 100 === 0 &&
       masteredCount > prevMasteredCount) {
 
       setShowConfetti(true);
-
-      // Stop confetti after 5 seconds
       setTimeout(() => {
         setShowConfetti(false);
       }, 5000);
@@ -502,13 +473,21 @@ const App: React.FC = () => {
       trackEvent('milestone_reached', TRACKING_CATEGORY.ENGAGEMENT, `mastered_${masteredCount}`);
     }
 
-    // Always update the prev count so we only trigger when moving UP to a milestone,
-    // not when deleting cards and dropping back down.
     setPrevMasteredCount(masteredCount);
   }, [cards, prevMasteredCount]);
 
+  // Nav link active class helper
+  const navLinkClass = ({ isActive }: { isActive: boolean }) =>
+    `flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${isActive
+      ? 'bg-white text-brand-600 shadow-sm'
+      : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'
+    }`;
+
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-800 font-sans">
+      {/* GA page-view tracker — fires on every route change */}
+      <RouteTracker />
+
       {showConfetti && (
         <div className="fixed inset-0 z-[100] pointer-events-none">
           <Confetti
@@ -520,34 +499,44 @@ const App: React.FC = () => {
           />
         </div>
       )}
+
       <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-200">
         <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2 cursor-pointer" onClick={() => setView('dashboard')}>
+          <NavLink to="/" className="flex items-center gap-2 cursor-pointer">
             <div className="w-8 h-8 bg-brand-600 rounded-lg flex items-center justify-center text-white font-serif font-bold text-xl shadow-lg shadow-brand-500/30">
               L
             </div>
             <span className="font-bold text-xl tracking-tight text-slate-900 hidden sm:block">Lumina</span>
-          </div>
+          </NavLink>
 
           <div className="flex items-center gap-2">
             <nav className="flex items-center gap-1 bg-slate-100/50 p-1 rounded-xl mr-2">
-              <button onClick={() => setView('dashboard')} className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${view === 'dashboard' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>
+              <NavLink to="/" end className={navLinkClass}>
                 <Home className="h-4 w-4" />
                 <span className="hidden sm:inline">Home</span>
-              </button>
-              <button onClick={() => setView('dictionary')} className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${view === 'dictionary' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>
+              </NavLink>
+              <NavLink to="/dictionary" className={navLinkClass}>
                 <Book className="h-4 w-4" />
                 <span className="hidden sm:inline">Dictionary</span>
-              </button>
-              <button onClick={() => setView('flashcards')} className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${view === 'flashcards' || view === 'study' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>
+              </NavLink>
+              <NavLink
+                to="/flashcards"
+                className={({ isActive }) =>
+                  navLinkClass({ isActive: isActive || location.pathname === '/study' })
+                }
+              >
                 <Layers className="h-4 w-4" />
                 <span className="hidden sm:inline">Flashcards</span>
-                {cards.length > 0 && <span className="bg-slate-200 text-slate-600 text-[10px] px-1.5 py-0.5 rounded-full min-w-[20px] text-center">{cards.length}</span>}
-              </button>
-              <button onClick={() => setView('statistics')} className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${view === 'statistics' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>
+                {cards.length > 0 && (
+                  <span className="bg-slate-200 text-slate-600 text-[10px] px-1.5 py-0.5 rounded-full min-w-[20px] text-center">
+                    {cards.length}
+                  </span>
+                )}
+              </NavLink>
+              <NavLink to="/statistics" className={navLinkClass}>
                 <BarChart2 className="h-4 w-4" />
                 <span className="hidden sm:inline">Statistics</span>
-              </button>
+              </NavLink>
             </nav>
 
             <button
@@ -562,11 +551,65 @@ const App: React.FC = () => {
       </header>
 
       <main className="flex-1 max-w-5xl mx-auto w-full px-4 py-8">
-        {view === 'dashboard' && <Dashboard cards={cards} studyHistory={studyHistory} longestStreak={longestStreak} onNavigate={setView} onQuickSearch={handleQuickSearch} />}
-        {view === 'dictionary' && <Dictionary onAddCard={handleAddCard} onRemoveCard={handleDeleteCard} existingCards={cards} initialQuery={dictionaryQuery} />}
-        {view === 'flashcards' && <Flashcards cards={cards} onStartStudy={() => setView('study')} onDeleteCard={handleDeleteCard} onReviewCard={handleReviewCard} onOpenImport={() => setIsDataModalOpen(true)} />}
-        {view === 'study' && <StudySession cards={cards} onReviewCard={handleReviewCard} onSessionComplete={handleSessionComplete} onExit={() => setView('flashcards')} />}
-        {view === 'statistics' && <Statistics cards={cards} studyHistory={studyHistory} longestStreak={longestStreak} />}
+        <Routes>
+          <Route
+            path="/"
+            element={
+              <Dashboard
+                cards={cards}
+                studyHistory={studyHistory}
+                longestStreak={longestStreak}
+                onNavigate={(view) => navigate(`/${view === 'dashboard' ? '' : view}`)}
+                onQuickSearch={handleQuickSearch}
+              />
+            }
+          />
+          <Route
+            path="/dictionary"
+            element={
+              <Dictionary
+                onAddCard={handleAddCard}
+                onRemoveCard={handleDeleteCard}
+                existingCards={cards}
+              />
+            }
+          />
+          <Route
+            path="/flashcards"
+            element={
+              <Flashcards
+                cards={cards}
+                onStartStudy={() => navigate('/study')}
+                onDeleteCard={handleDeleteCard}
+                onReviewCard={handleReviewCard}
+                onOpenImport={() => setIsDataModalOpen(true)}
+              />
+            }
+          />
+          <Route
+            path="/study"
+            element={
+              <StudySession
+                cards={cards}
+                onReviewCard={handleReviewCard}
+                onSessionComplete={handleSessionComplete}
+                onExit={() => navigate('/flashcards')}
+              />
+            }
+          />
+          <Route
+            path="/statistics"
+            element={
+              <Statistics
+                cards={cards}
+                studyHistory={studyHistory}
+                longestStreak={longestStreak}
+              />
+            }
+          />
+          {/* Catch-all — redirect unknown hashes to home */}
+          <Route path="*" element={<Dashboard cards={cards} studyHistory={studyHistory} longestStreak={longestStreak} onNavigate={(view) => navigate(`/${view === 'dashboard' ? '' : view}`)} onQuickSearch={handleQuickSearch} />} />
+        </Routes>
       </main>
 
       {/* Auto-Save Indicators */}

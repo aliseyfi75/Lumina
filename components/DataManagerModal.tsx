@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { X, Database, Download, Upload, CheckCircle, AlertCircle, RefreshCw, Save, AlertTriangle, Cloud, ExternalLink } from 'lucide-react';
+import { X, Database, Download, Upload, CheckCircle, AlertCircle, RefreshCw, Save, AlertTriangle, Cloud, ExternalLink, HardDrive, ShieldCheck, ShieldAlert } from 'lucide-react';
 import { CloudConfig } from '../types';
 
 interface DataManagerModalProps {
@@ -7,13 +7,19 @@ interface DataManagerModalProps {
   onClose: () => void;
   onExport: () => void;
   onImport: (file: File) => Promise<void>;
-  onConnectFile?: () => void;
-  onChangeFile?: () => void;
+  onConnectFile?: () => Promise<boolean>;
+  onChangeFile?: () => Promise<boolean>;
   onDisconnectFile?: () => Promise<void>;
   onManualSave?: () => Promise<void>;
   isFileConnected: boolean;
   connectedFileName?: string;
   cardCount: number;
+
+  // Storage metadata
+  persistenceStatus: 'granted' | 'denied' | 'prompt' | 'unsupported';
+  storageEstimate: { usage: number; quota: number } | null;
+  onRequestPersistence: () => Promise<boolean>;
+  lastSavedAt: number | null;
 
   // Cloud Props
   cloudConfig: CloudConfig | null;
@@ -35,6 +41,10 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
   isFileConnected,
   connectedFileName,
   cardCount,
+  persistenceStatus,
+  storageEstimate,
+  onRequestPersistence,
+  lastSavedAt,
   cloudConfig,
   onConnectCloud,
   onDisconnectCloud,
@@ -45,6 +55,21 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
   const [status, setStatus] = useState<{ type: 'idle' | 'success' | 'error', msg: string }>({ type: 'idle', msg: '' });
   const [isProcessing, setIsProcessing] = useState(false);
   const [isIframe, setIsIframe] = useState(false);
+
+  const formatBytes = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const formatLastSaved = (ts: number | null): string => {
+    if (!ts) return 'Not yet saved';
+    const diff = Math.floor((Date.now() - ts) / 1000);
+    if (diff < 5) return 'Just now';
+    if (diff < 60) return `${diff}s ago`;
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    return new Date(ts).toLocaleTimeString();
+  };
 
   // Cloud Form State
   const [pantryIdInput, setPantryIdInput] = useState('');
@@ -84,19 +109,16 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
 
   const handleConnectLocal = async () => {
     if (onConnectFile) {
-      try {
-        await onConnectFile();
-        showMessage('success', 'File connected! Auto-save enabled.');
-      } catch (e) { /* Cancelled */ }
+      const connected = await onConnectFile();
+      if (connected) showMessage('success', 'File linked! Auto-save enabled.');
+      // If cancelled (returns false), show nothing — user chose not to pick a file
     }
   };
 
   const handleChangeLocalFile = async () => {
     if (onChangeFile) {
-      try {
-        await onChangeFile();
-        showMessage('success', 'Sync file updated!');
-      } catch (e) { /* Cancelled */ }
+      const changed = await onChangeFile();
+      if (changed) showMessage('success', 'Sync file updated!');
     }
   };
 
@@ -160,6 +182,23 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
     }
   };
 
+  const handleRequestPersistence = async () => {
+    setIsProcessing(true);
+    try {
+      const granted = await onRequestPersistence();
+      if (granted) {
+        showMessage('success', 'Persistent storage granted!');
+      } else {
+        showMessage('error',
+          'Not granted. Chrome silently decides based on engagement (bookmarks, PWA install, etc.). Try installing the app.');
+      }
+    } catch {
+      showMessage('error', 'Persistent storage is not supported in this browser.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
@@ -176,7 +215,155 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
           </button>
         </div>
 
-        <div className="p-6 space-y-6 overflow-y-auto custom-scrollbar">
+        <div className="p-6 space-y-5 overflow-y-auto custom-scrollbar">
+
+          {/* ── Local Storage (merged) ──────────────────────────────────── */}
+          {(() => {
+            const isStorageConnected = persistenceStatus === 'granted' || isFileConnected;
+            const storageAddress = isFileConnected ? connectedFileName : 'Browser Database (IndexedDB)';
+            const isIdbOnly = isStorageConnected && !isFileConnected;
+            const borderClass = isStorageConnected
+              ? 'border-green-100 dark:border-green-800/40 bg-green-50/40 dark:bg-green-900/10'
+              : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/30';
+
+            return (
+              <div className={`p-4 rounded-xl border space-y-3 ${borderClass}`}>
+
+                {/* Header row: title + persistence badge */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <HardDrive className={`h-4 w-4 ${isStorageConnected ? 'text-green-600' : 'text-slate-400'}`} />
+                    <span className="text-sm font-semibold text-slate-800 dark:text-white">Local Storage</span>
+                  </div>
+                  {/* Persistence badge — green if IDB is persistent OR a file is linked */}
+                  {persistenceStatus === 'granted' || isFileConnected ? (
+                    <span className="flex items-center gap-1 px-2 py-0.5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 text-[10px] font-bold rounded-full uppercase tracking-wider">
+                      <ShieldCheck className="h-3 w-3" /> Persistent
+                    </span>
+                  ) : persistenceStatus === 'denied' || persistenceStatus === 'prompt' ? (
+                    <span className="flex items-center gap-1 px-2 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 text-[10px] font-bold rounded-full uppercase tracking-wider">
+                      <ShieldAlert className="h-3 w-3" /> Standard
+                    </span>
+                  ) : null}
+                </div>
+
+                {/* Stats row: type · used · last saved */}
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="bg-white dark:bg-slate-800 rounded-lg p-2 border border-slate-100 dark:border-slate-700">
+                    <p className="text-[10px] text-slate-400">Type</p>
+                    <p className="text-xs font-semibold text-slate-800 dark:text-white mt-0.5">
+                      {isFileConnected ? 'Local File' : 'Browser Data'}
+                    </p>
+                  </div>
+                  <div className="bg-white dark:bg-slate-800 rounded-lg p-2 border border-slate-100 dark:border-slate-700">
+                    <p className="text-[10px] text-slate-400">Used</p>
+                    <p className="text-xs font-semibold text-slate-800 dark:text-white mt-0.5">
+                      {storageEstimate ? formatBytes(storageEstimate.usage) : '–'}
+                    </p>
+                  </div>
+                  <div className="bg-white dark:bg-slate-800 rounded-lg p-2 border border-slate-100 dark:border-slate-700">
+                    <p className="text-[10px] text-slate-400">Last saved</p>
+                    <p className="text-xs font-semibold text-slate-800 dark:text-white mt-0.5">{formatLastSaved(lastSavedAt)}</p>
+                  </div>
+                </div>
+
+                {/* Export / Import */}
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={onExport}
+                    disabled={cardCount === 0 || isProcessing}
+                    className="flex items-center justify-center gap-1.5 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-xs font-medium rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 hover:text-brand-600 dark:hover:text-brand-400 transition-colors disabled:opacity-40"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    Export JSON
+                  </button>
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isProcessing}
+                    className="flex items-center justify-center gap-1.5 py-2 bg-brand-600 text-white text-xs font-medium rounded-lg hover:bg-brand-700 transition-colors shadow-sm shadow-brand-500/20 disabled:opacity-40"
+                  >
+                    <Upload className="h-3.5 w-3.5" />
+                    Import JSON
+                  </button>
+                </div>
+
+                {/* File link sub-row */}
+                <div className={`flex items-center justify-between pt-2 border-t ${isStorageConnected
+                  ? 'border-green-200/60 dark:border-green-800/40'
+                  : 'border-slate-100 dark:border-slate-700'
+                  }`}>
+                  <div className={`text-xs flex items-center gap-1.5 ${isFileConnected ? 'text-green-700 dark:text-green-400' : 'text-slate-400'
+                    }`}>
+                    {isFileConnected
+                      ? <><RefreshCw className="h-3 w-3 animate-spin" style={{ animationDuration: '3s' }} /><span className="font-mono truncate max-w-[140px]" title={connectedFileName}>{connectedFileName}</span></>
+                      : isIdbOnly
+                        ? <><RefreshCw className="h-3 w-3 animate-spin" style={{ animationDuration: '3s' }} /><span>Auto-saving to database</span></>
+                        : <span className="flex items-center gap-1 px-2 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 text-[10px] font-bold rounded-full uppercase tracking-wider"><ShieldAlert className="h-3 w-3" /> No file linked</span>
+                    }
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {isFileConnected && (
+                      <button
+                        onClick={handleManualLocalSave}
+                        disabled={isProcessing}
+                        className="px-2 py-1 bg-green-600 text-white text-[10px] font-medium rounded hover:bg-green-700 disabled:opacity-50"
+                      >
+                        Save Now
+                      </button>
+                    )}
+                    {isFileConnected && isFileSystemAvailable && (
+                      <button
+                        onClick={handleChangeLocalFile}
+                        disabled={isProcessing}
+                        className="text-xs text-slate-500 hover:text-brand-600 dark:hover:text-brand-400 transition-colors"
+                      >
+                        Change
+                      </button>
+                    )}
+                    {isFileConnected && (
+                      <>
+                        <span className="text-slate-300 dark:text-slate-600">·</span>
+                        <button
+                          onClick={handleDisconnectLocalFile}
+                          disabled={isProcessing}
+                          className="text-xs text-red-500 hover:underline"
+                        >
+                          Unlink
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Request Persistent Storage — hidden when file is linked (file IS the persistent location) */}
+                {persistenceStatus !== 'granted' && !isFileConnected && persistenceStatus !== 'unsupported' && (
+                  <button
+                    onClick={handleRequestPersistence}
+                    disabled={isProcessing}
+                    className="w-full py-2 text-xs font-medium border border-dashed border-emerald-400 dark:border-emerald-700 text-emerald-700 dark:text-emerald-400 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                    Request Persistent Storage
+                  </button>
+                )}
+
+                {/* Link a File — hidden when persistence already granted (no need for a file just for persistence) */}
+                {isFileSystemAvailable && !isFileConnected && persistenceStatus !== 'granted' && (
+                  <button
+                    onClick={handleConnectLocal}
+                    disabled={isProcessing}
+                    className="w-full py-2 text-xs font-medium border border-dashed border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:border-brand-400 hover:text-brand-600 dark:hover:text-brand-400 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    <Save className="h-3.5 w-3.5" />
+                    Link a File for Auto-Save
+                  </button>
+                )}
+
+              </div>
+            );
+          })()}
+
+
 
           {/* Cloud Sync Section */}
           <div className={`p-5 rounded-xl border transition-colors ${cloudConfig ? 'bg-sky-50/50 dark:bg-sky-900/10 border-sky-100 dark:border-sky-800/40' : 'bg-slate-50 dark:bg-slate-900/30 border-slate-200 dark:border-slate-700'}`}>
@@ -255,110 +442,15 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
             )}
           </div>
 
-          <div className="h-px bg-slate-100 dark:bg-slate-700"></div>
 
-          {/* Local File Sync Section */}
-          <div className={`p-4 rounded-xl border ${isFileConnected ? 'border-green-100 dark:border-green-800/40 bg-green-50/50 dark:bg-green-900/10' : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/30'}`}>
-            {isFileSystemAvailable ? (
-              isFileConnected ? (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-                        <Save className="h-4 w-4 text-green-600" />
-                        Local JSON Connected
-                      </h3>
-                      <p className="text-xs text-green-700 dark:text-green-400 mt-1 truncate" title={connectedFileName}>
-                        {connectedFileName}
-                      </p>
-                    </div>
-                    <button
-                      onClick={handleManualLocalSave}
-                      disabled={isProcessing}
-                      className="shrink-0 px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 shadow-sm disabled:opacity-50"
-                    >
-                      Save Now
-                    </button>
-                  </div>
-                  <div className="flex items-center justify-between pt-2 border-t border-green-200/60 dark:border-green-800/40">
-                    <div className="text-xs text-green-700 dark:text-green-400 flex items-center gap-1.5">
-                      <RefreshCw className="h-3 w-3 animate-spin" style={{ animationDuration: '3s' }} />
-                      Auto-save enabled — changes saved automatically
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={handleChangeLocalFile}
-                        disabled={isProcessing}
-                        className="text-xs text-slate-500 hover:text-brand-600 dark:hover:text-brand-400 transition-colors"
-                      >
-                        Change File
-                      </button>
-                      <span className="text-slate-300 dark:text-slate-600">·</span>
-                      <button
-                        onClick={handleDisconnectLocalFile}
-                        disabled={isProcessing}
-                        className="text-xs text-red-500 hover:underline"
-                      >
-                        Disconnect
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex-1">
-                    <h3 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-                      <Save className="h-4 w-4" />
-                      Local JSON Auto-Save
-                    </h3>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                      Changes save automatically to a local file.
-                    </p>
-                  </div>
-                  <button
-                    onClick={handleConnectLocal}
-                    className="shrink-0 px-3 py-1.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 text-xs font-medium rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600"
-                  >
-                    Connect File
-                  </button>
-                </div>
-              )
-            ) : (
-              <div className="flex items-start gap-3 opacity-70">
-                <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0" />
-                <p className="text-xs text-slate-500">
-                  Local file auto-save unavailable in this browser. Use Cloud Sync or Export below.
-                </p>
-              </div>
-            )}
-          </div>
-
-
-          <div className="grid grid-cols-2 gap-4">
-            <button
-              onClick={onExport}
-              disabled={cardCount === 0}
-              className="py-2.5 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 text-sm font-medium rounded-xl hover:bg-slate-50 dark:hover:bg-slate-600 hover:text-brand-600 dark:hover:text-brand-400 hover:border-brand-200 transition-colors shadow-sm disabled:opacity-50"
-            >
-              Export JSON
-            </button>
-
-            <div className="relative">
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="w-full py-2.5 bg-brand-600 text-white text-sm font-medium rounded-xl hover:bg-brand-700 transition-colors shadow-sm shadow-brand-500/30"
-              >
-                Import JSON
-              </button>
-              <input
-                type="file"
-                ref={fileInputRef}
-                accept=".json,.csv"
-                className="hidden"
-                onChange={handleFileChange}
-              />
-            </div>
-          </div>
+          {/* Hidden file input for Import — triggered by inline Import button above */}
+          <input
+            type="file"
+            ref={fileInputRef}
+            accept=".json,.csv"
+            className="hidden"
+            onChange={handleFileChange}
+          />
 
           {/* Status Messages */}
           {status.type !== 'idle' && (

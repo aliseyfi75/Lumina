@@ -10,7 +10,7 @@ import { DataManagerModal } from './components/DataManagerModal';
 import { PwaInstallBanner } from './components/PwaInstallBanner';
 import { generateJSON, parseFileContent, downloadJSON, saveToLocalFile } from './services/fileService';
 import { getDetails, getDeck, updateDeck } from './services/pantryService';
-import { saveFileHandleToIDB, loadFileHandleFromIDB, clearFileHandleFromIDB } from './services/idbService';
+import { saveFileHandleToIDB, loadFileHandleFromIDB, clearFileHandleFromIDB, saveAppDataToIDB, loadAppDataFromIDB, requestPersistentStorage, checkPersistentStorage, getStorageEstimate } from './services/idbService';
 import { initializeTracking, trackEvent, setTrackingUserId, trackPageView, PAGE_TITLES, TRACKING_CATEGORY, TRACKING_ACTION } from './services/trackingService';
 import { Book, Layers, Database, Save, Cloud, BarChart2, Home, Sun, Moon, RefreshCw } from 'lucide-react';
 import Confetti from 'react-confetti';
@@ -79,6 +79,13 @@ const App: React.FC = () => {
   // Cloud Sync State
   const [cloudConfig, setCloudConfig] = useState<CloudConfig | null>(null);
   const [isCloudSaving, setIsCloudSaving] = useState(false);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [pendingCloudSync, setPendingCloudSync] = useState(false);
+
+  // Storage metadata
+  const [persistenceStatus, setPersistenceStatus] = useState<'granted' | 'denied' | 'prompt' | 'unsupported'>('prompt');
+  const [storageEstimate, setStorageEstimate] = useState<{ usage: number; quota: number } | null>(null);
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
 
   // Confetti State
   const { width, height } = useWindowSize();
@@ -152,25 +159,57 @@ const App: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // intentionally empty — reads tombstones via ref, not closure
 
-  // 1. Initial Load: Local Storage -> Fallback to CSV DB -> Merge Cloud -> Restore IDB File Handle
+  // 1. Initial Load: IDB -> localStorage migration -> Fallback CSV DB -> Cloud -> Restore file handle
   useEffect(() => {
     const initData = async () => {
       let initialCards: Flashcard[] = [];
+      let initialStudyHistory: Record<string, number> = {};
+      let initialLongestStreak = 0;
+      let initialDeletedCards: Record<string, number> = {};
 
-      // Step A: Load Local Storage
-      const savedCards = localStorage.getItem(LOCAL_STORAGE_KEY);
-      if (savedCards) {
-        try {
-          const parsed = JSON.parse(savedCards);
-          if (Array.isArray(parsed)) {
-            initialCards = parsed;
+      // Step A: Try IndexedDB first (primary store)
+      const idbData = await loadAppDataFromIDB();
+      if (idbData && idbData.cards && idbData.cards.length > 0) {
+        initialCards = idbData.cards;
+        initialStudyHistory = idbData.studyHistory ?? {};
+        initialLongestStreak = idbData.longestStreak ?? 0;
+        initialDeletedCards = idbData.deletedCards ?? {};
+      } else {
+        // Step A-fallback: migrate from localStorage (existing users)
+        const savedCards = localStorage.getItem(LOCAL_STORAGE_KEY);
+        if (savedCards) {
+          try {
+            const parsed = JSON.parse(savedCards);
+            if (Array.isArray(parsed)) {
+              initialCards = parsed;
+              // Migrate immediately so next load hits IDB
+              try {
+                await saveAppDataToIDB({ cards: parsed, studyHistory: {}, longestStreak: 0, deletedCards: {} });
+                localStorage.removeItem(LOCAL_STORAGE_KEY);
+              } catch { /* migration best-effort */ }
+            }
+          } catch (e) {
+            console.error('Failed to parse saved cards from localStorage', e);
           }
-        } catch (e) {
-          console.error("Failed to parse saved cards", e);
         }
       }
 
-      // Step B: Load Default JSON if Local is empty
+      // Restore tombstones into state early so performMerge honours them
+      if (Object.keys(initialDeletedCards).length > 0) {
+        const cutoff = Date.now() - TOMBSTONE_TTL;
+        const map = new Map<string, number>();
+        Object.entries(initialDeletedCards).forEach(([id, ts]) => { if (ts >= cutoff) map.set(id, ts); });
+        setDeletedCards(map);
+      }
+
+      if (initialStudyHistory && Object.keys(initialStudyHistory).length > 0) {
+        setStudyHistory(initialStudyHistory);
+      }
+      if (initialLongestStreak > 0) {
+        setLongestStreak(initialLongestStreak);
+      }
+
+      // Step B: Load Default JSON if still empty
       if (initialCards.length === 0) {
         try {
           const response = await fetch('./database/data.json');
@@ -180,15 +219,15 @@ const App: React.FC = () => {
             if (defaultData.cards.length > 0) {
               initialCards = defaultData.cards;
             }
-            if (Object.keys(studyHistory).length === 0 && defaultData.studyHistory) {
+            if (Object.keys(initialStudyHistory).length === 0 && defaultData.studyHistory) {
               setStudyHistory(defaultData.studyHistory);
             }
-            if (longestStreak === 0 && defaultData.longestStreak) {
+            if (initialLongestStreak === 0 && defaultData.longestStreak) {
               setLongestStreak(defaultData.longestStreak);
             }
           }
         } catch (e) {
-          console.warn("No default database found.", e);
+          console.warn('No default database found.', e);
         }
       }
 
@@ -234,7 +273,7 @@ const App: React.FC = () => {
             initializeTracking();
           }
         } catch (e) {
-          console.error("Failed to load cloud backup on init", e);
+          console.error('Failed to load cloud backup on init', e);
           if (savedCloudConfig) setCloudConfig(JSON.parse(savedCloudConfig));
           initializeTracking();
         }
@@ -251,23 +290,60 @@ const App: React.FC = () => {
           if (perm === 'granted') {
             setFileHandle(storedHandle);
           } else {
-            // Will need a user gesture to re-grant — store as pending
             setPendingHandle(storedHandle);
           }
         }
       } catch (e) {
         console.warn('Could not restore file handle from IDB', e);
       }
+
+      // Step E: Request persistent storage + refresh usage estimate
+      try {
+        const already = await checkPersistentStorage();
+        if (already) {
+          setPersistenceStatus('granted');
+        } else {
+          const granted = await requestPersistentStorage();
+          setPersistenceStatus(granted ? 'granted' : 'denied');
+        }
+      } catch {
+        setPersistenceStatus('unsupported');
+      }
+
+      const est = await getStorageEstimate();
+      if (est) setStorageEstimate(est);
     };
 
     initData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [performMerge]);
 
-  // 2. Persist to Local Storage
+  // 2. Persist to IndexedDB (primary store) and keep localStorage in sync for safety
   useEffect(() => {
+    if (!cards.length) return; // don't overwrite IDB with empty on first render
+    const data = { cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() };
+    saveAppDataToIDB(data)
+      .then(() => {
+        setLastSavedAt(Date.now());
+        // Refresh usage estimate periodically (cheap call)
+        getStorageEstimate().then(est => { if (est) setStorageEstimate(est); });
+      })
+      .catch(console.error);
+    // Keep localStorage as a secondary safety net (small overhead)
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(cards));
-  }, [cards]);
+  }, [cards, studyHistory, longestStreak]);
+
+  // Track online / offline status
+  useEffect(() => {
+    const goOnline = () => setIsOnline(true);
+    const goOffline = () => setIsOnline(false);
+    window.addEventListener('online', goOnline);
+    window.addEventListener('offline', goOffline);
+    return () => {
+      window.removeEventListener('online', goOnline);
+      window.removeEventListener('offline', goOffline);
+    };
+  }, []);
 
   // 3. Auto-Save to Local File
   useEffect(() => {
@@ -288,18 +364,45 @@ const App: React.FC = () => {
   // 4. Auto-Save to Cloud
   useEffect(() => {
     if (!cloudConfig || !cards.length) return;
+
+    if (!isOnline) {
+      // Mark dirty so we sync the moment connectivity returns
+      setPendingCloudSync(true);
+      return;
+    }
+
     const timeoutId = setTimeout(async () => {
       setIsCloudSaving(true);
       try {
         await updateDeck(cloudConfig.pantryId, { cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() });
+        setPendingCloudSync(false);
       } catch (error) {
-        console.error("Auto-save cloud failed:", error);
+        console.error('Auto-save cloud failed:', error);
+        setPendingCloudSync(true); // will retry when online
       } finally {
         setIsCloudSaving(false);
       }
     }, 2000);
     return () => clearTimeout(timeoutId);
-  }, [cards, studyHistory, longestStreak, cloudConfig]);
+  }, [cards, studyHistory, longestStreak, cloudConfig, isOnline]);
+
+  // 5. Flush pending sync when coming back online (or cloud config is restored)
+  useEffect(() => {
+    if (!isOnline || !cloudConfig || !pendingCloudSync || !cards.length) return;
+    const flush = async () => {
+      setIsCloudSaving(true);
+      try {
+        await updateDeck(cloudConfig.pantryId, { cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() });
+        setPendingCloudSync(false);
+      } catch (e) {
+        console.error('Pending sync flush failed:', e);
+      } finally {
+        setIsCloudSaving(false);
+      }
+    };
+    flush();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOnline, cloudConfig, pendingCloudSync]);
 
   // --- File Handlers ---
 
@@ -411,12 +514,34 @@ const App: React.FC = () => {
     localStorage.setItem(CLOUD_CONFIG_KEY, JSON.stringify(config));
     setTrackingUserId(pantryId);
     trackEvent(TRACKING_ACTION.CONNECT_CLOUD, TRACKING_CATEGORY.CLOUD);
+
+    // Immediately push any local data that the cloud may not have yet
+    if (cards.length > 0) {
+      try {
+        await updateDeck(pantryId, { cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() });
+        setPendingCloudSync(false);
+      } catch (e) {
+        // If offline at this point, the flush effect will retry
+        setPendingCloudSync(true);
+      }
+    }
   };
 
   const handleDisconnectCloud = () => {
     setCloudConfig(null);
     localStorage.removeItem(CLOUD_CONFIG_KEY);
     trackEvent(TRACKING_ACTION.DISCONNECT_CLOUD, TRACKING_CATEGORY.CLOUD);
+  };
+
+  const handleRequestPersistence = async (): Promise<boolean> => {
+    try {
+      const granted = await requestPersistentStorage();
+      setPersistenceStatus(granted ? 'granted' : 'denied');
+      return granted;
+    } catch {
+      setPersistenceStatus('unsupported');
+      return false;
+    }
   };
 
   const handleCloudPull = async () => {
@@ -769,10 +894,26 @@ const App: React.FC = () => {
       </main>
 
       {/* Auto-Save Indicators */}
-      {(isFileSaving || isCloudSaving) && (
-        <div className="fixed bottom-4 right-4 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 text-xs px-3 py-1.5 rounded-full shadow-lg animate-pulse flex items-center gap-2 z-50">
-          {isCloudSaving ? <Cloud className="h-3 w-3" /> : <Save className="h-3 w-3" />}
-          {isCloudSaving ? 'Syncing to Cloud...' : 'Saving to File...'}
+      {(isFileSaving || isCloudSaving || (!isOnline && cloudConfig) || (isOnline && pendingCloudSync && !isCloudSaving)) && (
+        <div className="fixed bottom-4 right-4 flex flex-col gap-2 items-end z-50">
+          {(isFileSaving || isCloudSaving) && (
+            <div className="bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 text-xs px-3 py-1.5 rounded-full shadow-lg animate-pulse flex items-center gap-2">
+              {isCloudSaving ? <Cloud className="h-3 w-3" /> : <Save className="h-3 w-3" />}
+              {isCloudSaving ? 'Syncing to Cloud...' : 'Saving to File...'}
+            </div>
+          )}
+          {!isOnline && cloudConfig && !isCloudSaving && (
+            <div className="bg-amber-500 text-white text-xs px-3 py-1.5 rounded-full shadow-lg flex items-center gap-2">
+              <RefreshCw className="h-3 w-3" />
+              Offline — changes will sync when connected
+            </div>
+          )}
+          {isOnline && pendingCloudSync && !isCloudSaving && (
+            <div className="bg-brand-600 text-white text-xs px-3 py-1.5 rounded-full shadow-lg animate-pulse flex items-center gap-2">
+              <RefreshCw className="h-3 w-3 animate-spin" />
+              Syncing offline changes...
+            </div>
+          )}
         </div>
       )}
 
@@ -788,6 +929,10 @@ const App: React.FC = () => {
         isFileConnected={!!fileHandle}
         connectedFileName={fileHandle?.name}
         cardCount={cards.length}
+        persistenceStatus={persistenceStatus}
+        storageEstimate={storageEstimate}
+        onRequestPersistence={handleRequestPersistence}
+        lastSavedAt={lastSavedAt}
         cloudConfig={cloudConfig}
         onConnectCloud={handleConnectCloud}
         onDisconnectCloud={handleDisconnectCloud}

@@ -347,15 +347,17 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                   </button>
                 )}
 
-                {/* Link a File — hidden when persistence already granted (no need for a file just for persistence) */}
-                {isFileSystemAvailable && !isFileConnected && persistenceStatus !== 'granted' && (
+                {/* Link a File — always available when no physical file linked; label adapts based on whether IDB is already persistent */}
+                {isFileSystemAvailable && !isFileConnected && (
                   <button
                     onClick={handleConnectLocal}
                     disabled={isProcessing}
                     className="w-full py-2 text-xs font-medium border border-dashed border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:border-brand-400 hover:text-brand-600 dark:hover:text-brand-400 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                   >
                     <Save className="h-3.5 w-3.5" />
-                    Link a File for Auto-Save
+                    {persistenceStatus === 'granted'
+                      ? 'Choose a Different Storage Location'
+                      : 'Link a File for Auto-Save'}
                   </button>
                 )}
 

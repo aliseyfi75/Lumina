@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Routes, Route, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { Flashcard, WordEntry, FlashcardStatus, FileSystemFileHandle, CloudConfig } from './types';
 import { Dashboard } from './components/Dashboard';
@@ -37,6 +37,11 @@ const App: React.FC = () => {
   const location = useLocation();
 
   const [cards, setCards] = useState<Flashcard[]>([]);
+  // Tombstone map: id → Unix-ms when deleted. Entries are pruned after 30 days.
+  const [deletedCards, setDeletedCards] = useState<Map<string, number>>(new Map());
+  // Ref mirrors the map so performMerge can always read current tombstones
+  // without needing the map in its useCallback deps (which would re-trigger initData).
+  const deletedCardsRef = useRef<Map<string, number>>(new Map());
   const [studyHistory, setStudyHistory] = useState<Record<string, number>>({});
   const [longestStreak, setLongestStreak] = useState(0);
 
@@ -56,6 +61,12 @@ const App: React.FC = () => {
     mq.addEventListener('change', handler);
     return () => mq.removeEventListener('change', handler);
   }, []);
+
+  // Keep ref in sync so performMerge always sees the latest tombstone map
+  useEffect(() => {
+    deletedCardsRef.current = deletedCards;
+  }, [deletedCards]);
+
   const [isDataModalOpen, setIsDataModalOpen] = useState(false);
 
   // File System State
@@ -71,26 +82,61 @@ const App: React.FC = () => {
   const [showConfetti, setShowConfetti] = useState(false);
   const [prevMasteredCount, setPrevMasteredCount] = useState(0);
 
-  // Helper: Merge incoming cards with existing state
-  const performMerge = useCallback((incoming: Flashcard[]) => {
-    setCards(prev => {
-      const cardMap = new Map<string, Flashcard>();
-      prev.forEach(c => cardMap.set(c.id, c));
+  // Prune tombstones older than 30 days and return a plain Record for serialisation
+  const TOMBSTONE_TTL = 30 * 24 * 60 * 60 * 1000;
+  const prunedDeletedCards = (): Record<string, number> => {
+    const cutoff = Date.now() - TOMBSTONE_TTL;
+    const result: Record<string, number> = {};
+    deletedCardsRef.current.forEach((deletedAt, id) => {
+      if (deletedAt >= cutoff) result[id] = deletedAt;
+    });
+    return result;
+  };
 
-      incoming.forEach(c => {
-        const duplicateId = Array.from(cardMap.keys()).find(key => {
-          const existing = cardMap.get(key)!;
-          return existing.word.toLowerCase() === c.word.toLowerCase() &&
-            existing.mainDefinition === c.mainDefinition;
-        });
-
-        if (duplicateId) {
-          const existing = cardMap.get(duplicateId)!;
-          cardMap.set(duplicateId, { ...existing, ...c, id: duplicateId });
-        } else {
-          cardMap.set(c.id, c);
-        }
+  // Helper: Merge incoming cards with existing state, honouring the tombstone map
+  const performMerge = useCallback((
+    incoming: Flashcard[],
+    incomingDeletedCards: Record<string, number> = {}
+  ) => {
+    // Union the incoming tombstones (pruning expired ones first)
+    setDeletedCards(prev => {
+      const cutoff = Date.now() - TOMBSTONE_TTL;
+      const merged = new Map(prev);
+      Object.entries(incomingDeletedCards).forEach(([id, deletedAt]) => {
+        if (deletedAt >= cutoff) merged.set(id, deletedAt);
       });
+      return merged;
+    });
+
+    setCards(prev => {
+      // Read from ref — always current, no stale closure, no dep-array entry
+      const liveMap = deletedCardsRef.current;
+      const isDeleted = (id: string) =>
+        liveMap.has(id) || Object.prototype.hasOwnProperty.call(incomingDeletedCards, id);
+
+      const cardMap = new Map<string, Flashcard>();
+      // Only keep existing cards that haven't been tombstoned
+      prev.forEach(c => {
+        if (!isDeleted(c.id)) cardMap.set(c.id, c);
+      });
+
+      // Filter incoming by tombstones, then merge
+      incoming
+        .filter(c => !isDeleted(c.id))
+        .forEach(c => {
+          const duplicateId = Array.from(cardMap.keys()).find(key => {
+            const existing = cardMap.get(key)!;
+            return existing.word.toLowerCase() === c.word.toLowerCase() &&
+              existing.mainDefinition === c.mainDefinition;
+          });
+
+          if (duplicateId) {
+            const existing = cardMap.get(duplicateId)!;
+            cardMap.set(duplicateId, { ...existing, ...c, id: duplicateId });
+          } else {
+            cardMap.set(c.id, c);
+          }
+        });
 
       const now = Date.now();
       return Array.from(cardMap.values()).map(c => {
@@ -100,7 +146,8 @@ const App: React.FC = () => {
         return c;
       }).sort((a, b) => b.createdAt - a.createdAt);
     });
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // intentionally empty — reads tombstones via ref, not closure
 
   // 1. Initial Load: Local Storage -> Fallback to CSV DB -> Merge Cloud
   useEffect(() => {
@@ -161,7 +208,7 @@ const App: React.FC = () => {
             const cloudData = await getDeck(config.pantryId);
 
             if (cloudData.cards && cloudData.cards.length > 0) {
-              performMerge(cloudData.cards);
+              performMerge(cloudData.cards, cloudData.deletedCards ?? {});
             }
 
             if (cloudData.studyHistory) {
@@ -208,7 +255,7 @@ const App: React.FC = () => {
     const timeoutId = setTimeout(async () => {
       setIsFileSaving(true);
       try {
-        await saveToLocalFile(fileHandle, { cards, studyHistory, longestStreak });
+        await saveToLocalFile(fileHandle, { cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() });
       } catch (error) {
         console.error("Auto-save file failed:", error);
       } finally {
@@ -224,7 +271,7 @@ const App: React.FC = () => {
     const timeoutId = setTimeout(async () => {
       setIsCloudSaving(true);
       try {
-        await updateDeck(cloudConfig.pantryId, { cards, studyHistory, longestStreak });
+        await updateDeck(cloudConfig.pantryId, { cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() });
       } catch (error) {
         console.error("Auto-save cloud failed:", error);
       } finally {
@@ -256,7 +303,7 @@ const App: React.FC = () => {
         const text = await file.text();
         const loadedData = parseFileContent(text);
         if (loadedData.cards.length > 0) {
-          performMerge(loadedData.cards);
+          performMerge(loadedData.cards, loadedData.deletedCards ?? {});
         }
         if (loadedData.studyHistory) setStudyHistory(prev => ({ ...prev, ...loadedData.studyHistory }));
         if (loadedData.longestStreak) setLongestStreak(prev => Math.max(prev, loadedData.longestStreak!));
@@ -274,13 +321,13 @@ const App: React.FC = () => {
   const handleManualFileSave = async () => {
     if (!fileHandle) return;
     setIsFileSaving(true);
-    await saveToLocalFile(fileHandle, { cards, studyHistory, longestStreak });
+    await saveToLocalFile(fileHandle, { cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() });
     setIsFileSaving(false);
     trackEvent(TRACKING_ACTION.MANUAL_SAVE, TRACKING_CATEGORY.DATA);
   };
 
   const handleExportCSV = () => {
-    const jsonContent = generateJSON({ cards, studyHistory, longestStreak });
+    const jsonContent = generateJSON({ cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() });
     const date = new Date().toISOString().split('T')[0];
     downloadJSON(jsonContent, `lumina_backup_${date}.json`);
     trackEvent(TRACKING_ACTION.EXPORT_CSV, TRACKING_CATEGORY.DATA);
@@ -290,7 +337,7 @@ const App: React.FC = () => {
     const text = await file.text();
     const importedData = parseFileContent(text);
     if (importedData.cards.length === 0) throw new Error("No valid data found");
-    performMerge(importedData.cards);
+    performMerge(importedData.cards, importedData.deletedCards ?? {});
     if (importedData.studyHistory) setStudyHistory(prev => ({ ...prev, ...importedData.studyHistory }));
     if (importedData.longestStreak) setLongestStreak(prev => Math.max(prev, importedData.longestStreak!));
     trackEvent(TRACKING_ACTION.IMPORT_CSV, TRACKING_CATEGORY.DATA, 'card_count', importedData.cards.length);
@@ -302,7 +349,7 @@ const App: React.FC = () => {
     await getDetails(pantryId);
     const cloudData = await getDeck(pantryId);
     if (cloudData.cards && cloudData.cards.length > 0) {
-      performMerge(cloudData.cards);
+      performMerge(cloudData.cards, cloudData.deletedCards ?? {});
     }
     if (cloudData.studyHistory) setStudyHistory(prev => ({ ...prev, ...cloudData.studyHistory }));
     if (cloudData.longestStreak) setLongestStreak(prev => Math.max(prev, cloudData.longestStreak!));
@@ -324,7 +371,7 @@ const App: React.FC = () => {
     if (!cloudConfig) return;
     const cloudData = await getDeck(cloudConfig.pantryId);
     if (cloudData.cards && cloudData.cards.length > 0) {
-      performMerge(cloudData.cards);
+      performMerge(cloudData.cards, cloudData.deletedCards ?? {});
     }
     if (cloudData.studyHistory) setStudyHistory(prev => ({ ...prev, ...cloudData.studyHistory }));
     if (cloudData.longestStreak) setLongestStreak(prev => Math.max(prev, cloudData.longestStreak!));
@@ -333,7 +380,7 @@ const App: React.FC = () => {
 
   const handleCloudPush = async () => {
     if (!cloudConfig) return;
-    await updateDeck(cloudConfig.pantryId, { cards, studyHistory, longestStreak });
+    await updateDeck(cloudConfig.pantryId, { cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() });
     trackEvent(TRACKING_ACTION.CLOUD_PUSH, TRACKING_CATEGORY.CLOUD);
   };
 
@@ -467,6 +514,7 @@ const App: React.FC = () => {
 
   const handleDeleteCard = (id: string) => {
     setCards(prev => prev.filter(c => c.id !== id));
+    setDeletedCards(prev => new Map(prev).set(id, Date.now()));
     trackEvent(TRACKING_ACTION.DELETE_CARD, TRACKING_CATEGORY.FLASHCARDS);
   };
 

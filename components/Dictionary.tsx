@@ -114,6 +114,8 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
   };
 
   const handleSuggestionClick = (word: string) => {
+    setShowSuggestions(false);
+    setSuggestions([]);
     setQuery(word);
     performSearch(word);
   };

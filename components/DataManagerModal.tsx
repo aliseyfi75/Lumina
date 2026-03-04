@@ -233,35 +233,52 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
           {/* Local File Sync Section */}
           <div className={`p-4 rounded-xl border ${isFileConnected ? 'border-green-100 dark:border-green-800/40 bg-green-50/50 dark:bg-green-900/10' : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/30'}`}>
             {isFileSystemAvailable ? (
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex-1">
-                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-                    <Save className="h-4 w-4" />
-                    {isFileConnected ? 'Local JSON Connected' : 'Local JSON Auto-Save'}
-                  </h3>
-                  {isFileConnected && (
-                    <p className="text-xs text-green-700 mt-1 truncate max-w-[200px]" title={connectedFileName}>
-                      Using: {connectedFileName}
-                    </p>
-                  )}
+              isFileConnected ? (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                        <Save className="h-4 w-4 text-green-600" />
+                        Local JSON Connected
+                      </h3>
+                      <p className="text-xs text-green-700 dark:text-green-400 mt-1 truncate" title={connectedFileName}>
+                        {connectedFileName}
+                      </p>
+                    </div>
+                    <button
+                      onClick={handleManualLocalSave}
+                      disabled={isProcessing}
+                      className="shrink-0 px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 shadow-sm disabled:opacity-50"
+                    >
+                      Save Now
+                    </button>
+                  </div>
+                  <div className="flex items-center pt-2 border-t border-green-200/60 dark:border-green-800/40">
+                    <div className="text-xs text-green-700 dark:text-green-400 flex items-center gap-1.5">
+                      <RefreshCw className="h-3 w-3 animate-spin" style={{ animationDuration: '3s' }} />
+                      Auto-save enabled — changes saved automatically
+                    </div>
+                  </div>
                 </div>
-                {isFileConnected ? (
-                  <button
-                    onClick={handleManualLocalSave}
-                    disabled={isProcessing}
-                    className="px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 shadow-sm"
-                  >
-                    Save Now
-                  </button>
-                ) : (
+              ) : (
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex-1">
+                    <h3 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                      <Save className="h-4 w-4" />
+                      Local JSON Auto-Save
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                      Changes save automatically to a local file.
+                    </p>
+                  </div>
                   <button
                     onClick={handleConnectLocal}
-                    className="px-3 py-1.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 text-xs font-medium rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600"
+                    className="shrink-0 px-3 py-1.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 text-xs font-medium rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600"
                   >
                     Connect File
                   </button>
-                )}
-              </div>
+                </div>
+              )
             ) : (
               <div className="flex items-start gap-3 opacity-70">
                 <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0" />
@@ -271,6 +288,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
               </div>
             )}
           </div>
+
 
           <div className="grid grid-cols-2 gap-4">
             <button

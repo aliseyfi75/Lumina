@@ -7,7 +7,9 @@ interface DataManagerModalProps {
   onClose: () => void;
   onExport: () => void;
   onImport: (file: File) => Promise<void>;
-  onConnectFile?: () => Promise<void>;
+  onConnectFile?: () => void;
+  onChangeFile?: () => void;
+  onDisconnectFile?: () => Promise<void>;
   onManualSave?: () => Promise<void>;
   isFileConnected: boolean;
   connectedFileName?: string;
@@ -27,6 +29,8 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
   onExport,
   onImport,
   onConnectFile,
+  onChangeFile,
+  onDisconnectFile,
   onManualSave,
   isFileConnected,
   connectedFileName,
@@ -84,6 +88,29 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
         await onConnectFile();
         showMessage('success', 'File connected! Auto-save enabled.');
       } catch (e) { /* Cancelled */ }
+    }
+  };
+
+  const handleChangeLocalFile = async () => {
+    if (onChangeFile) {
+      try {
+        await onChangeFile();
+        showMessage('success', 'Sync file updated!');
+      } catch (e) { /* Cancelled */ }
+    }
+  };
+
+  const handleDisconnectLocalFile = async () => {
+    if (onDisconnectFile) {
+      setIsProcessing(true);
+      try {
+        await onDisconnectFile();
+        showMessage('success', 'Local file disconnected.');
+      } catch (e) {
+        showMessage('error', 'Failed to disconnect.');
+      } finally {
+        setIsProcessing(false);
+      }
     }
   };
 
@@ -253,10 +280,27 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                       Save Now
                     </button>
                   </div>
-                  <div className="flex items-center pt-2 border-t border-green-200/60 dark:border-green-800/40">
+                  <div className="flex items-center justify-between pt-2 border-t border-green-200/60 dark:border-green-800/40">
                     <div className="text-xs text-green-700 dark:text-green-400 flex items-center gap-1.5">
                       <RefreshCw className="h-3 w-3 animate-spin" style={{ animationDuration: '3s' }} />
                       Auto-save enabled — changes saved automatically
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={handleChangeLocalFile}
+                        disabled={isProcessing}
+                        className="text-xs text-slate-500 hover:text-brand-600 dark:hover:text-brand-400 transition-colors"
+                      >
+                        Change File
+                      </button>
+                      <span className="text-slate-300 dark:text-slate-600">·</span>
+                      <button
+                        onClick={handleDisconnectLocalFile}
+                        disabled={isProcessing}
+                        className="text-xs text-red-500 hover:underline"
+                      >
+                        Disconnect
+                      </button>
                     </div>
                   </div>
                 </div>

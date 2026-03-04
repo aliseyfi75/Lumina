@@ -7,10 +7,12 @@ import { Flashcards } from './components/Flashcards';
 import { StudySession } from './components/StudySession';
 import { Statistics } from './components/Statistics';
 import { DataManagerModal } from './components/DataManagerModal';
+import { PwaInstallBanner } from './components/PwaInstallBanner';
 import { generateJSON, parseFileContent, downloadJSON, saveToLocalFile } from './services/fileService';
 import { getDetails, getDeck, updateDeck } from './services/pantryService';
+import { saveFileHandleToIDB, loadFileHandleFromIDB, clearFileHandleFromIDB } from './services/idbService';
 import { initializeTracking, trackEvent, setTrackingUserId, trackPageView, PAGE_TITLES, TRACKING_CATEGORY, TRACKING_ACTION } from './services/trackingService';
-import { Book, Layers, Database, Save, Cloud, BarChart2, Home, Sun, Moon } from 'lucide-react';
+import { Book, Layers, Database, Save, Cloud, BarChart2, Home, Sun, Moon, RefreshCw } from 'lucide-react';
 import Confetti from 'react-confetti';
 import { useWindowSize } from 'react-use';
 
@@ -71,6 +73,7 @@ const App: React.FC = () => {
 
   // File System State
   const [fileHandle, setFileHandle] = useState<FileSystemFileHandle | null>(null);
+  const [pendingHandle, setPendingHandle] = useState<FileSystemFileHandle | null>(null); // needs permission re-grant
   const [isFileSaving, setIsFileSaving] = useState(false);
 
   // Cloud Sync State
@@ -149,7 +152,7 @@ const App: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // intentionally empty — reads tombstones via ref, not closure
 
-  // 1. Initial Load: Local Storage -> Fallback to CSV DB -> Merge Cloud
+  // 1. Initial Load: Local Storage -> Fallback to CSV DB -> Merge Cloud -> Restore IDB File Handle
   useEffect(() => {
     const initData = async () => {
       let initialCards: Flashcard[] = [];
@@ -238,6 +241,23 @@ const App: React.FC = () => {
       } else {
         initializeTracking();
       }
+
+      // Step D: Restore FileSystemFileHandle from IndexedDB
+      try {
+        const storedHandle = await loadFileHandleFromIDB();
+        if (storedHandle) {
+          // @ts-ignore – queryPermission is on FileSystemHandle
+          const perm = await storedHandle.queryPermission({ mode: 'readwrite' });
+          if (perm === 'granted') {
+            setFileHandle(storedHandle);
+          } else {
+            // Will need a user gesture to re-grant — store as pending
+            setPendingHandle(storedHandle);
+          }
+        }
+      } catch (e) {
+        console.warn('Could not restore file handle from IDB', e);
+      }
     };
 
     initData();
@@ -283,11 +303,11 @@ const App: React.FC = () => {
 
   // --- File Handlers ---
 
-  const handleConnectFile = async () => {
+  const pickAndConnectFile = async (): Promise<boolean> => {
     // @ts-ignore
     if (!window.showOpenFilePicker) {
       alert("Your browser does not support the File System Access API.");
-      return;
+      return false;
     }
     try {
       // @ts-ignore
@@ -308,6 +328,9 @@ const App: React.FC = () => {
         if (loadedData.studyHistory) setStudyHistory(prev => ({ ...prev, ...loadedData.studyHistory }));
         if (loadedData.longestStreak) setLongestStreak(prev => Math.max(prev, loadedData.longestStreak!));
         setFileHandle(handle);
+        setPendingHandle(null);
+        await saveFileHandleToIDB(handle);
+        return true;
       }
     } catch (err: any) {
       if (err.name === 'SecurityError' || err.message?.includes('Cross origin')) {
@@ -315,6 +338,35 @@ const App: React.FC = () => {
       } else if (err.name !== 'AbortError') {
         alert("Failed to connect to file.");
       }
+    }
+    return false;
+  };
+
+  const handleConnectFile = () => pickAndConnectFile();
+
+  // "Change File": same as connect but replaces an existing handle
+  const handleChangeFile = () => pickAndConnectFile();
+
+  // Disconnect: remove from IDB so it won't be restored next time
+  const handleDisconnectFile = async () => {
+    setFileHandle(null);
+    setPendingHandle(null);
+    await clearFileHandleFromIDB();
+  };
+
+  // Re-grant permission for a handle that was restored from IDB
+  const handleReGrantPermission = async () => {
+    if (!pendingHandle) return;
+    try {
+      // @ts-ignore
+      const perm = await pendingHandle.requestPermission({ mode: 'readwrite' });
+      if (perm === 'granted') {
+        setFileHandle(pendingHandle);
+        setPendingHandle(null);
+      }
+    } catch (e) {
+      console.warn('Permission denied for file handle', e);
+      setPendingHandle(null);
     }
   };
 
@@ -376,6 +428,14 @@ const App: React.FC = () => {
     if (cloudData.studyHistory) setStudyHistory(prev => ({ ...prev, ...cloudData.studyHistory }));
     if (cloudData.longestStreak) setLongestStreak(prev => Math.max(prev, cloudData.longestStreak!));
     trackEvent(TRACKING_ACTION.CLOUD_PULL, TRACKING_CATEGORY.CLOUD);
+    // Immediately flush to local file so both are in sync
+    if (fileHandle) {
+      try {
+        await saveToLocalFile(fileHandle, { cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() });
+      } catch (e) {
+        console.warn('Could not flush cloud pull to local file', e);
+      }
+    }
   };
 
   const handleCloudPush = async () => {
@@ -549,6 +609,33 @@ const App: React.FC = () => {
       {/* GA page-view tracker — fires on every route change */}
       <RouteTracker />
 
+      {/* PWA Install Banner */}
+      <PwaInstallBanner />
+
+      {/* Re-grant permission banner */}
+      {pendingHandle && !fileHandle && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-md">
+          <div className="bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded-xl shadow-lg px-4 py-3 flex items-center gap-3">
+            <RefreshCw className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+            <p className="text-xs text-amber-800 dark:text-amber-200 flex-1">
+              Reconnect to <strong className="font-semibold">{pendingHandle.name}</strong>?
+            </p>
+            <button
+              onClick={handleReGrantPermission}
+              className="shrink-0 px-3 py-1 bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold rounded-lg transition-colors"
+            >
+              Reconnect
+            </button>
+            <button
+              onClick={() => setPendingHandle(null)}
+              className="shrink-0 text-amber-500 hover:text-amber-700 dark:hover:text-amber-300 text-xs"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
       {showConfetti && (
         <div className="fixed inset-0 z-[100] pointer-events-none">
           <Confetti
@@ -695,6 +782,8 @@ const App: React.FC = () => {
         onExport={handleExportCSV}
         onImport={handleImportCSV}
         onConnectFile={handleConnectFile}
+        onChangeFile={handleChangeFile}
+        onDisconnectFile={handleDisconnectFile}
         onManualSave={handleManualFileSave}
         isFileConnected={!!fileHandle}
         connectedFileName={fileHandle?.name}

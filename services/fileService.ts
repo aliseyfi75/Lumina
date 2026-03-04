@@ -51,10 +51,20 @@ export const parseFileContent = (text: string): CloudData => {
     // Attempt to parse as JSON first (new format)
     const data = JSON.parse(text);
     if (data.cards || data.studyHistory || data.longestStreak !== undefined) {
+      // Support legacy deletedCardIds (string[]) by upgrading to the new map format
+      let deletedCards: Record<string, number> = {};
+      if (data.deletedCards && typeof data.deletedCards === 'object' && !Array.isArray(data.deletedCards)) {
+        deletedCards = data.deletedCards;
+      } else if (Array.isArray(data.deletedCardIds)) {
+        // Upgrade: assign a placeholder timestamp so they can expire naturally
+        const now = Date.now();
+        (data.deletedCardIds as string[]).forEach((id: string) => { deletedCards[id] = now; });
+      }
       return {
         cards: Array.isArray(data.cards) ? data.cards : [],
         studyHistory: data.studyHistory || {},
-        longestStreak: data.longestStreak || 0
+        longestStreak: data.longestStreak || 0,
+        deletedCards,
       };
     }
   } catch (e) {

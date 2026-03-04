@@ -352,9 +352,7 @@ const App: React.FC = () => {
       status: FlashcardStatus.New,
       lastReviewed: 0,
       createdAt: Date.now(),
-      interval: 0,
       repetition: 0,
-      easinessFactor: 2.5,
       nextReviewDate: Date.now(),
     };
     setCards(prev => [newCard, ...prev]);
@@ -423,7 +421,7 @@ const App: React.FC = () => {
     setCards(prev => prev.map(card => {
       if (card.id !== id) return card;
 
-      let { interval = 0, repetition = 0, easinessFactor = 2.5 } = card;
+      let { repetition = 0 } = card;
       let nextReviewDate = Date.now();
       let status = FlashcardStatus.Learning;
 
@@ -456,9 +454,7 @@ const App: React.FC = () => {
 
       return {
         ...card,
-        interval,
         repetition,
-        easinessFactor,
         nextReviewDate,
         status,
         lastQuality: quality,

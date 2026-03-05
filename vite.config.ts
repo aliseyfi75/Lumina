@@ -13,7 +13,7 @@ export default defineConfig({
         name: 'Lumina – Vocabulary Builder',
         short_name: 'Lumina',
         description: 'Build your vocabulary with smart spaced repetition.',
-        theme_color: '#4f46e5',
+        theme_color: '#16a34a',
         background_color: '#0f172a',
         display: 'standalone',
         start_url: './',

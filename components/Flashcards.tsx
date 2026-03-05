@@ -166,17 +166,30 @@ export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onD
     return true;
   }).length;
 
-  let filteredCards = selectedStatus
-    ? cards.filter(c => c.status === selectedStatus)
-    : cards;
+  const statusPriority = {
+    [FlashcardStatus.New]: 0,
+    [FlashcardStatus.Learning]: 1,
+    [FlashcardStatus.Mastered]: 2,
+  };
 
-  if (selectedStatus === FlashcardStatus.Learning) {
-    filteredCards = [...filteredCards].sort((a, b) => {
-      const dateA = a.nextReviewDate || Infinity;
-      const dateB = b.nextReviewDate || Infinity;
-      return dateA - dateB;
+  const filteredCards = (selectedStatus
+    ? cards.filter(c => c.status === selectedStatus)
+    : [...cards]).sort((a, b) => {
+      // 1. Sort by Status Priority
+      if (a.status !== b.status) {
+        return statusPriority[a.status] - statusPriority[b.status];
+      }
+
+      // 2. If Learning, sort by nextReviewDate (earliest first)
+      if (a.status === FlashcardStatus.Learning) {
+        const dateA = a.nextReviewDate || Infinity;
+        const dateB = b.nextReviewDate || Infinity;
+        if (dateA !== dateB) return dateA - dateB;
+      }
+
+      // 3. Fallback to createdAt (newest first)
+      return b.createdAt - a.createdAt;
     });
-  }
 
   const handleStatusClick = (status: FlashcardStatus) => {
     if (selectedStatus === status) {

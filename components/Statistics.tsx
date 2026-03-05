@@ -169,13 +169,15 @@ export const Statistics: React.FC<StatisticsProps> = ({ cards, studyHistory, lon
                 </div>
 
                 <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-3 bg-white dark:bg-slate-800 px-5 py-3 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700">
-                        <div className="p-2 bg-slate-100 dark:bg-slate-700 rounded-xl">
-                            <Target className="h-6 w-6 text-slate-500 dark:text-slate-400" />
+                    <div className="flex items-center gap-3 bg-white dark:bg-slate-800 px-5 py-3 rounded-2xl shadow-sm border border-amber-200 dark:border-amber-800/50 ring-1 ring-amber-100 dark:ring-amber-900/50 relative overflow-hidden">
+                        <div className="absolute top-0 right-0 w-16 h-16 bg-gradient-to-br from-amber-400/20 to-transparent blur-xl"></div>
+                        <div className="p-2 bg-amber-100 dark:bg-amber-900/40 rounded-xl relative overflow-hidden group">
+                            <div className="absolute inset-0 bg-amber-300 opacity-0 group-hover:opacity-30 transition-opacity blur-md"></div>
+                            <Target className="h-6 w-6 text-amber-500 relative z-10" />
                         </div>
-                        <div>
+                        <div className="relative z-10">
                             <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Longest Streak</p>
-                            <p className="text-2xl font-bold text-slate-900 dark:text-white">{longestStreak} <span className="text-base font-medium text-slate-500 dark:text-slate-400">{longestStreak === 1 ? 'Day' : 'Days'}</span></p>
+                            <p className="text-2xl font-bold text-amber-600">{longestStreak} <span className="text-base font-medium text-amber-400">{longestStreak === 1 ? 'Day' : 'Days'}</span></p>
                         </div>
                     </div>
                     <div className="flex items-center gap-3 bg-white dark:bg-slate-800 px-5 py-3 rounded-2xl shadow-sm border border-orange-200 dark:border-orange-800/50 ring-1 ring-orange-100 dark:ring-orange-900/50 relative overflow-hidden">
@@ -193,29 +195,29 @@ export const Statistics: React.FC<StatisticsProps> = ({ cards, studyHistory, lon
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm flex items-center gap-4 hover:shadow-md transition-shadow">
-                    <div className="p-3 bg-slate-100 dark:bg-slate-700 rounded-xl text-slate-600 dark:text-slate-300"><BookOpen className="h-6 w-6" /></div>
+                <div className="bg-blue-50 dark:bg-blue-900/20 p-5 rounded-2xl border border-blue-100 dark:border-blue-800/40 shadow-sm flex items-center gap-4 hover:shadow-md transition-shadow">
+                    <div className="p-3 bg-blue-100 dark:bg-blue-900/40 rounded-xl text-blue-600 dark:text-blue-400"><BookOpen className="h-6 w-6" /></div>
                     <div>
                         <p className="text-2xl font-bold text-slate-900 dark:text-white">{totalCards}</p>
                         <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">Total Cards</p>
                     </div>
                 </div>
-                <div className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm flex items-center gap-4 hover:shadow-md transition-shadow">
-                    <div className="p-3 bg-blue-100 dark:bg-blue-900/40 rounded-xl text-blue-600 dark:text-blue-400"><Activity className="h-6 w-6" /></div>
+                <div className="bg-indigo-50 dark:bg-indigo-900/20 p-5 rounded-2xl border border-indigo-100 dark:border-indigo-800/40 shadow-sm flex items-center gap-4 hover:shadow-md transition-shadow">
+                    <div className="p-3 bg-indigo-100 dark:bg-indigo-900/40 rounded-xl text-indigo-600 dark:text-indigo-400"><Activity className="h-6 w-6" /></div>
                     <div>
                         <p className="text-2xl font-bold text-slate-900 dark:text-white">{newCount}</p>
                         <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">New</p>
                     </div>
                 </div>
-                <div className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm flex items-center gap-4 hover:shadow-md transition-shadow">
+                <div className="bg-amber-50 dark:bg-amber-900/20 p-5 rounded-2xl border border-amber-100 dark:border-amber-800/40 shadow-sm flex items-center gap-4 hover:shadow-md transition-shadow">
                     <div className="p-3 bg-amber-100 dark:bg-amber-900/40 rounded-xl text-amber-600 dark:text-amber-400"><Brain className="h-6 w-6" /></div>
                     <div>
                         <p className="text-2xl font-bold text-slate-900 dark:text-white">{learningCount}</p>
                         <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">Learning</p>
                     </div>
                 </div>
-                <div className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm flex items-center gap-4 hover:shadow-md transition-shadow">
-                    <div className="p-3 bg-green-100 dark:bg-green-900/40 rounded-xl text-green-600 dark:text-green-400"><CheckCircle className="h-6 w-6" /></div>
+                <div className="bg-emerald-50 dark:bg-emerald-900/20 p-5 rounded-2xl border border-emerald-100 dark:border-emerald-800/40 shadow-sm flex items-center gap-4 hover:shadow-md transition-shadow">
+                    <div className="p-3 bg-emerald-100 dark:bg-emerald-900/40 rounded-xl text-emerald-600 dark:text-emerald-400"><CheckCircle className="h-6 w-6" /></div>
                     <div>
                         <p className="text-2xl font-bold text-slate-900 dark:text-white">{masteredCount}</p>
                         <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">Mastered</p>

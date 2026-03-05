@@ -43,6 +43,7 @@ export interface Flashcard {
   easinessFactor?: number;
   nextReviewDate?: number;
   lastQuality?: number;
+  updatedAt?: number;
 }
 
 export type ViewState = 'dashboard' | 'dictionary' | 'flashcards' | 'study' | 'statistics';

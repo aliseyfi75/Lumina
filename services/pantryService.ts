@@ -39,7 +39,8 @@ export const getDeck = async (pantryId: string): Promise<CloudData> => {
     return {
       cards: Array.isArray(data.cards) ? data.cards : [],
       studyHistory: data.studyHistory || {},
-      longestStreak: data.longestStreak || 0
+      longestStreak: data.longestStreak || 0,
+      deletedCards: data.deletedCards || {}
     };
   } catch (error) {
     console.warn("Could not fetch deck from Pantry (might be new):", error);

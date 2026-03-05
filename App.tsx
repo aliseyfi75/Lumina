@@ -142,7 +142,14 @@ const App: React.FC = () => {
 
           if (duplicateId) {
             const existing = cardMap.get(duplicateId)!;
-            cardMap.set(duplicateId, { ...existing, ...c, id: duplicateId });
+            // Conflict Resolution: Only update if incoming is newer than local.
+            // Use updatedAt if available, otherwise fallback to lastReviewed or 0.
+            const incomingTs = c.updatedAt ?? c.lastReviewed ?? 0;
+            const existingTs = existing.updatedAt ?? existing.lastReviewed ?? 0;
+
+            if (incomingTs > existingTs) {
+              cardMap.set(duplicateId, { ...existing, ...c, id: duplicateId });
+            }
           } else {
             cardMap.set(c.id, c);
           }
@@ -586,6 +593,7 @@ const App: React.FC = () => {
       createdAt: Date.now(),
       repetition: 0,
       nextReviewDate: Date.now(),
+      updatedAt: Date.now(),
     };
     setCards(prev => [newCard, ...prev]);
     recordActivity();
@@ -594,7 +602,7 @@ const App: React.FC = () => {
 
   const handleUpdateStatus = (id: string, status: FlashcardStatus) => {
     setCards(prev => prev.map(card =>
-      card.id === id ? { ...card, status, lastReviewed: Date.now() } : card
+      card.id === id ? { ...card, status, lastReviewed: Date.now(), updatedAt: Date.now() } : card
     ));
     recordActivity();
     trackEvent(TRACKING_ACTION.UPDATE_STATUS, TRACKING_CATEGORY.FLASHCARDS, status);
@@ -690,7 +698,8 @@ const App: React.FC = () => {
         nextReviewDate,
         status,
         lastQuality: quality,
-        lastReviewed: Date.now()
+        lastReviewed: Date.now(),
+        updatedAt: Date.now()
       };
     }));
     recordActivity();

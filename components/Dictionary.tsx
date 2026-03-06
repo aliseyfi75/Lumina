@@ -4,6 +4,7 @@ import { WordEntry, Flashcard } from '../types';
 import { lookupWord, getSpellingSuggestions } from '../services/dictionaryService';
 import { getWordSuggestions } from '../services/suggestionService';
 import { trackEvent, TRACKING_ACTION, TRACKING_CATEGORY } from '../services/trackingService';
+import { playAudio } from '../utils/audio';
 import { Search, Plus, Check, Loader2, BookOpen, Clock, Volume2 } from 'lucide-react';
 
 interface DictionaryProps {
@@ -264,15 +265,13 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
               {result.phonetic && (
                 <span className="text-xl text-slate-500 dark:text-slate-400 font-serif italic">{result.phonetic}</span>
               )}
-              {result.audio && (
-                <button
-                  onClick={() => new Audio(result.audio!).play()}
-                  className="p-1.5 text-slate-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded-full transition-colors"
-                  title="Listen to pronunciation"
-                >
-                  <Volume2 className="h-6 w-6" />
-                </button>
-              )}
+              <button
+                onClick={() => playAudio(result.word, result.audio)}
+                className="p-1.5 text-slate-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded-full transition-colors"
+                title="Listen to pronunciation"
+              >
+                <Volume2 className="h-6 w-6" />
+              </button>
             </div>
           </div>
 

@@ -229,19 +229,19 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
 
       <div className="flex-1 relative perspective-1000 mb-8 sm:px-12 flex justify-center items-center">
         {/* Swipe Indicators */}
-        <motion.div style={{ opacity: swipeRightOpacity, pointerEvents: 'none' }} className="absolute right-0 top-1/2 -translate-y-1/2 z-0 hidden sm:flex flex-col items-center text-green-500">
+        <motion.div style={{ opacity: swipeRightOpacity, pointerEvents: 'none' }} className="absolute left-0 top-1/2 -translate-y-1/2 z-0 hidden sm:flex flex-col items-center text-green-500">
           <MoveRight className="h-10 w-10" />
           <span className="font-bold tracking-widest uppercase mt-2 text-xs">Mastered</span>
         </motion.div>
-        <motion.div style={{ opacity: swipeLeftOpacity, pointerEvents: 'none' }} className="absolute left-0 top-1/2 -translate-y-1/2 z-0 hidden sm:flex flex-col items-center text-red-500">
+        <motion.div style={{ opacity: swipeLeftOpacity, pointerEvents: 'none' }} className="absolute right-0 top-1/2 -translate-y-1/2 z-0 hidden sm:flex flex-col items-center text-red-500">
           <MoveLeft className="h-10 w-10" />
           <span className="font-bold tracking-widest uppercase mt-2 text-xs">Again</span>
         </motion.div>
-        <motion.div style={{ opacity: swipeDownOpacity, pointerEvents: 'none' }} className="absolute bottom-[-10px] left-1/2 -translate-x-1/2 z-0 hidden sm:flex flex-col items-center text-blue-500">
+        <motion.div style={{ opacity: swipeDownOpacity, pointerEvents: 'none' }} className="absolute top-[-20px] left-1/2 -translate-x-1/2 z-0 hidden sm:flex flex-col items-center text-blue-500">
           <MoveDown className="h-10 w-10" />
           <span className="font-bold tracking-widest uppercase mt-2 text-xs">Learned</span>
         </motion.div>
-        <motion.div style={{ opacity: swipeUpOpacity, pointerEvents: 'none' }} className="absolute top-[-20px] left-1/2 -translate-x-1/2 z-0 hidden sm:flex flex-col items-center text-blue-500">
+        <motion.div style={{ opacity: swipeUpOpacity, pointerEvents: 'none' }} className="absolute bottom-[-10px] left-1/2 -translate-x-1/2 z-0 hidden sm:flex flex-col items-center text-blue-500">
           <MoveUp className="h-10 w-10" />
           <span className="font-bold tracking-widest uppercase mt-2 text-xs">Learned</span>
         </motion.div>
@@ -271,24 +271,32 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
               className="absolute inset-0 backface-hidden bg-white dark:bg-slate-800 rounded-3xl shadow-xl shadow-slate-200/50 dark:shadow-none border border-slate-100 dark:border-slate-700 flex flex-col items-center justify-center p-8 text-center hover:shadow-2xl transition-shadow"
               style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}
             >
-              <h2 className="text-5xl font-serif font-bold text-slate-900 dark:text-white mb-6">{currentCard.word}</h2>
-              <div className="flex items-center gap-3">
-                {currentCard.phonetic && <p className="text-2xl text-slate-400 dark:text-slate-500 font-serif italic">{currentCard.phonetic}</p>}
-                {currentCard.audio && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      new Audio(currentCard.audio!).play();
-                    }}
-                    className="p-2 text-slate-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded-full transition-colors z-10 relative"
-                    title="Listen to pronunciation"
-                  >
-                    <Volume2 className="h-6 w-6" />
-                  </button>
-                )}
+              {/* Drag Overlays */}
+              <motion.div style={{ opacity: swipeRightOpacity }} className="absolute inset-0 rounded-3xl pointer-events-none bg-green-500/10 dark:bg-green-500/20" />
+              <motion.div style={{ opacity: swipeLeftOpacity }} className="absolute inset-0 rounded-3xl pointer-events-none bg-red-500/10 dark:bg-red-500/20" />
+              <motion.div style={{ opacity: swipeDownOpacity }} className="absolute inset-0 rounded-3xl pointer-events-none bg-blue-500/10 dark:bg-blue-500/20" />
+              <motion.div style={{ opacity: swipeUpOpacity }} className="absolute inset-0 rounded-3xl pointer-events-none bg-blue-500/10 dark:bg-blue-500/20" />
+
+              <div className="relative z-10 flex flex-col items-center w-full">
+                <h2 className="text-5xl font-serif font-bold text-slate-900 dark:text-white mb-6">{currentCard.word}</h2>
+                <div className="flex items-center gap-3 justify-center">
+                  {currentCard.phonetic && <p className="text-2xl text-slate-400 dark:text-slate-500 font-serif italic">{currentCard.phonetic}</p>}
+                  {currentCard.audio && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        new Audio(currentCard.audio!).play();
+                      }}
+                      className="p-2 text-slate-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded-full transition-colors z-10 relative"
+                      title="Listen to pronunciation"
+                    >
+                      <Volume2 className="h-6 w-6" />
+                    </button>
+                  )}
+                </div>
               </div>
 
-              <div className="absolute bottom-10 text-slate-300 dark:text-slate-600 flex items-center gap-2 opacity-50 group-hover:opacity-100 transition-opacity">
+              <div className="absolute bottom-10 text-slate-300 dark:text-slate-600 flex items-center gap-2 opacity-50 group-hover:opacity-100 transition-opacity z-10">
                 <RotateCw className="h-4 w-4" />
                 <span className="text-xs uppercase tracking-widest font-medium">Click to reveal</span>
               </div>
@@ -299,7 +307,13 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
               className="absolute inset-0 backface-hidden rotate-y-180 bg-slate-900 rounded-3xl shadow-xl flex flex-col p-8 text-center overflow-hidden"
               style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
             >
-              <div className="flex-1 flex flex-col items-center justify-center overflow-y-auto custom-scrollbar w-full">
+              {/* Drag Overlays */}
+              <motion.div style={{ opacity: swipeRightOpacity }} className="absolute inset-0 rounded-3xl pointer-events-none bg-green-500/10" />
+              <motion.div style={{ opacity: swipeLeftOpacity }} className="absolute inset-0 rounded-3xl pointer-events-none bg-red-500/10" />
+              <motion.div style={{ opacity: swipeDownOpacity }} className="absolute inset-0 rounded-3xl pointer-events-none bg-blue-500/10" />
+              <motion.div style={{ opacity: swipeUpOpacity }} className="absolute inset-0 rounded-3xl pointer-events-none bg-blue-500/10" />
+
+              <div className="relative z-10 flex-1 flex flex-col items-center justify-center overflow-y-auto custom-scrollbar w-full">
                 <span className="inline-block px-3 py-1 bg-brand-900/50 text-brand-300 text-xs font-bold uppercase tracking-widest rounded-full mb-6">
                   {currentCard.partOfSpeech}
                 </span>
@@ -326,7 +340,7 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
               </div>
 
               {/* Integrated Controls */}
-              <div className="pt-6 mt-4 border-t border-slate-800 grid grid-cols-3 gap-3 w-full" onClick={(e) => e.stopPropagation()}>
+              <div className="relative z-10 pt-6 mt-4 border-t border-slate-800 grid grid-cols-3 gap-3 w-full" onClick={(e) => e.stopPropagation()}>
                 <button
                   onClick={() => handleNext(1)}
                   className="group/btn flex flex-col items-center justify-center p-3 rounded-xl bg-slate-800 hover:bg-red-900/20 border border-slate-700 hover:border-red-700/50 transition-all text-center relative overflow-hidden"

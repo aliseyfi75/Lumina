@@ -4,6 +4,7 @@ import { RotateCw, CheckCircle, Brain, ArrowLeft, Volume2, MoveUp, MoveDown, Mov
 import Confetti from 'react-confetti';
 import { useWindowSize } from 'react-use';
 import { motion, useMotionValue, useTransform, PanInfo, AnimatePresence } from 'framer-motion';
+import { useLocation } from 'react-router-dom';
 
 interface StudySessionProps {
   cards: Flashcard[];
@@ -22,6 +23,8 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
   const [showConfetti, setShowConfetti] = useState(false);
   const [actionToast, setActionToast] = useState<{ message: string; colorClass: string; bgColorClass: string } | null>(null);
 
+  const location = useLocation();
+
   useEffect(() => {
     const dueCards = cards.filter(c => {
       if (c.status === FlashcardStatus.Mastered) return false;
@@ -32,8 +35,18 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
       return true;
     });
 
-    // Shuffle
-    const studySet = [...dueCards].sort(() => Math.random() - 0.5);
+    const sessionConfig = location.state?.sessionConfig as { mode: 'full' | 'short'; count?: number } | undefined;
+
+    let studySet: Flashcard[] = [];
+
+    if (sessionConfig?.mode === 'short' && sessionConfig.count) {
+      const newCards = dueCards.filter(c => c.status === FlashcardStatus.New).sort(() => Math.random() - 0.5);
+      const otherCards = dueCards.filter(c => c.status !== FlashcardStatus.New).sort(() => Math.random() - 0.5);
+
+      studySet = [...newCards, ...otherCards].slice(0, sessionConfig.count).sort(() => Math.random() - 0.5);
+    } else {
+      studySet = [...dueCards].sort(() => Math.random() - 0.5);
+    }
 
     setQueue(studySet);
     setIsInitialized(true);

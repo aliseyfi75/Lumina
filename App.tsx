@@ -15,6 +15,7 @@ import { initializeTracking, trackEvent, setTrackingUserId, trackPageView, PAGE_
 import { Book, Layers, Database, Save, Cloud, BarChart2, Home, Sun, Moon, RefreshCw } from 'lucide-react';
 import Confetti from 'react-confetti';
 import { useWindowSize } from 'react-use';
+import { SessionConfigModal } from './components/SessionConfigModal';
 
 const LOCAL_STORAGE_KEY = 'lumina_cards_v1';
 const CLOUD_CONFIG_KEY = 'lumina_cloud_config';
@@ -86,6 +87,8 @@ const App: React.FC = () => {
   const [persistenceStatus, setPersistenceStatus] = useState<'granted' | 'denied' | 'prompt' | 'unsupported'>('prompt');
   const [storageEstimate, setStorageEstimate] = useState<{ usage: number; quota: number } | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
+
+  const [isSessionConfigOpen, setIsSessionConfigOpen] = useState(false);
 
   // Confetti State
   const { width, height } = useWindowSize();
@@ -652,6 +655,14 @@ const App: React.FC = () => {
     recordActivity();
   };
 
+  const handleStartStudySession = () => {
+    setIsSessionConfigOpen(true);
+  };
+
+  const handleSessionStart = (config: { mode: 'full' | 'short'; count?: number }) => {
+    navigate('/study', { state: { sessionConfig: config } });
+  };
+
   // Navigate from Dashboard search → Dictionary, passing query via router state
   const handleQuickSearch = (word: string) => {
     navigate('/dictionary', { state: { query: word } });
@@ -849,7 +860,13 @@ const App: React.FC = () => {
                 cards={cards}
                 studyHistory={studyHistory}
                 longestStreak={longestStreak}
-                onNavigate={(view) => navigate(`/${view === 'dashboard' ? '' : view}`)}
+                onNavigate={(view) => {
+                  if (view === 'study') {
+                    handleStartStudySession();
+                  } else {
+                    navigate(`/${view === 'dashboard' ? '' : view}`);
+                  }
+                }}
                 onQuickSearch={handleQuickSearch}
               />
             }
@@ -869,7 +886,7 @@ const App: React.FC = () => {
             element={
               <Flashcards
                 cards={cards}
-                onStartStudy={() => navigate('/study')}
+                onStartStudy={handleStartStudySession}
                 onDeleteCard={handleDeleteCard}
                 onReviewCard={handleReviewCard}
                 onOpenImport={() => setIsDataModalOpen(true)}
@@ -947,6 +964,17 @@ const App: React.FC = () => {
         onDisconnectCloud={handleDisconnectCloud}
         onCloudPull={handleCloudPull}
         onCloudPush={handleCloudPush}
+      />
+
+      <SessionConfigModal
+        isOpen={isSessionConfigOpen}
+        onClose={() => setIsSessionConfigOpen(false)}
+        onStart={handleSessionStart}
+        dueCount={cards.filter(c => {
+          if (c.status === FlashcardStatus.Mastered) return false;
+          if (c.status === FlashcardStatus.New) return true;
+          return (c.nextReviewDate ?? 0) <= Date.now();
+        }).length}
       />
     </div>
   );

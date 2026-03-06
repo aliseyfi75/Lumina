@@ -100,6 +100,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     const [showSuggestions, setShowSuggestions] = useState(false);
     const [isSearching, setIsSearching] = useState(false);
     const wrapperRef = useRef<HTMLDivElement>(null);
+    const lastSearched = useRef<string>('');
 
     // Inline flashcard modal state
     const [selectedCard, setSelectedCard] = useState<Flashcard | null>(null);
@@ -139,13 +140,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
     // ------------------------------------------------------------------
     useEffect(() => {
         const fetchSuggestions = async () => {
-            if (query.trim().length < 2) {
+            const currentQuery = query.trim();
+            if (currentQuery.length < 2 || currentQuery.toLowerCase() === lastSearched.current.toLowerCase()) {
                 setSuggestions([]);
+                setShowSuggestions(false);
                 return;
             }
             const words = await getWordSuggestions(query);
-            setSuggestions(words);
-            setShowSuggestions(words.length > 0);
+            if (query.trim().toLowerCase() !== lastSearched.current.toLowerCase()) {
+                setSuggestions(words);
+                setShowSuggestions(words.length > 0);
+            }
         };
         const t = setTimeout(fetchSuggestions, 300);
         return () => clearTimeout(t);
@@ -165,6 +170,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         e.preventDefault();
         const q = query.trim();
         if (!q) return;
+        lastSearched.current = q;
         setShowSuggestions(false);
         setIsSearching(true);
         await onQuickSearch(q);
@@ -172,6 +178,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     };
 
     const handleSuggestionClick = async (word: string) => {
+        lastSearched.current = word.trim();
         setQuery(word);
         setShowSuggestions(false);
         setIsSearching(true);
@@ -298,6 +305,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                         value={query}
                                         onChange={e => setQuery(e.target.value)}
                                         onFocus={() => { if (suggestions.length > 0) setShowSuggestions(true); }}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Escape') {
+                                                setShowSuggestions(false);
+                                            }
+                                        }}
                                         placeholder="Look up a word…"
                                         autoComplete="off"
                                         className="block w-full pl-11 pr-28 py-4 bg-white/10 backdrop-blur border border-white/20 rounded-2xl text-white text-lg placeholder:text-slate-500 focus:outline-none focus:border-brand-400 focus:ring-4 focus:ring-brand-400/20 transition-all"

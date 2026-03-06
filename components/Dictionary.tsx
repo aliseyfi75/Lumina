@@ -31,6 +31,7 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const lastSearched = useRef<string>(initialQuery || '');
 
   // Typo suggestion state
   const [typoSuggestion, setTypoSuggestion] = useState<string | null>(null);
@@ -38,23 +39,24 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
   // Debounce logic for autocomplete suggestions
   useEffect(() => {
     const fetchSuggestions = async () => {
-      if (query.trim().length < 2) {
+      const currentQuery = query.trim();
+      if (currentQuery.length < 2 || currentQuery.toLowerCase() === lastSearched.current.toLowerCase()) {
         setSuggestions([]);
+        setShowSuggestions(false);
         return;
       }
 
-      // Only fetch if we aren't already displaying a result for this exact query
-      // (prevents dropdown from popping up after hitting enter)
-      if (result && query.toLowerCase() === result.word.toLowerCase()) return;
-
       const words = await getWordSuggestions(query);
-      setSuggestions(words);
-      setShowSuggestions(words.length > 0);
+
+      if (query.trim().toLowerCase() !== lastSearched.current.toLowerCase()) {
+        setSuggestions(words);
+        setShowSuggestions(words.length > 0);
+      }
     };
 
     const timeoutId = setTimeout(fetchSuggestions, 300);
     return () => clearTimeout(timeoutId);
-  }, [query, result]);
+  }, [query]);
 
   // Click outside to close dropdown
   useEffect(() => {
@@ -70,6 +72,7 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
   const performSearch = async (searchQuery: string) => {
     if (!searchQuery.trim()) return;
 
+    lastSearched.current = searchQuery.trim();
     setLoading(true);
     setError('');
     setResult(null);
@@ -146,6 +149,11 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
             onFocus={() => {
               if (suggestions.length > 0) setShowSuggestions(true);
             }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                setShowSuggestions(false);
+              }
+            }}
             placeholder="Lookup a word..."
             className="block w-full pl-11 pr-4 py-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-2xl text-lg text-slate-900 dark:text-white shadow-sm placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 transition-all"
             autoComplete="off"
@@ -193,6 +201,58 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
               ?
             </p>
           )}
+        </div>
+      )}
+
+      {/* Loading Skeleton */}
+      {loading && !result && (
+        <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-xl shadow-slate-200/50 dark:shadow-none overflow-hidden border border-slate-100 dark:border-slate-700 animate-pulse">
+          <div className="p-8 border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/30">
+            <div className="flex items-baseline gap-4 flex-wrap">
+              <div className="h-10 w-48 bg-slate-200 dark:bg-slate-700 rounded-lg"></div>
+              <div className="h-6 w-24 bg-slate-200 dark:bg-slate-700 rounded-lg"></div>
+              <div className="h-8 w-8 bg-slate-200 dark:bg-slate-700 rounded-full ml-auto"></div>
+            </div>
+          </div>
+
+          <div className="p-8 space-y-8">
+            {/* Meaning Block 1 */}
+            <div className="space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="h-6 w-24 bg-slate-200 dark:bg-slate-700 rounded-full"></div>
+                <div className="h-px bg-slate-100 dark:bg-slate-700 flex-grow"></div>
+              </div>
+
+              <div className="space-y-6">
+                <div className="pl-4 border-l-2 border-slate-100 dark:border-slate-700 mt-2">
+                  <div className="h-5 w-full max-w-2xl bg-slate-200 dark:bg-slate-700 rounded mb-3"></div>
+                  <div className="h-5 w-5/6 max-w-xl bg-slate-200 dark:bg-slate-700 rounded mb-4"></div>
+                  <div className="h-4 w-3/4 max-w-lg bg-slate-200 dark:bg-slate-700 rounded mb-4"></div>
+                  <div className="h-8 w-40 bg-slate-200 dark:bg-slate-700 rounded-lg mt-3"></div>
+                </div>
+
+                <div className="pl-4 border-l-2 border-slate-100 dark:border-slate-700 mt-6">
+                  <div className="h-5 w-11/12 max-w-2xl bg-slate-200 dark:bg-slate-700 rounded mb-3"></div>
+                  <div className="h-8 w-40 bg-slate-200 dark:bg-slate-700 rounded-lg mt-3"></div>
+                </div>
+              </div>
+            </div>
+
+            {/* Meaning Block 2 */}
+            <div className="space-y-4 mt-8">
+              <div className="flex items-center gap-3">
+                <div className="h-6 w-20 bg-slate-200 dark:bg-slate-700 rounded-full"></div>
+                <div className="h-px bg-slate-100 dark:bg-slate-700 flex-grow"></div>
+              </div>
+
+              <div className="space-y-6">
+                <div className="pl-4 border-l-2 border-slate-100 dark:border-slate-700 mt-2">
+                  <div className="h-5 w-full max-w-xl bg-slate-200 dark:bg-slate-700 rounded mb-3"></div>
+                  <div className="h-8 w-40 bg-slate-200 dark:bg-slate-700 rounded-lg mt-3"></div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

@@ -39,24 +39,31 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
 
   // Debounce logic for autocomplete suggestions
   useEffect(() => {
+    let isActive = true;
+
     const fetchSuggestions = async () => {
       const currentQuery = query.trim();
       if (currentQuery.length < 2 || currentQuery.toLowerCase() === lastSearched.current.toLowerCase()) {
-        setSuggestions([]);
-        setShowSuggestions(false);
+        if (isActive) {
+          setSuggestions([]);
+          setShowSuggestions(false);
+        }
         return;
       }
 
       const words = await getWordSuggestions(query);
 
-      if (query.trim().toLowerCase() !== lastSearched.current.toLowerCase()) {
+      if (isActive && query.trim().toLowerCase() !== lastSearched.current.toLowerCase()) {
         setSuggestions(words);
         setShowSuggestions(words.length > 0);
       }
     };
 
     const timeoutId = setTimeout(fetchSuggestions, 300);
-    return () => clearTimeout(timeoutId);
+    return () => {
+      isActive = false;
+      clearTimeout(timeoutId);
+    };
   }, [query]);
 
   // Click outside to close dropdown
@@ -86,6 +93,7 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
       const data = await lookupWord(searchQuery);
       if (data && data.word) {
         setResult(data);
+        lastSearched.current = data.word.trim();
         setQuery(data.word); // Normalize case in input
       } else {
         // If not found, try to find suggestions for typos

@@ -229,19 +229,19 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
 
       <div className="flex-1 relative perspective-1000 mb-8 sm:px-12 flex justify-center items-center">
         {/* Swipe Indicators */}
-        <motion.div style={{ opacity: swipeRightOpacity, pointerEvents: 'none' }} className="absolute left-0 top-1/2 -translate-y-1/2 z-0 hidden sm:flex flex-col items-center text-green-500">
+        <motion.div style={{ opacity: swipeRightOpacity, pointerEvents: 'none' }} className="absolute left-0 top-1/2 -translate-y-1/2 z-0 flex flex-col items-center text-green-500">
           <MoveRight className="h-10 w-10" />
           <span className="font-bold tracking-widest uppercase mt-2 text-xs">Mastered</span>
         </motion.div>
-        <motion.div style={{ opacity: swipeLeftOpacity, pointerEvents: 'none' }} className="absolute right-0 top-1/2 -translate-y-1/2 z-0 hidden sm:flex flex-col items-center text-red-500">
+        <motion.div style={{ opacity: swipeLeftOpacity, pointerEvents: 'none' }} className="absolute right-0 top-1/2 -translate-y-1/2 z-0 flex flex-col items-center text-red-500">
           <MoveLeft className="h-10 w-10" />
           <span className="font-bold tracking-widest uppercase mt-2 text-xs">Again</span>
         </motion.div>
-        <motion.div style={{ opacity: swipeDownOpacity, pointerEvents: 'none' }} className="absolute top-[-20px] left-1/2 -translate-x-1/2 z-0 hidden sm:flex flex-col items-center text-blue-500">
+        <motion.div style={{ opacity: swipeDownOpacity, pointerEvents: 'none' }} className="absolute top-[-20px] left-1/2 -translate-x-1/2 z-0 flex flex-col items-center text-blue-500">
           <MoveDown className="h-10 w-10" />
           <span className="font-bold tracking-widest uppercase mt-2 text-xs">Learned</span>
         </motion.div>
-        <motion.div style={{ opacity: swipeUpOpacity, pointerEvents: 'none' }} className="absolute bottom-[-10px] left-1/2 -translate-x-1/2 z-0 hidden sm:flex flex-col items-center text-blue-500">
+        <motion.div style={{ opacity: swipeUpOpacity, pointerEvents: 'none' }} className="absolute bottom-[-10px] left-1/2 -translate-x-1/2 z-0 flex flex-col items-center text-blue-500">
           <MoveUp className="h-10 w-10" />
           <span className="font-bold tracking-widest uppercase mt-2 text-xs">Learned</span>
         </motion.div>

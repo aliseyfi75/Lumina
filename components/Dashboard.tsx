@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Flashcard, FlashcardStatus, ViewState } from '../types';
 import { getWordSuggestions } from '../services/suggestionService';
+import { playAudio } from '../utils/audio';
 import { motion } from 'framer-motion';
 import {
     Search, Play, BookOpen, CheckCircle, Brain, Loader2,
@@ -230,14 +231,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                     {selectedCard.phonetic && (
                                         <p className="text-slate-400 text-sm font-serif italic">{selectedCard.phonetic}</p>
                                     )}
-                                    {selectedCard.audio && (
-                                        <button
-                                            onClick={e => { e.stopPropagation(); new Audio(selectedCard.audio!).play(); }}
-                                            className="mt-1 p-1 text-slate-400 hover:text-brand-500 rounded-full transition-colors"
-                                        >
-                                            <Volume2 className="h-4 w-4" />
-                                        </button>
-                                    )}
+                                    <button
+                                        onClick={e => { e.stopPropagation(); playAudio(selectedCard.word, selectedCard.audio); }}
+                                        className="mt-1 p-1 text-slate-400 hover:text-brand-500 rounded-full transition-colors"
+                                    >
+                                        <Volume2 className="h-4 w-4" />
+                                    </button>
                                     <p className="text-slate-500 dark:text-slate-400 italic text-sm mt-1">{selectedCard.partOfSpeech}</p>
                                     <div className="absolute bottom-5 flex items-center gap-1.5 text-slate-300 dark:text-slate-600 text-xs font-medium uppercase tracking-wider">
                                         <RotateCw className="h-3.5 w-3.5" /> Tap to reveal
@@ -428,15 +427,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                                 {wordOfTheDay.phonetic && (
                                                     <span className="text-slate-400 text-sm font-serif italic">{wordOfTheDay.phonetic}</span>
                                                 )}
-                                                {wordOfTheDay.audio && (
-                                                    <button
-                                                        onClick={() => new Audio(wordOfTheDay.audio!).play()}
-                                                        className="p-1 text-slate-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded-full transition-colors"
-                                                        title="Listen"
-                                                    >
-                                                        <Volume2 className="h-4 w-4" />
-                                                    </button>
-                                                )}
+                                                <button
+                                                    onClick={() => playAudio(wordOfTheDay.word, wordOfTheDay.audio)}
+                                                    className="p-1 text-slate-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded-full transition-colors"
+                                                    title="Listen"
+                                                >
+                                                    <Volume2 className="h-4 w-4" />
+                                                </button>
                                                 <StatusPill status={wordOfTheDay.status} />
                                             </div>
                                             <p className="text-xs text-slate-400 mt-0.5 italic">{wordOfTheDay.partOfSpeech}</p>

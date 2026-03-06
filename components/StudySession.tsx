@@ -5,6 +5,7 @@ import Confetti from 'react-confetti';
 import { useWindowSize } from 'react-use';
 import { motion, useMotionValue, useTransform, PanInfo, AnimatePresence } from 'framer-motion';
 import { useLocation } from 'react-router-dom';
+import { playAudio } from '../utils/audio';
 
 interface StudySessionProps {
   cards: Flashcard[];
@@ -281,18 +282,16 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
                 <h2 className="text-5xl font-serif font-bold text-slate-900 dark:text-white mb-6">{currentCard.word}</h2>
                 <div className="flex items-center gap-3 justify-center">
                   {currentCard.phonetic && <p className="text-2xl text-slate-400 dark:text-slate-500 font-serif italic">{currentCard.phonetic}</p>}
-                  {currentCard.audio && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        new Audio(currentCard.audio!).play();
-                      }}
-                      className="p-2 text-slate-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded-full transition-colors z-10 relative"
-                      title="Listen to pronunciation"
-                    >
-                      <Volume2 className="h-6 w-6" />
-                    </button>
-                  )}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      playAudio(currentCard.word, currentCard.audio);
+                    }}
+                    className="p-2 text-slate-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded-full transition-colors z-10 relative"
+                    title="Listen to pronunciation"
+                  >
+                    <Volume2 className="h-6 w-6" />
+                  </button>
                 </div>
               </div>
 

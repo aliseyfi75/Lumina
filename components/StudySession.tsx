@@ -127,6 +127,11 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
         case 'ArrowUp':
           handleNext(3);
           break;
+        case ' ':
+        case 'Enter':
+          e.preventDefault();
+          setIsFlipped(prev => !prev);
+          break;
       }
     };
 

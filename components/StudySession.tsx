@@ -360,7 +360,7 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
                 >
                   <span className="text-sm font-bold uppercase tracking-wider text-slate-300 group-hover/btn:text-blue-400 mb-1 z-10 transition-colors">Learned</span>
                   <span className="text-[9px] text-slate-500 leading-tight mb-2 z-10 transition-colors">Pushes to<br />tomorrow</span>
-                  <div className="hidden sm:flex text-[10px] items-center gap-1 text-slate-600 bg-slate-900/50 px-2 py-0.5 rounded border border-slate-700/50 z-10 transition-colors"><MoveDown className="w-3 h-3" /> Swipe</div>
+                  <div className="hidden sm:flex text-[10px] items-center gap-1 text-slate-600 bg-slate-900/50 px-2 py-0.5 rounded border border-slate-700/50 z-10 transition-colors"><MoveDown className="w-3 h-3" /><MoveUp className="w-3 h-3" /> Swipe</div>
                 </button>
 
                 <button

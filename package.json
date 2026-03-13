@@ -13,6 +13,7 @@
     "date-fns": "^4.1.0",
     "framer-motion": "^12.34.5",
     "lucide-react": "^0.344.0",
+    "playwright": "^1.58.2",
     "react": "^18.2.0",
     "react-confetti": "^6.4.0",
     "react-dom": "^18.2.0",

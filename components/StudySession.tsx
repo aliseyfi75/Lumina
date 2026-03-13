@@ -41,12 +41,14 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
     let studySet: Flashcard[] = [];
 
     if (sessionConfig?.mode === 'short' && sessionConfig.count) {
-      const newCards = dueCards.filter(c => c.status === FlashcardStatus.New).sort(() => Math.random() - 0.5);
-      const otherCards = dueCards.filter(c => c.status !== FlashcardStatus.New).sort(() => Math.random() - 0.5);
+      const newCards = dueCards.filter(c => c.status === FlashcardStatus.New).sort((a, b) => (a.lastReviewed || 0) - (b.lastReviewed || 0));
+      const otherCards = dueCards.filter(c => c.status !== FlashcardStatus.New).sort((a, b) => (a.lastReviewed || 0) - (b.lastReviewed || 0));
 
-      studySet = [...newCards, ...otherCards].slice(0, sessionConfig.count).sort(() => Math.random() - 0.5);
+      studySet = [...newCards, ...otherCards].slice(0, sessionConfig.count);
     } else {
-      studySet = [...dueCards].sort(() => Math.random() - 0.5);
+      const newCards = dueCards.filter(c => c.status === FlashcardStatus.New).sort((a, b) => (a.lastReviewed || 0) - (b.lastReviewed || 0));
+      const otherCards = dueCards.filter(c => c.status !== FlashcardStatus.New).sort((a, b) => (a.lastReviewed || 0) - (b.lastReviewed || 0));
+      studySet = [...newCards, ...otherCards];
     }
 
     setQueue(studySet);

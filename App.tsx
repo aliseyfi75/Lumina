@@ -7,6 +7,7 @@ import { Flashcards } from './components/Flashcards';
 import { StudySession } from './components/StudySession';
 import { Statistics } from './components/Statistics';
 import { DataManagerModal } from './components/DataManagerModal';
+import { AnkiImportModal } from './components/AnkiImportModal';
 import { PwaInstallBanner } from './components/PwaInstallBanner';
 import { generateJSON, parseFileContent, downloadJSON, saveToLocalFile } from './services/fileService';
 import { getDetails, getDeck, updateDeck } from './services/pantryService';
@@ -71,6 +72,7 @@ const App: React.FC = () => {
   }, [deletedCards]);
 
   const [isDataModalOpen, setIsDataModalOpen] = useState(false);
+  const [ankiImportFile, setAnkiImportFile] = useState<File | null>(null);
 
   // File System State
   const [fileHandle, setFileHandle] = useState<FileSystemFileHandle | null>(null);
@@ -506,6 +508,17 @@ const App: React.FC = () => {
     if (importedData.studyHistory) setStudyHistory(prev => ({ ...prev, ...importedData.studyHistory }));
     if (importedData.longestStreak) setLongestStreak(prev => Math.max(prev, importedData.longestStreak!));
     trackEvent(TRACKING_ACTION.IMPORT_CSV, TRACKING_CATEGORY.DATA, 'card_count', importedData.cards.length);
+  };
+
+  const handleAnkiFileSelected = (file: File) => {
+    setIsDataModalOpen(false);
+    setAnkiImportFile(file);
+  };
+
+  const handleAnkiImport = (cards: Flashcard[]) => {
+    performMerge(cards);
+    setAnkiImportFile(null);
+    trackEvent(TRACKING_ACTION.IMPORT_CSV, TRACKING_CATEGORY.DATA, 'anki_card_count', cards.length);
   };
 
   // --- Cloud Handlers ---
@@ -948,6 +961,7 @@ const App: React.FC = () => {
         onClose={() => setIsDataModalOpen(false)}
         onExport={handleExportCSV}
         onImport={handleImportCSV}
+        onAnkiFileSelected={handleAnkiFileSelected}
         onConnectFile={handleConnectFile}
         onChangeFile={handleChangeFile}
         onDisconnectFile={handleDisconnectFile}
@@ -964,6 +978,12 @@ const App: React.FC = () => {
         onDisconnectCloud={handleDisconnectCloud}
         onCloudPull={handleCloudPull}
         onCloudPush={handleCloudPush}
+      />
+
+      <AnkiImportModal
+        file={ankiImportFile}
+        onClose={() => setAnkiImportFile(null)}
+        onImport={handleAnkiImport}
       />
 
       <SessionConfigModal

@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { X, Database, Download, Upload, CheckCircle, AlertCircle, RefreshCw, Save, AlertTriangle, Cloud, ExternalLink, HardDrive, ShieldCheck, ShieldAlert } from 'lucide-react';
+import { X, Database, Download, Upload, CheckCircle, AlertCircle, RefreshCw, Save, AlertTriangle, Cloud, ExternalLink, HardDrive, ShieldCheck, ShieldAlert, Zap } from 'lucide-react';
 import { CloudConfig } from '../types';
 
 interface DataManagerModalProps {
@@ -7,6 +7,7 @@ interface DataManagerModalProps {
   onClose: () => void;
   onExport: () => void;
   onImport: (file: File) => Promise<void>;
+  onAnkiFileSelected: (file: File) => void;
   onConnectFile?: () => Promise<boolean>;
   onChangeFile?: () => Promise<boolean>;
   onDisconnectFile?: () => Promise<void>;
@@ -34,6 +35,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
   onClose,
   onExport,
   onImport,
+  onAnkiFileSelected,
   onConnectFile,
   onChangeFile,
   onDisconnectFile,
@@ -52,6 +54,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
   onCloudPush
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const ankiFileInputRef = useRef<HTMLInputElement>(null);
   const [status, setStatus] = useState<{ type: 'idle' | 'success' | 'error', msg: string }>({ type: 'idle', msg: '' });
   const [isProcessing, setIsProcessing] = useState(false);
   const [isIframe, setIsIframe] = useState(false);
@@ -105,6 +108,13 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
       showMessage('error', 'Failed to parse JSON file.');
     }
     if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleAnkiFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    onAnkiFileSelected(file);
+    if (ankiFileInputRef.current) ankiFileInputRef.current.value = '';
   };
 
   const handleConnectLocal = async () => {
@@ -365,9 +375,32 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
             );
           })()}
 
+          {/* ── Anki Import ─────────────────────────────────────────────── */}
+          <div className="p-4 rounded-xl border border-orange-100 dark:border-orange-800/40 bg-orange-50/40 dark:bg-orange-900/10 space-y-3">
+            <div className="flex items-center gap-2">
+              <Zap className="h-4 w-4 text-orange-500" />
+              <span className="text-sm font-semibold text-slate-800 dark:text-white">Import from Anki</span>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Upload an <strong>.apkg</strong> file exported from Anki. You'll be able to map fields before importing.
+            </p>
+            <button
+              onClick={() => ankiFileInputRef.current?.click()}
+              className="w-full flex items-center justify-center gap-2 py-2.5 bg-orange-500 text-white text-sm font-medium rounded-xl hover:bg-orange-600 transition-colors shadow-sm shadow-orange-500/20"
+            >
+              <Upload className="h-4 w-4" />
+              Choose Anki Deck (.apkg)
+            </button>
+            <input
+              type="file"
+              ref={ankiFileInputRef}
+              accept=".apkg"
+              className="hidden"
+              onChange={handleAnkiFileChange}
+            />
+          </div>
 
 
-          {/* Cloud Sync Section */}
           <div className={`p-5 rounded-xl border transition-colors ${cloudConfig ? 'bg-sky-50/50 dark:bg-sky-900/10 border-sky-100 dark:border-sky-800/40' : 'bg-slate-50 dark:bg-slate-900/30 border-slate-200 dark:border-slate-700'}`}>
             <div className="flex items-start justify-between mb-4">
               <div>

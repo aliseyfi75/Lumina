@@ -25,6 +25,7 @@ interface DataManagerModalProps {
   // Cloud Props
   cloudConfig: CloudConfig | null;
   onConnectCloud: (pantryId: string) => Promise<void>;
+  onMigrateCloud?: (newPantryId: string, oldPantryId?: string) => Promise<{ cardCount: number; historyDays: number }>;
   onDisconnectCloud: () => void;
   onCloudPull: () => Promise<void>;
   onCloudPush: () => Promise<void>;
@@ -49,6 +50,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
   lastSavedAt,
   cloudConfig,
   onConnectCloud,
+  onMigrateCloud,
   onDisconnectCloud,
   onCloudPull,
   onCloudPush
@@ -76,11 +78,19 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
 
   // Cloud Form State
   const [pantryIdInput, setPantryIdInput] = useState('');
+  const [isMigratingCloud, setIsMigratingCloud] = useState(false);
+  const [newPantryIdInput, setNewPantryIdInput] = useState('');
+  const [oldPantryIdInput, setOldPantryIdInput] = useState('');
 
   useEffect(() => {
     setIsIframe(window.self !== window.top);
     if (isOpen && cloudConfig) {
       setPantryIdInput(cloudConfig.pantryId);
+      setOldPantryIdInput(cloudConfig.pantryId);
+    }
+    if (!isOpen) {
+      setIsMigratingCloud(false);
+      setNewPantryIdInput('');
     }
   }, [isOpen, cloudConfig]);
 
@@ -166,10 +176,43 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
 
     setIsProcessing(true);
     try {
-      await onConnectCloud(pantryIdInput.trim());
-      showMessage('success', 'Connected to Pantry!');
+      if (onMigrateCloud) {
+        const res = await onMigrateCloud(pantryIdInput.trim(), oldPantryIdInput.trim() || undefined);
+        showMessage('success', `Connected & migrated ${res.cardCount} cards (${res.historyDays} study days) to Pantry!`);
+      } else {
+        await onConnectCloud(pantryIdInput.trim());
+        showMessage('success', 'Connected to Pantry!');
+      }
+      setIsMigratingCloud(false);
+      setNewPantryIdInput('');
     } catch (error: any) {
       showMessage('error', error.message || 'Failed to connect to Pantry');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleCloudMigrateSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const targetId = newPantryIdInput.trim();
+    if (!targetId) return showMessage('error', 'New Pantry ID is required');
+    if (cloudConfig && targetId === cloudConfig.pantryId) {
+      return showMessage('error', 'Please enter a different Pantry ID to migrate to');
+    }
+
+    setIsProcessing(true);
+    try {
+      if (onMigrateCloud) {
+        const res = await onMigrateCloud(targetId, cloudConfig?.pantryId || oldPantryIdInput.trim() || undefined);
+        showMessage('success', `Migrated ${res.cardCount} cards & ${res.historyDays} study days to new Pantry ID!`);
+      } else {
+        await onConnectCloud(targetId);
+        showMessage('success', 'Migrated to new Pantry ID!');
+      }
+      setIsMigratingCloud(false);
+      setNewPantryIdInput('');
+    } catch (error: any) {
+      showMessage('error', error.message || 'Failed to migrate to new Pantry ID');
     } finally {
       setIsProcessing(false);
     }
@@ -186,7 +229,11 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
         showMessage('success', 'Flashcards saved to Cloud!');
       }
     } catch (error: any) {
-      showMessage('error', error.message || `Failed to ${action} cloud data`);
+      const msg = error.message || `Failed to ${action} cloud data`;
+      showMessage('error', msg);
+      if (msg.toLowerCase().includes('not found')) {
+        setIsMigratingCloud(true);
+      }
     } finally {
       setIsProcessing(false);
     }
@@ -424,28 +471,60 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                 <div>
                   <input
                     type="text"
-                    placeholder="Your Pantry ID"
+                    placeholder="New or Existing Pantry ID"
                     value={pantryIdInput}
                     onChange={(e) => setPantryIdInput(e.target.value)}
                     className="w-full text-sm px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent"
                   />
-                  <div className="mt-2 text-[10px] text-slate-500 flex flex-wrap gap-1">
-                    <span>Don't have one?</span>
-                    <a href="https://getpantry.cloud/" target="_blank" rel="noreferrer" className="text-sky-600 hover:underline flex items-center gap-1 font-medium">
-                      Create Pantry ID <ExternalLink className="h-3 w-3" />
-                    </a>
+                  <div className="mt-2 flex items-center justify-between text-[10px] text-slate-500 flex-wrap gap-1">
+                    <div className="flex items-center gap-1">
+                      <span>Don't have one?</span>
+                      <a href="https://getpantry.cloud/" target="_blank" rel="noreferrer" className="text-sky-600 hover:underline flex items-center gap-1 font-medium">
+                        Create Pantry ID <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsMigratingCloud((v) => !v)}
+                      className="text-sky-600 dark:text-sky-400 hover:underline font-medium"
+                    >
+                      {isMigratingCloud ? 'Hide migration options' : 'Migrating from an old ID?'}
+                    </button>
                   </div>
                 </div>
+
+                {isMigratingCloud && (
+                  <div className="p-3 rounded-lg bg-sky-50/80 dark:bg-sky-900/20 border border-sky-200 dark:border-sky-800/50 space-y-2">
+                    <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
+                      All local flashcards ({cardCount}), study history, and streaks are automatically migrated to your new Pantry ID. If your previous Pantry ID is still active, enter it below to also merge its cloud data:
+                    </p>
+                    <input
+                      type="text"
+                      placeholder="Previous Pantry ID (optional)"
+                      value={oldPantryIdInput}
+                      onChange={(e) => setOldPantryIdInput(e.target.value)}
+                      className="w-full text-xs px-2.5 py-1.5 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    />
+                  </div>
+                )}
+
                 <button
                   type="submit"
                   disabled={isProcessing}
                   className="w-full py-2 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 text-sm font-medium rounded-lg hover:bg-slate-800 dark:hover:bg-white disabled:opacity-50 transition-colors"
                 >
-                  {isProcessing ? 'Connecting...' : 'Connect Storage'}
+                  {isProcessing ? 'Migrating & Connecting...' : isMigratingCloud ? 'Migrate All Data & Connect' : 'Connect & Sync Storage'}
                 </button>
               </form>
             ) : (
               <div className="space-y-4">
+                <div className="flex items-center justify-between text-xs bg-white/80 dark:bg-slate-800/80 px-3 py-2 rounded-lg border border-sky-100 dark:border-sky-800/40">
+                  <span className="text-slate-500 dark:text-slate-400">Connected ID:</span>
+                  <span className="font-mono text-slate-700 dark:text-slate-200 truncate max-w-[220px]" title={cloudConfig.pantryId}>
+                    {cloudConfig.pantryId}
+                  </span>
+                </div>
+
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     onClick={() => handleCloudAction('pull')}
@@ -464,14 +543,69 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                     <span className="text-xs font-medium">Save to Cloud</span>
                   </button>
                 </div>
+
+                {isMigratingCloud && (
+                  <form onSubmit={handleCloudMigrateSubmit} className="p-3.5 rounded-xl bg-white dark:bg-slate-800 border border-sky-200 dark:border-sky-700 space-y-3 animate-in fade-in duration-200">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+                        Migrate to New Pantry ID
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setIsMigratingCloud(false)}
+                        className="text-[11px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                      Enter a new Pantry ID below. All {cardCount} flashcards, study history, and streaks will be transferred to the new ID.
+                    </p>
+                    <input
+                      type="text"
+                      placeholder="Paste new Pantry ID"
+                      value={newPantryIdInput}
+                      onChange={(e) => setNewPantryIdInput(e.target.value)}
+                      className="w-full text-sm px-3 py-2 border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    />
+                    <div className="flex items-center justify-between gap-2">
+                      <a
+                        href="https://getpantry.cloud/"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[11px] text-sky-600 hover:underline flex items-center gap-1 font-medium"
+                      >
+                        Create New Pantry ID <ExternalLink className="h-3 w-3" />
+                      </a>
+                      <button
+                        type="submit"
+                        disabled={isProcessing || !newPantryIdInput.trim()}
+                        className="px-3.5 py-1.5 bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold rounded-lg disabled:opacity-50 transition-colors"
+                      >
+                        {isProcessing ? 'Migrating...' : 'Migrate All Data'}
+                      </button>
+                    </div>
+                  </form>
+                )}
+
                 <div className="flex items-center justify-between pt-3 border-t border-sky-200/50">
                   <div className="text-xs text-sky-700 dark:text-sky-400 flex items-center gap-1.5">
                     <RefreshCw className="h-3 w-3 animate-spin" style={{ animationDuration: '3s' }} />
                     Auto-sync enabled
                   </div>
-                  <button onClick={onDisconnectCloud} className="text-xs text-red-500 hover:underline">
-                    Disconnect
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setIsMigratingCloud((v) => !v)}
+                      className="text-xs text-sky-600 dark:text-sky-400 font-medium hover:underline"
+                    >
+                      {isMigratingCloud ? 'Close Migrate' : 'Migrate / Change ID'}
+                    </button>
+                    <span className="text-slate-300 dark:text-slate-600">·</span>
+                    <button onClick={onDisconnectCloud} className="text-xs text-red-500 hover:underline">
+                      Disconnect
+                    </button>
+                  </div>
                 </div>
               </div>
             )}

@@ -44,6 +44,7 @@ export default defineConfig({
             handler: 'NetworkFirst',
             options: {
               cacheName: 'dictionary-api-cache',
+              networkTimeoutSeconds: 3,
               expiration: { maxAgeSeconds: 60 * 60 * 24 },
             },
           },
@@ -52,6 +53,7 @@ export default defineConfig({
             handler: 'NetworkFirst',
             options: {
               cacheName: 'pantry-api-cache',
+              networkTimeoutSeconds: 5,
               expiration: { maxAgeSeconds: 60 * 5 },
             },
           },

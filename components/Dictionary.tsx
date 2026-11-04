@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { WordEntry, Flashcard } from '../types';
-import { lookupWord, getSpellingSuggestions } from '../services/dictionaryService';
+import { lookupWord, fetchImageForWord, getSpellingSuggestions, prefetchWord } from '../services/dictionaryService';
 import { getWordSuggestions } from '../services/suggestionService';
 import { trackEvent, TRACKING_ACTION, TRACKING_CATEGORY } from '../services/trackingService';
 import { playAudio } from '../utils/audio';
@@ -33,6 +33,7 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
   const [showSuggestions, setShowSuggestions] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const lastSearched = useRef<string>(initialQuery || '');
+  const searchRequestIdRef = useRef<number>(0);
 
   // Typo suggestion state
   const [typoSuggestion, setTypoSuggestion] = useState<string | null>(null);
@@ -51,15 +52,23 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
         return;
       }
 
-      const words = await getWordSuggestions(query);
+      const words = await getWordSuggestions(currentQuery);
 
       if (isActive && query.trim().toLowerCase() !== lastSearched.current.toLowerCase()) {
         setSuggestions(words);
         setShowSuggestions(words.length > 0);
+        // Prefetch top suggestion and exact match so search/click is instantaneous
+        if (words.length > 0) {
+          prefetchWord(words[0]);
+          const exact = words.find(w => w.toLowerCase() === currentQuery.toLowerCase());
+          if (exact && exact !== words[0]) {
+            prefetchWord(exact);
+          }
+        }
       }
     };
 
-    const timeoutId = setTimeout(fetchSuggestions, 300);
+    const timeoutId = setTimeout(fetchSuggestions, 200);
     return () => {
       isActive = false;
       clearTimeout(timeoutId);
@@ -78,35 +87,53 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
   }, []);
 
   const performSearch = async (searchQuery: string) => {
-    if (!searchQuery.trim()) return;
+    const trimmedQuery = searchQuery.trim();
+    if (!trimmedQuery) return;
 
-    lastSearched.current = searchQuery.trim();
+    const requestId = ++searchRequestIdRef.current;
+    lastSearched.current = trimmedQuery;
     setLoading(true);
     setError('');
     setResult(null);
     setTypoSuggestion(null);
     setShowSuggestions(false); // Hide dropdown immediately
+    setSuggestions([]);
 
-    trackEvent(TRACKING_ACTION.SEARCH, TRACKING_CATEGORY.DICTIONARY, searchQuery);
+    trackEvent(TRACKING_ACTION.SEARCH, TRACKING_CATEGORY.DICTIONARY, trimmedQuery);
 
     try {
-      const data = await lookupWord(searchQuery);
+      const data = await lookupWord(trimmedQuery);
+      if (requestId !== searchRequestIdRef.current) return;
+
       if (data && data.word) {
         setResult(data);
         lastSearched.current = data.word.trim();
         setQuery(data.word); // Normalize case in input
+        setLoading(false);
+
+        // If the image wasn't in the quick cache window yet, resolve it non-blockingly in the background
+        if (!data.image) {
+          fetchImageForWord(data.word).then(image => {
+            if (image && requestId === searchRequestIdRef.current) {
+              setResult(prev => (prev && prev.word === data.word ? { ...prev, image } : prev));
+            }
+          });
+        }
       } else {
         // If not found, try to find suggestions for typos
-        const typoSuggestions = await getSpellingSuggestions(searchQuery);
+        const typoSuggestions = await getSpellingSuggestions(trimmedQuery);
+        if (requestId !== searchRequestIdRef.current) return;
         if (typoSuggestions.length > 0) {
           // Use the first suggestion
           setTypoSuggestion(typoSuggestions[0]);
+          prefetchWord(typoSuggestions[0]);
         }
-        setError(`Could not find a definition for "${searchQuery}".`);
+        setError(`Could not find a definition for "${trimmedQuery}".`);
+        setLoading(false);
       }
     } catch (err) {
+      if (requestId !== searchRequestIdRef.current) return;
       setError('An error occurred while fetching the definition. Please try again.');
-    } finally {
       setLoading(false);
     }
   };
@@ -116,9 +143,8 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
     if (initialQuery && initialQuery.trim()) {
       performSearch(initialQuery.trim());
     }
-    // Only run on mount — location.state doesn't change after initial render
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [initialQuery]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -169,7 +195,7 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
           />
           <button
             type="submit"
-            disabled={loading || !query.trim()}
+            disabled={(loading && query.trim().toLowerCase() === lastSearched.current.toLowerCase()) || !query.trim()}
             className="absolute right-2 top-2 bottom-2 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-4 rounded-xl font-medium hover:bg-slate-800 dark:hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Search'}
@@ -183,6 +209,7 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
               {suggestions.map((word, index) => (
                 <li
                   key={index}
+                  onMouseEnter={() => prefetchWord(word)}
                   onClick={() => handleSuggestionClick(word)}
                   className="px-4 py-3 flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200 transition-colors border-b border-slate-50 dark:border-slate-700 last:border-none"
                 >

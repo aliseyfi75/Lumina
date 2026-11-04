@@ -82,8 +82,10 @@ const App: React.FC = () => {
   // Cloud Sync State
   const [cloudConfig, setCloudConfig] = useState<CloudConfig | null>(null);
   const [isCloudSaving, setIsCloudSaving] = useState(false);
+  const [isSyncingOffline, setIsSyncingOffline] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [pendingCloudSync, setPendingCloudSync] = useState(false);
+  const skipNextCloudAutoSaveRef = useRef(false);
 
   // Storage metadata
   const [persistenceStatus, setPersistenceStatus] = useState<'granted' | 'denied' | 'prompt' | 'unsupported'>('prompt');
@@ -108,6 +110,65 @@ const App: React.FC = () => {
     return result;
   };
 
+  // Pure helper: merge two card arrays while honoring tombstones
+  const mergeCardArrays = (
+    baseCards: Flashcard[],
+    incoming: Flashcard[],
+    tombstones: Record<string, number>
+  ): Flashcard[] => {
+    const liveMap = deletedCardsRef.current;
+    const isDeleted = (id: string) =>
+      liveMap.has(id) || Object.prototype.hasOwnProperty.call(tombstones, id);
+
+    const cardMap = new Map<string, Flashcard>();
+    baseCards.forEach(c => {
+      if (!isDeleted(c.id)) cardMap.set(c.id, c);
+    });
+
+    incoming
+      .filter(c => !isDeleted(c.id))
+      .forEach(c => {
+        const duplicateId = Array.from(cardMap.keys()).find(key => {
+          const existing = cardMap.get(key)!;
+          return existing.word.toLowerCase() === c.word.toLowerCase() &&
+            existing.mainDefinition === c.mainDefinition;
+        });
+
+        if (duplicateId) {
+          const existing = cardMap.get(duplicateId)!;
+          const incomingTs = c.updatedAt ?? c.lastReviewed ?? 0;
+          const existingTs = existing.updatedAt ?? existing.lastReviewed ?? 0;
+
+          if (incomingTs > existingTs) {
+            cardMap.set(duplicateId, { ...existing, ...c, id: duplicateId });
+          }
+        } else {
+          cardMap.set(c.id, c);
+        }
+      });
+
+    const now = Date.now();
+    return Array.from(cardMap.values()).map(c => {
+      if (c.status === FlashcardStatus.Learning && c.nextReviewDate && c.nextReviewDate < now) {
+        return { ...c, nextReviewDate: now };
+      }
+      return c;
+    }).sort((a, b) => b.createdAt - a.createdAt);
+  };
+
+  const mergeHistoryRecords = (
+    ...histories: (Record<string, number> | undefined)[]
+  ): Record<string, number> => {
+    const merged: Record<string, number> = {};
+    for (const h of histories) {
+      if (!h) continue;
+      for (const [date, count] of Object.entries(h)) {
+        merged[date] = Math.max(merged[date] || 0, count);
+      }
+    }
+    return merged;
+  };
+
   // Helper: Merge incoming cards with existing state, honouring the tombstone map
   const performMerge = useCallback((
     incoming: Flashcard[],
@@ -123,51 +184,7 @@ const App: React.FC = () => {
       return merged;
     });
 
-    setCards(prev => {
-      // Read from ref — always current, no stale closure, no dep-array entry
-      const liveMap = deletedCardsRef.current;
-      const isDeleted = (id: string) =>
-        liveMap.has(id) || Object.prototype.hasOwnProperty.call(incomingDeletedCards, id);
-
-      const cardMap = new Map<string, Flashcard>();
-      // Only keep existing cards that haven't been tombstoned
-      prev.forEach(c => {
-        if (!isDeleted(c.id)) cardMap.set(c.id, c);
-      });
-
-      // Filter incoming by tombstones, then merge
-      incoming
-        .filter(c => !isDeleted(c.id))
-        .forEach(c => {
-          const duplicateId = Array.from(cardMap.keys()).find(key => {
-            const existing = cardMap.get(key)!;
-            return existing.word.toLowerCase() === c.word.toLowerCase() &&
-              existing.mainDefinition === c.mainDefinition;
-          });
-
-          if (duplicateId) {
-            const existing = cardMap.get(duplicateId)!;
-            // Conflict Resolution: Only update if incoming is newer than local.
-            // Use updatedAt if available, otherwise fallback to lastReviewed or 0.
-            const incomingTs = c.updatedAt ?? c.lastReviewed ?? 0;
-            const existingTs = existing.updatedAt ?? existing.lastReviewed ?? 0;
-
-            if (incomingTs > existingTs) {
-              cardMap.set(duplicateId, { ...existing, ...c, id: duplicateId });
-            }
-          } else {
-            cardMap.set(c.id, c);
-          }
-        });
-
-      const now = Date.now();
-      return Array.from(cardMap.values()).map(c => {
-        if (c.status === FlashcardStatus.Learning && c.nextReviewDate && c.nextReviewDate < now) {
-          return { ...c, nextReviewDate: now };
-        }
-        return c;
-      }).sort((a, b) => b.createdAt - a.createdAt);
-    });
+    setCards(prev => mergeCardArrays(prev, incoming, incomingDeletedCards));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // intentionally empty — reads tombstones via ref, not closure
 
@@ -279,6 +296,7 @@ const App: React.FC = () => {
               setLongestStreak(prev => Math.max(prev, cloudData.longestStreak!));
             }
 
+            skipNextCloudAutoSaveRef.current = true;
             setCloudConfig(config);
             initializeTracking(config.pantryId);
           } else {
@@ -286,7 +304,10 @@ const App: React.FC = () => {
           }
         } catch (e) {
           console.error('Failed to load cloud backup on init', e);
-          if (savedCloudConfig) setCloudConfig(JSON.parse(savedCloudConfig));
+          if (savedCloudConfig) {
+            skipNextCloudAutoSaveRef.current = true;
+            setCloudConfig(JSON.parse(savedCloudConfig));
+          }
           initializeTracking();
         }
       } else {
@@ -377,6 +398,11 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!cloudConfig || !cards.length) return;
 
+    if (skipNextCloudAutoSaveRef.current) {
+      skipNextCloudAutoSaveRef.current = false;
+      return;
+    }
+
     if (!isOnline) {
       // Mark dirty so we sync the moment connectivity returns
       setPendingCloudSync(true);
@@ -390,31 +416,40 @@ const App: React.FC = () => {
         setPendingCloudSync(false);
       } catch (error) {
         console.error('Auto-save cloud failed:', error);
-        setPendingCloudSync(true); // will retry when online
+        if (!navigator.onLine) {
+          setPendingCloudSync(true); // will retry when online
+        }
       } finally {
         setIsCloudSaving(false);
       }
     }, 2000);
     return () => clearTimeout(timeoutId);
-  }, [cards, studyHistory, longestStreak, cloudConfig, isOnline]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cards, studyHistory, longestStreak, cloudConfig]);
 
   // 5. Flush pending sync when coming back online (or cloud config is restored)
   useEffect(() => {
     if (!isOnline || !cloudConfig || !pendingCloudSync || !cards.length) return;
+    let cancelled = false;
     const flush = async () => {
-      setIsCloudSaving(true);
+      setIsSyncingOffline(true);
       try {
         await updateDeck(cloudConfig.pantryId, { cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() });
-        setPendingCloudSync(false);
       } catch (e) {
         console.error('Pending sync flush failed:', e);
       } finally {
-        setIsCloudSaving(false);
+        if (!cancelled) {
+          setPendingCloudSync(false);
+          setIsSyncingOffline(false);
+        }
       }
     };
     flush();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOnline, cloudConfig, pendingCloudSync]);
+  }, [isOnline, cloudConfig]);
 
   // --- File Handlers ---
 
@@ -523,35 +558,105 @@ const App: React.FC = () => {
 
   // --- Cloud Handlers ---
 
-  const handleConnectCloud = async (pantryId: string) => {
-    await getDetails(pantryId);
-    const cloudData = await getDeck(pantryId);
-    if (cloudData.cards && cloudData.cards.length > 0) {
-      performMerge(cloudData.cards, cloudData.deletedCards ?? {});
-    }
-    if (cloudData.studyHistory) setStudyHistory(prev => ({ ...prev, ...cloudData.studyHistory }));
-    if (cloudData.longestStreak) setLongestStreak(prev => Math.max(prev, cloudData.longestStreak!));
+  const handleMigrateCloud = async (
+    newPantryId: string,
+    oldPantryId?: string
+  ): Promise<{ cardCount: number; historyDays: number }> => {
+    const cleanNewId = newPantryId.trim();
+    const cleanOldId = (oldPantryId ?? cloudConfig?.pantryId ?? '').trim();
 
-    const config = { pantryId };
-    setCloudConfig(config);
-    localStorage.setItem(CLOUD_CONFIG_KEY, JSON.stringify(config));
-    setTrackingUserId(pantryId);
-    trackEvent(TRACKING_ACTION.CONNECT_CLOUD, TRACKING_CATEGORY.CLOUD);
+    // 1. Validate that the new Pantry ID exists on Pantry's servers
+    await getDetails(cleanNewId);
 
-    // Immediately push any local data that the cloud may not have yet
-    if (cards.length > 0) {
+    // 2. Best-effort pull from old Pantry ID (if provided and distinct from new ID)
+    let oldCloudData = { cards: [] as Flashcard[], studyHistory: {} as Record<string, number>, longestStreak: 0, deletedCards: {} as Record<string, number> };
+    if (cleanOldId && cleanOldId !== cleanNewId) {
       try {
-        await updateDeck(pantryId, { cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() });
-        setPendingCloudSync(false);
-      } catch (e) {
-        // If offline at this point, the flush effect will retry
-        setPendingCloudSync(true);
+        const fetchedOld = await getDeck(cleanOldId);
+        oldCloudData = {
+          cards: fetchedOld.cards ?? [],
+          studyHistory: fetchedOld.studyHistory ?? {},
+          longestStreak: fetchedOld.longestStreak ?? 0,
+          deletedCards: fetchedOld.deletedCards ?? {},
+        };
+      } catch {
+        // Old Pantry ID may have expired; local state already holds cached history
       }
     }
+
+    // 3. Pull any existing data on the new Pantry ID
+    const newCloudData = await getDeck(cleanNewId);
+
+    // 4. Merge tombstones (local + old cloud + new cloud)
+    const cutoff = Date.now() - TOMBSTONE_TTL;
+    const mergedDeletedRecord: Record<string, number> = {
+      ...prunedDeletedCards(),
+    };
+    for (const src of [oldCloudData.deletedCards, newCloudData.deletedCards ?? {}]) {
+      for (const [id, deletedAt] of Object.entries(src)) {
+        if (deletedAt >= cutoff) {
+          mergedDeletedRecord[id] = Math.max(mergedDeletedRecord[id] || 0, deletedAt);
+        }
+      }
+    }
+
+    // 5. Merge cards, study history, and longest streak across all sources
+    const afterOldCards = mergeCardArrays(cards, oldCloudData.cards, mergedDeletedRecord);
+    const mergedCards = mergeCardArrays(afterOldCards, newCloudData.cards ?? [], mergedDeletedRecord);
+    const mergedHistory = mergeHistoryRecords(studyHistory, oldCloudData.studyHistory, newCloudData.studyHistory);
+    const mergedStreak = Math.max(
+      longestStreak,
+      oldCloudData.longestStreak || 0,
+      newCloudData.longestStreak || 0,
+      calculateCurrentStreak(mergedHistory)
+    );
+
+    // 6. Push complete migrated dataset to the new Pantry ID immediately
+    await updateDeck(cleanNewId, {
+      cards: mergedCards,
+      studyHistory: mergedHistory,
+      longestStreak: mergedStreak,
+      deletedCards: mergedDeletedRecord,
+    });
+
+    // 7. Update local state & persistence
+    setDeletedCards(new Map(Object.entries(mergedDeletedRecord)));
+    setCards(mergedCards);
+    setStudyHistory(mergedHistory);
+    setLongestStreak(mergedStreak);
+    setPendingCloudSync(false);
+
+    skipNextCloudAutoSaveRef.current = true;
+    const config = { pantryId: cleanNewId };
+    setCloudConfig(config);
+    localStorage.setItem(CLOUD_CONFIG_KEY, JSON.stringify(config));
+    setTrackingUserId(cleanNewId);
+    trackEvent(TRACKING_ACTION.CONNECT_CLOUD, TRACKING_CATEGORY.CLOUD);
+
+    if (fileHandle) {
+      saveToLocalFile(fileHandle, {
+        cards: mergedCards,
+        studyHistory: mergedHistory,
+        longestStreak: mergedStreak,
+        deletedCards: mergedDeletedRecord,
+      }).catch(() => {});
+    }
+
+    return {
+      cardCount: mergedCards.length,
+      historyDays: Object.keys(mergedHistory).length,
+    };
+  };
+
+  const handleConnectCloud = async (pantryId: string) => {
+    await handleMigrateCloud(pantryId);
   };
 
   const handleDisconnectCloud = () => {
     setCloudConfig(null);
+    setPendingCloudSync(false);
+    setIsCloudSaving(false);
+    setIsSyncingOffline(false);
     localStorage.removeItem(CLOUD_CONFIG_KEY);
     trackEvent(TRACKING_ACTION.DISCONNECT_CLOUD, TRACKING_CATEGORY.CLOUD);
   };
@@ -589,6 +694,7 @@ const App: React.FC = () => {
   const handleCloudPush = async () => {
     if (!cloudConfig) return;
     await updateDeck(cloudConfig.pantryId, { cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() });
+    setPendingCloudSync(false);
     trackEvent(TRACKING_ACTION.CLOUD_PUSH, TRACKING_CATEGORY.CLOUD);
   };
 
@@ -933,21 +1039,21 @@ const App: React.FC = () => {
       </main>
 
       {/* Auto-Save Indicators */}
-      {(isFileSaving || isCloudSaving || (!isOnline && cloudConfig) || (isOnline && pendingCloudSync && !isCloudSaving)) && (
+      {(isFileSaving || isCloudSaving || isSyncingOffline || (!isOnline && cloudConfig)) && (
         <div className="fixed bottom-4 right-4 flex flex-col gap-2 items-end z-50">
-          {(isFileSaving || isCloudSaving) && (
+          {(isFileSaving || isCloudSaving) && !isSyncingOffline && (
             <div className="bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 text-xs px-3 py-1.5 rounded-full shadow-lg animate-pulse flex items-center gap-2">
               {isCloudSaving ? <Cloud className="h-3 w-3" /> : <Save className="h-3 w-3" />}
               {isCloudSaving ? 'Syncing to Cloud...' : 'Saving to File...'}
             </div>
           )}
-          {!isOnline && cloudConfig && !isCloudSaving && (
+          {!isOnline && cloudConfig && !isCloudSaving && !isSyncingOffline && (
             <div className="bg-amber-500 text-white text-xs px-3 py-1.5 rounded-full shadow-lg flex items-center gap-2">
               <RefreshCw className="h-3 w-3" />
               Offline — changes will sync when connected
             </div>
           )}
-          {isOnline && pendingCloudSync && !isCloudSaving && (
+          {isOnline && isSyncingOffline && (
             <div className="bg-brand-600 text-white text-xs px-3 py-1.5 rounded-full shadow-lg animate-pulse flex items-center gap-2">
               <RefreshCw className="h-3 w-3 animate-spin" />
               Syncing offline changes...
@@ -975,6 +1081,7 @@ const App: React.FC = () => {
         lastSavedAt={lastSavedAt}
         cloudConfig={cloudConfig}
         onConnectCloud={handleConnectCloud}
+        onMigrateCloud={handleMigrateCloud}
         onDisconnectCloud={handleDisconnectCloud}
         onCloudPull={handleCloudPull}
         onCloudPush={handleCloudPush}

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Flashcard, FlashcardStatus, ViewState } from '../types';
 import { getWordSuggestions } from '../services/suggestionService';
+import { prefetchWord } from '../services/dictionaryService';
 import { playAudio } from '../utils/audio';
 import { motion } from 'framer-motion';
 import {
@@ -140,21 +141,34 @@ export const Dashboard: React.FC<DashboardProps> = ({
     // Autocomplete for search bar
     // ------------------------------------------------------------------
     useEffect(() => {
+        let isActive = true;
         const fetchSuggestions = async () => {
             const currentQuery = query.trim();
             if (currentQuery.length < 2 || currentQuery.toLowerCase() === lastSearched.current.toLowerCase()) {
-                setSuggestions([]);
-                setShowSuggestions(false);
+                if (isActive) {
+                    setSuggestions([]);
+                    setShowSuggestions(false);
+                }
                 return;
             }
-            const words = await getWordSuggestions(query);
-            if (query.trim().toLowerCase() !== lastSearched.current.toLowerCase()) {
+            const words = await getWordSuggestions(currentQuery);
+            if (isActive && query.trim().toLowerCase() !== lastSearched.current.toLowerCase()) {
                 setSuggestions(words);
                 setShowSuggestions(words.length > 0);
+                if (words.length > 0) {
+                    prefetchWord(words[0]);
+                    const exact = words.find(w => w.toLowerCase() === currentQuery.toLowerCase());
+                    if (exact && exact !== words[0]) {
+                        prefetchWord(exact);
+                    }
+                }
             }
         };
-        const t = setTimeout(fetchSuggestions, 300);
-        return () => clearTimeout(t);
+        const t = setTimeout(fetchSuggestions, 200);
+        return () => {
+            isActive = false;
+            clearTimeout(t);
+        };
     }, [query]);
 
     useEffect(() => {
@@ -329,6 +343,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                             {suggestions.map((word, i) => (
                                                 <li
                                                     key={i}
+                                                    onMouseEnter={() => prefetchWord(word)}
                                                     onClick={() => handleSuggestionClick(word)}
                                                     className="px-4 py-3 flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200 transition-colors border-b border-slate-50 dark:border-slate-700 last:border-none"
                                                 >

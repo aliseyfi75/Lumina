@@ -49,15 +49,6 @@ export default defineConfig({
             },
           },
           {
-            urlPattern: /^https:\/\/getpantry\.cloud\//,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'pantry-api-cache',
-              networkTimeoutSeconds: 5,
-              expiration: { maxAgeSeconds: 60 * 5 },
-            },
-          },
-          {
             urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com\//,
             handler: 'CacheFirst',
             options: {

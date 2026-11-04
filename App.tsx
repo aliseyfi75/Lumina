@@ -566,7 +566,7 @@ const App: React.FC = () => {
     const cleanOldId = (oldPantryId ?? cloudConfig?.pantryId ?? '').trim();
 
     // 1. Validate that the new Pantry ID exists on Pantry's servers
-    await getDetails(cleanNewId);
+    const details = await getDetails(cleanNewId);
 
     // 2. Best-effort pull from old Pantry ID (if provided and distinct from new ID)
     let oldCloudData = { cards: [] as Flashcard[], studyHistory: {} as Record<string, number>, longestStreak: 0, deletedCards: {} as Record<string, number> };
@@ -584,8 +584,8 @@ const App: React.FC = () => {
       }
     }
 
-    // 3. Pull any existing data on the new Pantry ID
-    const newCloudData = await getDeck(cleanNewId);
+    // 3. Pull any existing data on the new Pantry ID (skips network request if basket doesn't exist yet)
+    const newCloudData = await getDeck(cleanNewId, details.baskets);
 
     // 4. Merge tombstones (local + old cloud + new cloud)
     const cutoff = Date.now() - TOMBSTONE_TTL;

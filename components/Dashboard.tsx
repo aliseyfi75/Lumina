@@ -1,14 +1,16 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Flashcard, FlashcardStatus, ViewState } from '../types';
 import { getWordSuggestions } from '../services/suggestionService';
 import { prefetchWord } from '../services/dictionaryService';
 import { playAudio } from '../utils/audio';
 import { getLocalDateString, calculateCurrentStreak, getDueCards } from '../utils/studyUtils';
+import { BookExtractedWord } from '../services/bookService';
+import { BookPrepModal } from './BookPrepModal';
 import { motion } from 'framer-motion';
 import {
     Search, Play, BookOpen, CheckCircle, Brain, Loader2,
     Flame, Layers, Sparkles, Clock, TrendingUp, Volume2,
-    ArrowRight, Star, Calendar, X, RotateCw
+    ArrowRight, Star, Calendar, X, RotateCw, Tag, Plus
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -17,7 +19,151 @@ interface DashboardProps {
     longestStreak: number;
     onNavigate: (view: ViewState) => void;
     onQuickSearch: (word: string) => void;
+    onStartStudy?: (initialTag?: string) => void;
+    onImportBookWords?: (bookTitle: string, words: BookExtractedWord[]) => void;
 }
+
+interface CategoryProgressItem {
+    id: string;
+    name: string;
+    rawTag?: string;
+    kind: 'book' | 'tag' | 'general';
+    total: number;
+    newCount: number;
+    learningCount: number;
+    masteredCount: number;
+    dueCount: number;
+    progressPct: number;
+    statusLabel: 'Completed' | 'In Progress' | 'Not Started';
+    latestCreatedAt: number;
+}
+
+const buildCategoryProgress = (cards: Flashcard[]): CategoryProgressItem[] => {
+    if (cards.length === 0) return [];
+
+    const buckets = new Map<
+        string,
+        {
+            name: string;
+            rawTag?: string;
+            kind: 'book' | 'tag' | 'general';
+            cards: Flashcard[];
+        }
+    >();
+
+    const untaggedCards: Flashcard[] = [];
+
+    for (const card of cards) {
+        const validTags = (card.tags ?? []).map(t => t.trim()).filter(Boolean);
+        if (validTags.length === 0) {
+            untaggedCards.push(card);
+            continue;
+        }
+
+        for (const rawTag of validTags) {
+            const isBook = /^book:/i.test(rawTag);
+            const cleanName = isBook
+                ? rawTag.replace(/^book:\s*/i, '').trim() || rawTag
+                : rawTag;
+            const key = isBook ? `book:${cleanName.toLowerCase()}` : `tag:${cleanName.toLowerCase()}`;
+            const existing = buckets.get(key);
+            if (!existing) {
+                buckets.set(key, {
+                    name: cleanName,
+                    rawTag,
+                    kind: isBook ? 'book' : 'tag',
+                    cards: [card],
+                });
+            } else {
+                existing.cards.push(card);
+            }
+        }
+    }
+
+    if (untaggedCards.length > 0) {
+        if (buckets.size > 0) {
+            // Group untagged cards into "General Vocabulary" alongside Book & Tag categories
+            buckets.set('general:vocabulary', {
+                name: 'General Vocabulary',
+                rawTag: undefined,
+                kind: 'general',
+                cards: untaggedCards,
+            });
+        } else {
+            // If user has no Book or Tag categories yet, group by Part of Speech (or General Vocabulary)
+            const posBuckets = new Map<string, Flashcard[]>();
+            for (const c of untaggedCards) {
+                const rawPos = (c.partOfSpeech || 'General').trim().toLowerCase();
+                const label =
+                    rawPos === 'noun' ? 'Nouns' :
+                    rawPos === 'verb' ? 'Verbs' :
+                    rawPos === 'adjective' ? 'Adjectives' :
+                    rawPos === 'adverb' ? 'Adverbs' :
+                    'General Vocabulary';
+                const list = posBuckets.get(label) || [];
+                list.push(c);
+                posBuckets.set(label, list);
+            }
+            for (const [label, list] of posBuckets.entries()) {
+                buckets.set(`general:${label.toLowerCase()}`, {
+                    name: label,
+                    rawTag: undefined,
+                    kind: 'general',
+                    cards: list,
+                });
+            }
+        }
+    }
+
+    const items: CategoryProgressItem[] = [];
+    for (const [id, bucket] of buckets.entries()) {
+        const total = bucket.cards.length;
+        if (total === 0) continue;
+        const newCount = bucket.cards.filter(c => c.status === FlashcardStatus.New).length;
+        const learningCount = bucket.cards.filter(c => c.status === FlashcardStatus.Learning).length;
+        const masteredCount = bucket.cards.filter(c => c.status === FlashcardStatus.Mastered).length;
+        const dueCount = getDueCards(bucket.cards).length;
+        const progressPct = Math.round(((masteredCount + learningCount * 0.5) / total) * 100);
+        const statusLabel: CategoryProgressItem['statusLabel'] =
+            masteredCount === total
+                ? 'Completed'
+                : masteredCount > 0 || learningCount > 0
+                    ? 'In Progress'
+                    : 'Not Started';
+        const latestCreatedAt = bucket.cards.reduce((max, c) => Math.max(max, c.createdAt || 0), 0);
+
+        items.push({
+            id,
+            name: bucket.name,
+            rawTag: bucket.rawTag,
+            kind: bucket.kind,
+            total,
+            newCount,
+            learningCount,
+            masteredCount,
+            dueCount,
+            progressPct,
+            statusLabel,
+            latestCreatedAt,
+        });
+    }
+
+    const kindPriority: Record<CategoryProgressItem['kind'], number> = {
+        book: 0, // Books always have top priority
+        tag: 1,
+        general: 2,
+    };
+
+    return items.sort((a, b) => {
+        if (kindPriority[a.kind] !== kindPriority[b.kind]) {
+            return kindPriority[a.kind] - kindPriority[b.kind];
+        }
+        if (a.kind === 'book') {
+            return b.latestCreatedAt - a.latestCreatedAt || b.dueCount - a.dueCount;
+        }
+        return b.dueCount - a.dueCount || b.total - a.total;
+    });
+};
 
 // ------------------------------------------------------------------
 // Helper: get a stable "Word of the Day" based on today's date
@@ -66,13 +212,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
     longestStreak,
     onNavigate,
     onQuickSearch,
+    onStartStudy,
+    onImportBookWords,
 }) => {
     const [query, setQuery] = useState('');
     const [suggestions, setSuggestions] = useState<string[]>([]);
     const [showSuggestions, setShowSuggestions] = useState(false);
     const [isSearching, setIsSearching] = useState(false);
+    const [isBookPrepOpen, setIsBookPrepOpen] = useState(false);
     const wrapperRef = useRef<HTMLDivElement>(null);
     const lastSearched = useRef<string>('');
+
+    const categoryProgressItems = useMemo(() => buildCategoryProgress(cards), [cards]);
+    const existingWordsSet = useMemo(
+        () => new Set(cards.map(c => c.word.trim().toLowerCase())),
+        [cards]
+    );
 
     // Inline flashcard modal state
     const [selectedCard, setSelectedCard] = useState<Flashcard | null>(null);
@@ -388,6 +543,221 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         ))}
                     </div>
 
+                    {/* ── Categories & Books Progress (Books in Priority) ─────────────── */}
+                    {categoryProgressItems.length > 0 && (
+                        <div
+                            data-testid="home-categories-section"
+                            className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm shadow-slate-100 dark:shadow-none overflow-hidden"
+                        >
+                            <div className="px-6 pt-6 pb-4 border-b border-slate-50 dark:border-slate-700 flex flex-wrap items-center justify-between gap-3">
+                                <div className="flex items-center gap-2.5">
+                                    <div className="p-2 rounded-xl bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-400">
+                                        <BookOpen className="h-4 w-4" />
+                                    </div>
+                                    <div>
+                                        <div className="flex items-center gap-2">
+                                            <h2 className="font-semibold text-slate-800 dark:text-slate-100 text-sm uppercase tracking-wider">
+                                                Categories & Books
+                                            </h2>
+                                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300">
+                                                {categoryProgressItems.length}
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
+                                            Reading docks prioritized first, followed by custom categories and general vocabulary
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="flex items-center gap-2.5">
+                                    {onImportBookWords && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsBookPrepOpen(true)}
+                                            className="px-3.5 py-2 rounded-xl bg-brand-50 hover:bg-brand-100 dark:bg-brand-900/30 dark:hover:bg-brand-900/50 text-brand-700 dark:text-brand-300 text-xs font-semibold border border-brand-200 dark:border-brand-800/60 transition-colors flex items-center gap-1.5"
+                                        >
+                                            <Plus className="h-3.5 w-3.5" />
+                                            Prepare for a Book
+                                        </button>
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={() => onNavigate('flashcards')}
+                                        className="text-sm text-brand-600 hover:text-brand-700 font-medium flex items-center gap-1 group"
+                                    >
+                                        Manage Deck
+                                        <ArrowRight className="h-3.5 w-3.5 group-hover:translate-x-0.5 transition-transform" />
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {categoryProgressItems.map((cat) => {
+                                    const isBook = cat.kind === 'book';
+                                    const isTag = cat.kind === 'tag';
+                                    const masteredWidth = cat.total > 0 ? (cat.masteredCount / cat.total) * 100 : 0;
+                                    const learningWidth = cat.total > 0 ? (cat.learningCount / cat.total) * 100 : 0;
+
+                                    const statusBadgeStyle =
+                                        cat.statusLabel === 'Completed'
+                                            ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300'
+                                            : cat.statusLabel === 'In Progress'
+                                                ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300'
+                                                : 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300';
+
+                                    return (
+                                        <div
+                                            key={cat.id}
+                                            data-testid="home-category-card"
+                                            data-category-kind={cat.kind}
+                                            className={`rounded-2xl p-4 border flex flex-col justify-between gap-4 transition-all hover:shadow-md ${
+                                                isBook
+                                                    ? 'bg-gradient-to-br from-brand-50/70 via-white to-emerald-50/40 dark:from-brand-950/35 dark:via-slate-800/90 dark:to-slate-800 border-brand-200 dark:border-brand-800/70'
+                                                    : 'bg-slate-50/70 dark:bg-slate-900/50 border-slate-200/80 dark:border-slate-700'
+                                            }`}
+                                        >
+                                            <div className="space-y-3">
+                                                {/* Top row: Category type badge + Status badge */}
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <span
+                                                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                                                            isBook
+                                                                ? 'bg-brand-600 text-white shadow-xs'
+                                                                : isTag
+                                                                    ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300'
+                                                                    : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
+                                                        }`}
+                                                    >
+                                                        {isBook ? (
+                                                            <>
+                                                                <BookOpen className="h-3 w-3" />
+                                                                Book
+                                                            </>
+                                                        ) : isTag ? (
+                                                            <>
+                                                                <Tag className="h-3 w-3" />
+                                                                Category
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <Layers className="h-3 w-3" />
+                                                                General
+                                                            </>
+                                                        )}
+                                                    </span>
+
+                                                    <div className="flex items-center gap-1.5">
+                                                        {cat.dueCount > 0 && (
+                                                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300">
+                                                                {cat.dueCount} due
+                                                            </span>
+                                                        )}
+                                                        <span
+                                                            data-testid="category-status-badge"
+                                                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${statusBadgeStyle}`}
+                                                        >
+                                                            {cat.statusLabel}
+                                                        </span>
+                                                    </div>
+                                                </div>
+
+                                                {/* Title & total words */}
+                                                <div>
+                                                    <h3 className="font-serif font-bold text-lg text-slate-900 dark:text-white truncate">
+                                                        {cat.name}
+                                                    </h3>
+                                                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                                                        {cat.total} {cat.total === 1 ? 'word' : 'words'} total
+                                                    </p>
+                                                </div>
+
+                                                {/* Progress bar + percentage */}
+                                                <div className="space-y-1.5">
+                                                    <div className="flex items-center justify-between text-xs">
+                                                        <span className="text-slate-500 dark:text-slate-400 font-medium">
+                                                            Mastery Progress
+                                                        </span>
+                                                        <span
+                                                            data-testid="category-progress-pct"
+                                                            className="font-bold text-slate-800 dark:text-slate-100"
+                                                        >
+                                                            {cat.progressPct}%
+                                                        </span>
+                                                    </div>
+                                                    <div className="h-2.5 w-full bg-slate-200/80 dark:bg-slate-700 rounded-full overflow-hidden flex">
+                                                        {masteredWidth > 0 && (
+                                                            <div
+                                                                className="h-full bg-emerald-500 transition-all duration-500"
+                                                                style={{ width: `${masteredWidth}%` }}
+                                                                title={`Mastered: ${cat.masteredCount}`}
+                                                            />
+                                                        )}
+                                                        {learningWidth > 0 && (
+                                                            <div
+                                                                className="h-full bg-amber-400 transition-all duration-500"
+                                                                style={{ width: `${learningWidth}%` }}
+                                                                title={`Learning: ${cat.learningCount}`}
+                                                            />
+                                                        )}
+                                                    </div>
+                                                </div>
+
+                                                {/* Status breakdown pills */}
+                                                <div className="grid grid-cols-3 gap-1.5 pt-0.5 text-center">
+                                                    <div className="px-2 py-1 rounded-lg bg-blue-50/80 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800/40">
+                                                        <p className="text-xs font-bold text-blue-700 dark:text-blue-300">
+                                                            {cat.newCount}
+                                                        </p>
+                                                        <p className="text-[10px] text-blue-600/80 dark:text-blue-400/80">
+                                                            New
+                                                        </p>
+                                                    </div>
+                                                    <div className="px-2 py-1 rounded-lg bg-amber-50/80 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800/40">
+                                                        <p className="text-xs font-bold text-amber-700 dark:text-amber-300">
+                                                            {cat.learningCount}
+                                                        </p>
+                                                        <p className="text-[10px] text-amber-600/80 dark:text-amber-400/80">
+                                                            Learning
+                                                        </p>
+                                                    </div>
+                                                    <div className="px-2 py-1 rounded-lg bg-emerald-50/80 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800/40">
+                                                        <p className="text-xs font-bold text-emerald-700 dark:text-emerald-300">
+                                                            {cat.masteredCount}
+                                                        </p>
+                                                        <p className="text-[10px] text-emerald-600/80 dark:text-emerald-400/80">
+                                                            Mastered
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Study Category Button */}
+                                            <button
+                                                type="button"
+                                                aria-label={`Study ${cat.name}`}
+                                                onClick={() => {
+                                                    if (onStartStudy) {
+                                                        onStartStudy(cat.rawTag);
+                                                    } else {
+                                                        onNavigate('study');
+                                                    }
+                                                }}
+                                                className={`w-full py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
+                                                    isBook
+                                                        ? 'bg-brand-600 hover:bg-brand-700 text-white shadow-xs'
+                                                        : 'bg-white dark:bg-slate-800 hover:bg-brand-50 dark:hover:bg-brand-900/30 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-600'
+                                                }`}
+                                            >
+                                                <Play className="h-3.5 w-3.5 fill-current" />
+                                                Study {isBook ? 'Book' : 'Category'}
+                                            </button>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
+
                     {/* ── Two-column layout: Word of the Day + Progress ────────────────── */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
@@ -568,6 +938,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     )}
                 </div>
             }
+
+            {onImportBookWords && (
+                <BookPrepModal
+                    isOpen={isBookPrepOpen}
+                    onClose={() => setIsBookPrepOpen(false)}
+                    existingWords={existingWordsSet}
+                    onImportBookWords={onImportBookWords}
+                />
+            )}
         </>
     );
 };

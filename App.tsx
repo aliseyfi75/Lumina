@@ -1287,6 +1287,8 @@ const App: React.FC = () => {
                   }
                 }}
                 onQuickSearch={handleQuickSearch}
+                onStartStudy={handleStartStudySession}
+                onImportBookWords={handleImportBookWords}
               />
             }
           />
@@ -1338,7 +1340,26 @@ const App: React.FC = () => {
             }
           />
           {/* Catch-all — redirect unknown hashes to home */}
-          <Route path="*" element={<Dashboard cards={cards} studyHistory={studyHistory} longestStreak={longestStreak} onNavigate={(view) => navigate(`/${view === 'dashboard' ? '' : view}`)} onQuickSearch={handleQuickSearch} />} />
+          <Route
+            path="*"
+            element={
+              <Dashboard
+                cards={cards}
+                studyHistory={studyHistory}
+                longestStreak={longestStreak}
+                onNavigate={(view) => {
+                  if (view === 'study') {
+                    handleStartStudySession();
+                  } else {
+                    navigate(`/${view === 'dashboard' ? '' : view}`);
+                  }
+                }}
+                onQuickSearch={handleQuickSearch}
+                onStartStudy={handleStartStudySession}
+                onImportBookWords={handleImportBookWords}
+              />
+            }
+          />
         </Routes>
       </main>
 

@@ -6,6 +6,7 @@ import { useWindowSize } from 'react-use';
 import { motion, useMotionValue, useTransform, PanInfo, AnimatePresence } from 'framer-motion';
 import { useLocation } from 'react-router-dom';
 import { playAudio } from '../utils/audio';
+import { getDueCards } from '../utils/studyUtils';
 
 interface StudySessionProps {
   cards: Flashcard[];
@@ -29,14 +30,7 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
   useEffect(() => {
     if (isInitialized || cards.length === 0) return;
 
-    const dueCards = cards.filter(c => {
-      if (c.status === FlashcardStatus.Mastered) return false;
-      if (c.status === FlashcardStatus.New) return true;
-      if (c.nextReviewDate) {
-        return c.nextReviewDate <= Date.now();
-      }
-      return true;
-    });
+    const dueCards = getDueCards(cards);
 
     const sessionConfig = location.state?.sessionConfig as { mode: 'full' | 'short'; count?: number } | undefined;
 

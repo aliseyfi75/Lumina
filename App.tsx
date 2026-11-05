@@ -13,6 +13,7 @@ import { generateJSON, parseFileContent, downloadJSON, saveToLocalFile } from '.
 import { getDetails, getDeck, updateDeck, keepAlivePantry, getKnownChunkCount } from './services/pantryService';
 import { saveFileHandleToIDB, loadFileHandleFromIDB, clearFileHandleFromIDB, saveAppDataToIDB, loadAppDataFromIDB, requestPersistentStorage, checkPersistentStorage, getStorageEstimate } from './services/idbService';
 import { initializeTracking, trackEvent, setTrackingUserId, trackPageView, PAGE_TITLES, TRACKING_CATEGORY, TRACKING_ACTION } from './services/trackingService';
+import { getLocalDateString, calculateCurrentStreak, getDueCards } from './utils/studyUtils';
 import { Book, Layers, Database, Save, Cloud, BarChart2, Home, Sun, Moon, RefreshCw } from 'lucide-react';
 import Confetti from 'react-confetti';
 import { useWindowSize } from 'react-use';
@@ -646,14 +647,14 @@ const App: React.FC = () => {
     trackEvent(TRACKING_ACTION.MANUAL_SAVE, TRACKING_CATEGORY.DATA);
   };
 
-  const handleExportCSV = () => {
+  const handleExportData = () => {
     const jsonContent = generateJSON({ cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() });
     const date = new Date().toISOString().split('T')[0];
     downloadJSON(jsonContent, `lumina_backup_${date}.json`);
     trackEvent(TRACKING_ACTION.EXPORT_CSV, TRACKING_CATEGORY.DATA);
   };
 
-  const handleImportCSV = async (file: File) => {
+  const handleImportData = async (file: File) => {
     const text = await file.text();
     const importedData = parseFileContent(text);
     if (importedData.cards.length === 0) throw new Error("No valid data found");
@@ -873,41 +874,6 @@ const App: React.FC = () => {
     setCards(prev => [newCard, ...prev]);
     recordActivity();
     trackEvent(TRACKING_ACTION.ADD_CARD, TRACKING_CATEGORY.FLASHCARDS, entry.word);
-  };
-
-  const handleUpdateStatus = (id: string, status: FlashcardStatus) => {
-    setCards(prev => prev.map(card =>
-      card.id === id ? { ...card, status, lastReviewed: Date.now(), updatedAt: Date.now() } : card
-    ));
-    recordActivity();
-    trackEvent(TRACKING_ACTION.UPDATE_STATUS, TRACKING_CATEGORY.FLASHCARDS, status);
-  };
-
-  const getLocalDateString = (d: Date) => {
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
-
-  const calculateCurrentStreak = (history: Record<string, number>) => {
-    let streak = 0;
-    let currentDate = new Date();
-    const todayStr = getLocalDateString(currentDate);
-
-    if (!history[todayStr] || history[todayStr] === 0) {
-      currentDate.setDate(currentDate.getDate() - 1);
-      const yesterdayStr = getLocalDateString(currentDate);
-      if (!history[yesterdayStr] || history[yesterdayStr] === 0) {
-        return 0;
-      }
-    }
-
-    while (history[getLocalDateString(currentDate)] > 0) {
-      streak++;
-      currentDate.setDate(currentDate.getDate() - 1);
-    }
-    return streak;
   };
 
   const recordActivity = () => {
@@ -1218,8 +1184,8 @@ const App: React.FC = () => {
       <DataManagerModal
         isOpen={isDataModalOpen}
         onClose={() => setIsDataModalOpen(false)}
-        onExport={handleExportCSV}
-        onImport={handleImportCSV}
+        onExport={handleExportData}
+        onImport={handleImportData}
         onAnkiFileSelected={handleAnkiFileSelected}
         onConnectFile={handleConnectFile}
         onChangeFile={handleChangeFile}
@@ -1250,11 +1216,7 @@ const App: React.FC = () => {
         isOpen={isSessionConfigOpen}
         onClose={() => setIsSessionConfigOpen(false)}
         onStart={handleSessionStart}
-        dueCount={cards.filter(c => {
-          if (c.status === FlashcardStatus.Mastered) return false;
-          if (c.status === FlashcardStatus.New) return true;
-          return (c.nextReviewDate ?? 0) <= Date.now();
-        }).length}
+        dueCount={getDueCards(cards).length}
       />
     </div>
   );

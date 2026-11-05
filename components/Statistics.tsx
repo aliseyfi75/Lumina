@@ -5,6 +5,7 @@ import { Activity, Flame, BookOpen, Brain, CheckCircle, TrendingUp, Calendar, Ta
 import { format, subDays, startOfDay, eachDayOfInterval, differenceInDays } from 'date-fns';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { calculateCurrentStreak } from '../utils/studyUtils';
 
 function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs));
@@ -36,26 +37,7 @@ export const Statistics: React.FC<StatisticsProps> = ({ cards, studyHistory, lon
     const masteredCount = cards.filter(c => c.status === FlashcardStatus.Mastered).length;
 
     // Streak Calculation
-    const currentStreak = useMemo(() => {
-        let streak = 0;
-        let currentDate = new Date();
-        const todayStr = format(currentDate, 'yyyy-MM-dd');
-
-        // Check if we studied today or yesterday to continue streak
-        if (!studyHistory[todayStr] || studyHistory[todayStr] === 0) {
-            currentDate = subDays(currentDate, 1);
-            const yesterdayStr = format(currentDate, 'yyyy-MM-dd');
-            if (!studyHistory[yesterdayStr] || studyHistory[yesterdayStr] === 0) {
-                return 0; // No activity today or yesterday, streak is 0
-            }
-        }
-
-        while (studyHistory[format(currentDate, 'yyyy-MM-dd')] > 0) {
-            streak++;
-            currentDate = subDays(currentDate, 1);
-        }
-        return streak;
-    }, [studyHistory]);
+    const currentStreak = useMemo(() => calculateCurrentStreak(studyHistory), [studyHistory]);
 
     // Heatmap Data (Last 91 days - makes 13 weeks of 7 days)
     const heatmapDays = useMemo(() => {

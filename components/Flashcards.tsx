@@ -3,6 +3,7 @@ import { Flashcard, FlashcardStatus } from '../types';
 import { Play, BookOpen, CheckCircle, Brain, Trash2, RotateCw, Upload, Volume2, ChevronDown } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { playAudio } from '../utils/audio';
+import { getDueCards } from '../utils/studyUtils';
 
 const PAGE_SIZE = 24;
 
@@ -164,14 +165,7 @@ export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onD
   const learningCount = cards.filter(c => c.status === FlashcardStatus.Learning).length;
   const masteredCount = cards.filter(c => c.status === FlashcardStatus.Mastered).length;
 
-  const studyQueueCount = cards.filter(c => {
-    if (c.status === FlashcardStatus.Mastered) return false;
-    if (c.status === FlashcardStatus.New) return true;
-    if (c.nextReviewDate) {
-      return c.nextReviewDate <= Date.now();
-    }
-    return true;
-  }).length;
+  const studyQueueCount = getDueCards(cards).length;
 
   const statusPriority = {
     [FlashcardStatus.New]: 0,
@@ -246,7 +240,7 @@ export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onD
             className="inline-flex items-center gap-2 px-5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-xl text-slate-700 dark:text-slate-200 font-medium hover:bg-slate-50 dark:hover:bg-slate-700 hover:text-brand-600 dark:hover:text-brand-400 hover:border-brand-200 transition-all shadow-sm"
           >
             <Upload className="h-4 w-4" />
-            Import CSV
+            Import Deck
           </button>
         </div>
       </div>

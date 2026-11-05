@@ -3,6 +3,7 @@ import { Flashcard, FlashcardStatus, ViewState } from '../types';
 import { getWordSuggestions } from '../services/suggestionService';
 import { prefetchWord } from '../services/dictionaryService';
 import { playAudio } from '../utils/audio';
+import { getLocalDateString, calculateCurrentStreak, getDueCards } from '../utils/studyUtils';
 import { motion } from 'framer-motion';
 import {
     Search, Play, BookOpen, CheckCircle, Brain, Loader2,
@@ -37,37 +38,6 @@ const getWordOfTheDay = (cards: Flashcard[]): Flashcard | null => {
         (today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate()) %
         pool.length;
     return pool[dayIndex];
-};
-
-// ------------------------------------------------------------------
-// Helper: local date string YYYY-MM-DD
-// ------------------------------------------------------------------
-const toLocalDateStr = (d: Date) => {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
-};
-
-// ------------------------------------------------------------------
-// Helper: current streak from study history
-// ------------------------------------------------------------------
-const getCurrentStreak = (history: Record<string, number>): number => {
-    let streak = 0;
-    let d = new Date();
-    const todayStr = toLocalDateStr(d);
-
-    if (!history[todayStr] || history[todayStr] === 0) {
-        d.setDate(d.getDate() - 1);
-        const ydStr = toLocalDateStr(d);
-        if (!history[ydStr] || history[ydStr] === 0) return 0;
-    }
-
-    while (history[toLocalDateStr(d)] > 0) {
-        streak++;
-        d.setDate(d.getDate() - 1);
-    }
-    return streak;
 };
 
 // ------------------------------------------------------------------
@@ -118,18 +88,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
     const wordOfTheDay = getWordOfTheDay(cards);
 
     // Study stats
-    const now = Date.now();
-    const dueCount = cards.filter(c => {
-        if (c.status === FlashcardStatus.Mastered) return false;
-        if (c.status === FlashcardStatus.New) return true;
-        return (c.nextReviewDate ?? 0) <= now;
-    }).length;
+    const dueCount = getDueCards(cards).length;
 
     const newCount = cards.filter(c => c.status === FlashcardStatus.New).length;
     const learningCount = cards.filter(c => c.status === FlashcardStatus.Learning).length;
     const masteredCount = cards.filter(c => c.status === FlashcardStatus.Mastered).length;
-    const currentStreak = getCurrentStreak(studyHistory);
-    const todayStr = toLocalDateStr(new Date());
+    const currentStreak = calculateCurrentStreak(studyHistory);
+    const todayStr = getLocalDateString(new Date());
     const studiedToday = studyHistory[todayStr] ?? 0;
 
     // Recently added (last 6)

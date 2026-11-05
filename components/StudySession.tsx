@@ -27,6 +27,8 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
   const location = useLocation();
 
   useEffect(() => {
+    if (isInitialized || cards.length === 0) return;
+
     const dueCards = cards.filter(c => {
       if (c.status === FlashcardStatus.Mastered) return false;
       if (c.status === FlashcardStatus.New) return true;
@@ -53,11 +55,8 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
 
     setQueue(studySet);
     setIsInitialized(true);
-    // We intentionally use an empty dependency array here.
-    // This creates a stable "snapshot" of the cards when the session mounts.
-    // We don't want the queue to re-shuffle or reset every time a card status is updated in the parent.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    // Snapshot the queue once cards have loaded so in-session status updates do not reshuffle the queue.
+  }, [cards, isInitialized, location.state]);
 
   const currentCard = queue[currentIndex];
 
@@ -120,14 +119,14 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
 
       switch (e.key) {
         case 'ArrowLeft':
-          handleNext(1);
+          if (isFlipped) handleNext(1);
           break;
         case 'ArrowRight':
-          handleNext(5);
+          if (isFlipped) handleNext(5);
           break;
         case 'ArrowDown':
         case 'ArrowUp':
-          handleNext(3);
+          if (isFlipped) handleNext(3);
           break;
         case ' ':
         case 'Enter':
@@ -139,9 +138,10 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleNext, currentCard]);
+  }, [handleNext, currentCard, isFlipped]);
 
-  const handleDragEnd = (event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
+  const handleDragEnd = (_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
+    if (!isFlipped) return;
     const threshold = 100;
     if (info.offset.x > threshold) {
       handleNext(5);
@@ -263,7 +263,7 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
               y,
               rotateZ: rotate
             }}
-            drag
+            drag={isFlipped}
             dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
             dragElastic={0.8}
             onDragEnd={handleDragEnd}

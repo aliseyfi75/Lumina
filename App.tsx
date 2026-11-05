@@ -10,7 +10,7 @@ import { DataManagerModal } from './components/DataManagerModal';
 import { AnkiImportModal } from './components/AnkiImportModal';
 import { PwaInstallBanner } from './components/PwaInstallBanner';
 import { generateJSON, parseFileContent, downloadJSON, saveToLocalFile } from './services/fileService';
-import { getDetails, getDeck, updateDeck, keepAlivePantry, getKnownChunkCount } from './services/pantryService';
+import { getDetails, getDeck, updateDeck, keepAlivePantry, getKnownChunkCount, CloudSyncProgress } from './services/pantryService';
 import { saveFileHandleToIDB, loadFileHandleFromIDB, clearFileHandleFromIDB, saveAppDataToIDB, loadAppDataFromIDB, requestPersistentStorage, checkPersistentStorage, getStorageEstimate } from './services/idbService';
 import { initializeTracking, trackEvent, setTrackingUserId, trackPageView, PAGE_TITLES, TRACKING_CATEGORY, TRACKING_ACTION } from './services/trackingService';
 import { getLocalDateString, calculateCurrentStreak, getDueCards } from './utils/studyUtils';
@@ -699,7 +699,8 @@ const App: React.FC = () => {
 
   const handleMigrateCloud = async (
     newPantryId: string,
-    oldPantryId?: string
+    oldPantryId?: string,
+    onProgress?: (progress: CloudSyncProgress) => void
   ): Promise<{ cardCount: number; localCount: number; cloudCount: number; historyDays: number }> => {
     const cleanNewId = newPantryId.trim();
     const cleanOldId = (oldPantryId ?? '').trim();
@@ -707,6 +708,7 @@ const App: React.FC = () => {
     isMigratingCloudRef.current = true;
     try {
       // 1. Validate that the new Pantry ID exists on Pantry's servers
+      onProgress?.({ percent: 12, step: 'Verifying Pantry ID on server...' });
       const details = await getDetails(cleanNewId);
 
       // 2. Best-effort pull from an explicitly specified old Pantry ID
@@ -722,8 +724,21 @@ const App: React.FC = () => {
         cleanOldId !== cleanNewId &&
         (cleanOldId !== cloudConfig?.pantryId || cards.length === 0)
       ) {
+        onProgress?.({ percent: 24, step: 'Fetching flashcards from previous Pantry ID...' });
         try {
-          const fetchedOld = await getDeck(cleanOldId, undefined, { retries: 0 });
+          const fetchedOld = await getDeck(cleanOldId, undefined, {
+            retries: 0,
+            onProgress: ({ currentChunk, totalChunks }) => {
+              const pct = Math.min(36, 24 + Math.round((currentChunk / Math.max(1, totalChunks)) * 12));
+              onProgress?.({
+                percent: pct,
+                step:
+                  totalChunks > 1
+                    ? `Loading previous Pantry chunk ${currentChunk} of ${totalChunks}...`
+                    : 'Fetching flashcards from previous Pantry ID...',
+              });
+            },
+          });
           oldCloudData = {
             cards: fetchedOld.cards ?? [],
             studyHistory: fetchedOld.studyHistory ?? {},
@@ -736,9 +751,23 @@ const App: React.FC = () => {
       }
 
       // 3. Strictly pull any existing data on the target Pantry ID so we never lose cards already in Pantry
-      const newCloudData = await getDeck(cleanNewId, details.baskets, { strict: true });
+      onProgress?.({ percent: 40, step: 'Checking target Pantry for existing flashcards...' });
+      const newCloudData = await getDeck(cleanNewId, details.baskets, {
+        strict: true,
+        onProgress: ({ currentChunk, totalChunks }) => {
+          const pct = Math.min(58, 40 + Math.round((currentChunk / Math.max(1, totalChunks)) * 18));
+          onProgress?.({
+            percent: pct,
+            step:
+              totalChunks > 1
+                ? `Loading cloud chunk ${currentChunk} of ${totalChunks}...`
+                : 'Loading existing flashcards from Pantry...',
+          });
+        },
+      });
 
       // 4. Merge cards across local + old Pantry + target Pantry WITHOUT dropping active cards via tombstones
+      onProgress?.({ percent: 64, step: 'Merging local and cloud flashcards & study history...' });
       const afterOldCards = mergeCardArrays(cards, oldCloudData.cards, {}, { ignoreTombstones: true });
       const mergedCards = mergeCardArrays(
         afterOldCards,
@@ -775,17 +804,34 @@ const App: React.FC = () => {
       }
 
       // 6. Push complete merged dataset to the target Pantry ID immediately
-      await updateDeck(cleanNewId, {
-        cards: mergedCards,
-        studyHistory: mergedHistory,
-        longestStreak: mergedStreak,
-        deletedCards: mergedDeletedRecord,
-      });
+      onProgress?.({ percent: 72, step: `Uploading ${mergedCards.length} flashcards to Pantry...` });
+      await updateDeck(
+        cleanNewId,
+        {
+          cards: mergedCards,
+          studyHistory: mergedHistory,
+          longestStreak: mergedStreak,
+          deletedCards: mergedDeletedRecord,
+        },
+        {
+          onProgress: ({ currentChunk, totalChunks }) => {
+            const pct = Math.min(95, 72 + Math.round(((currentChunk - 0.3) / Math.max(1, totalChunks)) * 23));
+            onProgress?.({
+              percent: pct,
+              step:
+                totalChunks > 1
+                  ? `Uploading deck chunk ${currentChunk} of ${totalChunks} to Pantry...`
+                  : `Uploading ${mergedCards.length} flashcards to Pantry...`,
+            });
+          },
+        }
+      );
 
       const localCount = cards.length;
       const cloudCount = (newCloudData.cards?.length ?? 0) + (oldCloudData.cards?.length ?? 0);
 
       // 7. Update local state & persistence
+      onProgress?.({ percent: 100, step: 'Sync complete!' });
       setDeletedCards(new Map(Object.entries(mergedDeletedRecord)));
       setCards(mergedCards);
       setStudyHistory(mergedHistory);
@@ -820,8 +866,11 @@ const App: React.FC = () => {
     }
   };
 
-  const handleConnectCloud = async (pantryId: string) => {
-    await handleMigrateCloud(pantryId);
+  const handleConnectCloud = async (
+    pantryId: string,
+    onProgress?: (progress: CloudSyncProgress) => void
+  ) => {
+    await handleMigrateCloud(pantryId, undefined, onProgress);
   };
 
   const handleDisconnectCloud = () => {

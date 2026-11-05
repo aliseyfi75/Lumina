@@ -165,6 +165,16 @@ export interface PantryDetails {
   baskets?: Array<{ name: string; ttl?: number } | string>;
 }
 
+export interface CloudSyncProgress {
+  percent: number;
+  step: string;
+}
+
+export interface ChunkProgressInfo {
+  currentChunk: number;
+  totalChunks: number;
+}
+
 const getBasketName = (b: { name?: string } | string): string =>
   typeof b === 'string' ? b : b?.name ?? '';
 
@@ -196,7 +206,11 @@ export const getDetails = async (pantryId: string): Promise<PantryDetails> => {
 export const getDeck = async (
   pantryId: string,
   existingBaskets?: Array<{ name: string; ttl?: number } | string>,
-  options?: { retries?: number; strict?: boolean }
+  options?: {
+    retries?: number;
+    strict?: boolean;
+    onProgress?: (info: ChunkProgressInfo) => void;
+  }
 ): Promise<CloudData> => {
   const cleanId = normalizePantryId(pantryId);
   const retries = options?.retries ?? 3;
@@ -248,6 +262,8 @@ export const getDeck = async (
       }
     }
 
+    options?.onProgress?.({ currentChunk: 1, totalChunks: chunkCount });
+
     // Fetch additional card chunks if the deck was split across multiple baskets
     for (let i = 1; i < chunkCount; i++) {
       if (
@@ -256,6 +272,7 @@ export const getDeck = async (
       ) {
         continue;
       }
+      options?.onProgress?.({ currentChunk: i + 1, totalChunks: chunkCount });
       const chunkRes = await fetchWithRetry(
         `${BASE_URL}/${cleanId}/basket/${BASKET_NAME}_${i}?t=${Date.now()}`,
         {
@@ -394,7 +411,8 @@ const pushDeckWithChunkLimit = async (
   cleanId: string,
   sanitizedCards: Flashcard[],
   cloudData: CloudData,
-  maxBasketBytes: number
+  maxBasketBytes: number,
+  onProgress?: (info: ChunkProgressInfo) => void
 ) => {
   const previousChunkCount = knownChunkCounts.get(cleanId) ?? cloudData.chunkCount ?? 1;
   const now = Date.now();
@@ -417,6 +435,7 @@ const pushDeckWithChunkLimit = async (
 
   // Fast path: fits in a single basket under maxBasketBytes
   if (totalBytes <= maxBasketBytes) {
+    onProgress?.({ currentChunk: 1, totalChunks: 1 });
     const response = await fetchWithRetry(`${BASE_URL}/${cleanId}/basket/${BASKET_NAME}`, {
       ...FETCH_OPTIONS,
       method: 'POST',
@@ -460,6 +479,7 @@ const pushDeckWithChunkLimit = async (
   const allChunks = [chunk0, ...restChunks];
 
   // 1. Save main basket (chunk 0 + metadata + chunkCount)
+  onProgress?.({ currentChunk: 1, totalChunks: allChunks.length });
   const mainBody = JSON.stringify({
     cards: allChunks[0],
     studyHistory: cloudData.studyHistory,
@@ -483,6 +503,7 @@ const pushDeckWithChunkLimit = async (
 
   // 2. Save overflow chunks sequentially with rate-limit spacing
   for (let i = 1; i < allChunks.length; i++) {
+    onProgress?.({ currentChunk: i + 1, totalChunks: allChunks.length });
     const chunkRes = await fetchWithRetry(`${BASE_URL}/${cleanId}/basket/${BASKET_NAME}_${i}`, {
       ...FETCH_OPTIONS,
       method: 'POST',
@@ -502,12 +523,16 @@ const pushDeckWithChunkLimit = async (
   }
 };
 
-export const updateDeck = async (pantryId: string, cloudData: CloudData) => {
+export const updateDeck = async (
+  pantryId: string,
+  cloudData: CloudData,
+  options?: { onProgress?: (info: ChunkProgressInfo) => void }
+) => {
   const cleanId = normalizePantryId(pantryId);
   const sanitizedCards = sanitizeCardsForCloud(cloudData.cards || []);
 
   try {
-    await pushDeckWithChunkLimit(cleanId, sanitizedCards, cloudData, MAX_BASKET_BYTES);
+    await pushDeckWithChunkLimit(cleanId, sanitizedCards, cloudData, MAX_BASKET_BYTES, options?.onProgress);
   } catch (err: any) {
     // If a 30 KB basket POST still hit a gateway/payload limit, automatically retry with smaller 14 KB chunks
     if (
@@ -516,7 +541,7 @@ export const updateDeck = async (pantryId: string, cloudData: CloudData) => {
       !/not found/i.test(err?.message || '')
     ) {
       await sleep(3000);
-      await pushDeckWithChunkLimit(cleanId, sanitizedCards, cloudData, FALLBACK_BASKET_BYTES);
+      await pushDeckWithChunkLimit(cleanId, sanitizedCards, cloudData, FALLBACK_BASKET_BYTES, options?.onProgress);
       return;
     }
     throw err;

@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { X, Database, Download, Upload, CheckCircle, AlertCircle, RefreshCw, Save, AlertTriangle, Cloud, ExternalLink, HardDrive, ShieldCheck, ShieldAlert, Zap } from 'lucide-react';
 import { CloudConfig } from '../types';
+import { CloudSyncProgress } from '../services/pantryService';
 
 interface DataManagerModalProps {
   isOpen: boolean;
@@ -24,10 +25,14 @@ interface DataManagerModalProps {
 
   // Cloud Props
   cloudConfig: CloudConfig | null;
-  onConnectCloud: (pantryId: string) => Promise<void>;
+  onConnectCloud: (
+    pantryId: string,
+    onProgress?: (progress: CloudSyncProgress) => void
+  ) => Promise<void>;
   onMigrateCloud?: (
     newPantryId: string,
-    oldPantryId?: string
+    oldPantryId?: string,
+    onProgress?: (progress: CloudSyncProgress) => void
   ) => Promise<{ cardCount: number; localCount: number; cloudCount: number; historyDays: number }>;
   onDisconnectCloud: () => void;
   onCloudPull: () => Promise<void>;
@@ -84,6 +89,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
   const [isMigratingCloud, setIsMigratingCloud] = useState(false);
   const [newPantryIdInput, setNewPantryIdInput] = useState('');
   const [oldPantryIdInput, setOldPantryIdInput] = useState('');
+  const [cloudProgress, setCloudProgress] = useState<CloudSyncProgress | null>(null);
 
   useEffect(() => {
     setIsIframe(window.self !== window.top);
@@ -98,6 +104,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
       setIsMigratingCloud(false);
       setNewPantryIdInput('');
       setOldPantryIdInput('');
+      setCloudProgress(null);
     }
   }, [isOpen, cloudConfig]);
 
@@ -182,17 +189,18 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
     if (!pantryIdInput.trim()) return showMessage('error', 'Pantry ID is required');
 
     setIsProcessing(true);
+    setCloudProgress({ percent: 8, step: 'Connecting to Pantry...' });
     try {
       if (onMigrateCloud) {
         const explicitOldId = isMigratingCloud ? oldPantryIdInput.trim() || undefined : undefined;
-        const res = await onMigrateCloud(pantryIdInput.trim(), explicitOldId);
+        const res = await onMigrateCloud(pantryIdInput.trim(), explicitOldId, setCloudProgress);
         const summary =
           res.cloudCount > 0
             ? `Connected & merged ${res.localCount} local + ${res.cloudCount} cloud cards → ${res.cardCount} total (${res.historyDays} study days)!`
             : `Connected & synced ${res.cardCount} cards (${res.historyDays} study days) to Pantry!`;
         showMessage('success', summary);
       } else {
-        await onConnectCloud(pantryIdInput.trim());
+        await onConnectCloud(pantryIdInput.trim(), setCloudProgress);
         showMessage('success', 'Connected to Pantry!');
       }
       setIsMigratingCloud(false);
@@ -202,6 +210,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
       showMessage('error', error.message || 'Failed to connect to Pantry');
     } finally {
       setIsProcessing(false);
+      setCloudProgress(null);
     }
   };
 
@@ -214,16 +223,17 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
     }
 
     setIsProcessing(true);
+    setCloudProgress({ percent: 8, step: 'Starting migration to new Pantry ID...' });
     try {
       if (onMigrateCloud) {
-        const res = await onMigrateCloud(targetId, oldPantryIdInput.trim() || undefined);
+        const res = await onMigrateCloud(targetId, oldPantryIdInput.trim() || undefined, setCloudProgress);
         const summary =
           res.cloudCount > 0
             ? `Merged ${res.localCount} local + ${res.cloudCount} cloud cards → ${res.cardCount} total (${res.historyDays} study days)!`
             : `Migrated ${res.cardCount} cards & ${res.historyDays} study days to new Pantry ID!`;
         showMessage('success', summary);
       } else {
-        await onConnectCloud(targetId);
+        await onConnectCloud(targetId, setCloudProgress);
         showMessage('success', 'Migrated to new Pantry ID!');
       }
       setIsMigratingCloud(false);
@@ -233,6 +243,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
       showMessage('error', error.message || 'Failed to migrate to new Pantry ID');
     } finally {
       setIsProcessing(false);
+      setCloudProgress(null);
     }
   };
 
@@ -526,6 +537,36 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                   </div>
                 )}
 
+                {cloudProgress && (
+                  <div
+                    data-testid="pantry-progress-bar"
+                    className="p-3 rounded-xl bg-sky-50 dark:bg-sky-900/20 border border-sky-200 dark:border-sky-800/60 space-y-2"
+                  >
+                    <div className="flex items-center justify-between text-xs font-medium text-sky-900 dark:text-sky-200">
+                      <span className="flex items-center gap-1.5">
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin text-sky-600 dark:text-sky-400 shrink-0" />
+                        <span>{cloudProgress.step}</span>
+                      </span>
+                      <span className="font-mono font-bold text-sky-700 dark:text-sky-300">
+                        {cloudProgress.percent}%
+                      </span>
+                    </div>
+                    <div
+                      role="progressbar"
+                      aria-label="Pantry sync progress"
+                      aria-valuenow={cloudProgress.percent}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      className="w-full h-2 bg-sky-200/70 dark:bg-slate-700 rounded-full overflow-hidden"
+                    >
+                      <div
+                        className="h-full bg-sky-600 dark:bg-sky-400 rounded-full transition-all duration-300 ease-out"
+                        style={{ width: `${Math.max(5, Math.min(100, cloudProgress.percent))}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
                 <button
                   type="submit"
                   disabled={isProcessing}
@@ -586,6 +627,35 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                       onChange={(e) => setNewPantryIdInput(e.target.value)}
                       className="w-full text-sm px-3 py-2 border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
                     />
+                    {cloudProgress && (
+                      <div
+                        data-testid="pantry-progress-bar"
+                        className="p-3 rounded-xl bg-sky-50 dark:bg-sky-900/20 border border-sky-200 dark:border-sky-800/60 space-y-2"
+                      >
+                        <div className="flex items-center justify-between text-xs font-medium text-sky-900 dark:text-sky-200">
+                          <span className="flex items-center gap-1.5">
+                            <RefreshCw className="h-3.5 w-3.5 animate-spin text-sky-600 dark:text-sky-400 shrink-0" />
+                            <span>{cloudProgress.step}</span>
+                          </span>
+                          <span className="font-mono font-bold text-sky-700 dark:text-sky-300">
+                            {cloudProgress.percent}%
+                          </span>
+                        </div>
+                        <div
+                          role="progressbar"
+                          aria-label="Pantry sync progress"
+                          aria-valuenow={cloudProgress.percent}
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                          className="w-full h-2 bg-sky-200/70 dark:bg-slate-700 rounded-full overflow-hidden"
+                        >
+                          <div
+                            className="h-full bg-sky-600 dark:bg-sky-400 rounded-full transition-all duration-300 ease-out"
+                            style={{ width: `${Math.max(5, Math.min(100, cloudProgress.percent))}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
                     <div className="flex items-center justify-between gap-2">
                       <a
                         href="https://getpantry.cloud/"

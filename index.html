@@ -28,17 +28,21 @@
     rel="stylesheet">
 
   <script>
-    // Apply dark class before first paint based on system preference
-    if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-      document.documentElement.classList.add('dark');
-    }
+    // Apply dark class before first paint based on saved user preference or system preference
+    (function () {
+      var saved = localStorage.getItem('lumina_theme');
+      if (saved === 'dark' || (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+    })();
   </script>
   <style>
-    /* Smooth theme transitions */
+    /* Smooth root theme transitions without forcing transitions on every DOM/SVG node */
     html,
-    body,
-    * {
-      transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+    body {
+      transition: background-color 0.2s ease, color 0.2s ease;
     }
 
     /* Custom Scrollbar */
@@ -100,8 +104,8 @@
       animation: fade-in 0.5s ease-out forwards;
     }
   </style>
-  <script type="module" crossorigin src="./assets/index-CW_9rTiw.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-CQuxIX5e.css">
+  <script type="module" crossorigin src="./assets/index-XFHRcy9b.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-B7lnm9Bs.css">
 <link rel="manifest" href="./manifest.webmanifest"><script id="vite-plugin-pwa:register-sw" src="./registerSW.js"></script></head>
 
 <body

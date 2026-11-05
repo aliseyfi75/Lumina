@@ -5,7 +5,39 @@ import { lookupWord, fetchImageForWord, getSpellingSuggestions, prefetchWord } f
 import { getWordSuggestions } from '../services/suggestionService';
 import { trackEvent, TRACKING_ACTION, TRACKING_CATEGORY } from '../services/trackingService';
 import { playAudio } from '../utils/audio';
-import { Search, Plus, Check, Loader2, BookOpen, Clock, Volume2 } from 'lucide-react';
+import { Search, Plus, Check, Loader2, BookOpen, Clock, Volume2, Sparkles, Compass, X } from 'lucide-react';
+
+const RECENT_SEARCHES_KEY = 'lumina_recent_searches_v1';
+const MAX_RECENT_SEARCHES = 10;
+
+const CURATED_WORD_PACKS: Array<{
+  title: string;
+  subtitle: string;
+  words: string[];
+}> = [
+  {
+    title: 'Literary Gems',
+    subtitle: 'Evocative words for vivid prose and poetry',
+    words: ['Ephemeral', 'Mellifluous', 'Ineffable', 'Halcyon', 'Petrichor', 'Luminous'],
+  },
+  {
+    title: 'Rhetoric & Persuasion',
+    subtitle: 'Precision vocabulary for sharp arguments',
+    words: ['Cogent', 'Trenchant', 'Pithy', 'Polemic', 'Didactic', 'Eloquent'],
+  },
+  {
+    title: 'Sharp Adjectives',
+    subtitle: 'Nuanced descriptors of character and mind',
+    words: ['Perspicacious', 'Capricious', 'Fastidious', 'Taciturn', 'Sagacious', 'Recalcitrant'],
+  },
+  {
+    title: 'GRE High-Frequency',
+    subtitle: 'Classic academic and test-prep power words',
+    words: ['Ubiquitous', 'Laconic', 'Pragmatic', 'Mitigate', 'Alacrity', 'Obsequious'],
+  },
+];
+
+const ALL_DISCOVERY_WORDS = CURATED_WORD_PACKS.flatMap(p => p.words);
 
 interface DictionaryProps {
   onAddCard: (entry: WordEntry, definition: string, example: string, partOfSpeech: string) => void;
@@ -90,6 +122,43 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
   // Typo suggestion state
   const [typoSuggestion, setTypoSuggestion] = useState<string | null>(null);
 
+  // Recent searches persisted in localStorage
+  const [recentSearches, setRecentSearches] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(RECENT_SEARCHES_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed.slice(0, MAX_RECENT_SEARCHES);
+      }
+    } catch {
+      // ignore parse errors
+    }
+    return [];
+  });
+
+  const recordRecentSearch = (word: string) => {
+    const clean = word.trim();
+    if (!clean) return;
+    setRecentSearches(prev => {
+      const updated = [clean, ...prev.filter(w => w.toLowerCase() !== clean.toLowerCase())].slice(0, MAX_RECENT_SEARCHES);
+      try {
+        localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(updated));
+      } catch {
+        // ignore quota errors
+      }
+      return updated;
+    });
+  };
+
+  const handleClearRecentSearches = () => {
+    setRecentSearches([]);
+    try {
+      localStorage.removeItem(RECENT_SEARCHES_KEY);
+    } catch {
+      // ignore
+    }
+  };
+
   // Debounce logic for autocomplete suggestions
   useEffect(() => {
     let isActive = true;
@@ -161,6 +230,7 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
         setResult(data);
         lastSearched.current = data.word.trim();
         setQuery(data.word); // Normalize case in input
+        recordRecentSearch(data.word);
         setLoading(false);
 
         // If the image wasn't in the quick cache window yet, resolve it non-blockingly in the background
@@ -210,6 +280,13 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
     performSearch(word);
   };
 
+  const handleSurpriseMe = () => {
+    const currentLower = result?.word?.toLowerCase() || query.trim().toLowerCase();
+    const candidates = ALL_DISCOVERY_WORDS.filter(w => w.toLowerCase() !== currentLower);
+    const randomWord = candidates[Math.floor(Math.random() * candidates.length)] || ALL_DISCOVERY_WORDS[0];
+    handleSuggestionClick(randomWord);
+  };
+
   const getSavedCard = (word: string, def: string) => {
     return existingCards.find(card =>
       card.word.toLowerCase() === word.toLowerCase() &&
@@ -224,54 +301,95 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
         <p className="text-slate-500 dark:text-slate-400 text-lg">Illuminate your vocabulary.</p>
       </div>
 
-      <div ref={wrapperRef} className="relative group z-20">
-        <form onSubmit={handleSearch} className="relative">
-          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-            <Search className="h-5 w-5 text-slate-400 group-focus-within:text-brand-500 transition-colors" />
-          </div>
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onFocus={() => {
-              if (suggestions.length > 0) setShowSuggestions(true);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                setShowSuggestions(false);
-              }
-            }}
-            placeholder="Lookup a word..."
-            className="block w-full pl-11 pr-4 py-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-2xl text-lg text-slate-900 dark:text-white shadow-sm placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 transition-all"
-            autoComplete="off"
-          />
-          <button
-            type="submit"
-            disabled={(loading && query.trim().toLowerCase() === lastSearched.current.toLowerCase()) || !query.trim()}
-            className="absolute right-2 top-2 bottom-2 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-4 rounded-xl font-medium hover:bg-slate-800 dark:hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Search'}
-          </button>
-        </form>
+      <div className="space-y-3">
+        <div ref={wrapperRef} className="relative group z-20">
+          <form onSubmit={handleSearch} className="relative">
+            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+              <Search className="h-5 w-5 text-slate-400 group-focus-within:text-brand-500 transition-colors" />
+            </div>
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onFocus={() => {
+                if (suggestions.length > 0) setShowSuggestions(true);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  setShowSuggestions(false);
+                }
+              }}
+              placeholder="Lookup a word..."
+              className="block w-full pl-11 pr-4 py-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-2xl text-lg text-slate-900 dark:text-white shadow-sm placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 transition-all"
+              autoComplete="off"
+            />
+            <button
+              type="submit"
+              disabled={(loading && query.trim().toLowerCase() === lastSearched.current.toLowerCase()) || !query.trim()}
+              className="absolute right-2 top-2 bottom-2 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-4 rounded-xl font-medium hover:bg-slate-800 dark:hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Search'}
+            </button>
+          </form>
 
-        {/* Autocomplete Dropdown */}
-        {showSuggestions && suggestions.length > 0 && (
-          <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-100 dark:border-slate-700 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
-            <ul>
-              {suggestions.map((word, index) => (
-                <li
-                  key={index}
-                  onMouseEnter={() => prefetchWord(word)}
-                  onClick={() => handleSuggestionClick(word)}
-                  className="px-4 py-3 flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200 transition-colors border-b border-slate-50 dark:border-slate-700 last:border-none"
+          {/* Autocomplete Dropdown */}
+          {showSuggestions && suggestions.length > 0 && (
+            <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-100 dark:border-slate-700 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+              <ul>
+                {suggestions.map((word, index) => (
+                  <li
+                    key={index}
+                    onMouseEnter={() => prefetchWord(word)}
+                    onClick={() => handleSuggestionClick(word)}
+                    className="px-4 py-3 flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200 transition-colors border-b border-slate-50 dark:border-slate-700 last:border-none"
+                  >
+                    <Search className="h-4 w-4 text-slate-300 dark:text-slate-500" />
+                    <span className="font-medium">{word}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+
+        {/* Surprise Me + Recent Searches Toolbar */}
+        <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+          <div className="flex flex-wrap items-center gap-1.5" aria-label="Recent searches">
+            {recentSearches.length > 0 && (
+              <>
+                <span className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mr-1">
+                  <Clock className="h-3.5 w-3.5" />
+                  Recent:
+                </span>
+                {recentSearches.map((item) => (
+                  <button
+                    key={item}
+                    onClick={() => handleSuggestionClick(item)}
+                    className="px-2.5 py-1 rounded-full text-xs font-medium bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:border-brand-400 hover:text-brand-600 dark:hover:text-brand-400 transition-colors shadow-sm"
+                  >
+                    {item}
+                  </button>
+                ))}
+                <button
+                  onClick={handleClearRecentSearches}
+                  aria-label="Clear recent searches"
+                  className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-400 hover:text-red-500 transition-colors"
                 >
-                  <Search className="h-4 w-4 text-slate-300 dark:text-slate-500" />
-                  <span className="font-medium">{word}</span>
-                </li>
-              ))}
-            </ul>
+                  <X className="h-3 w-3" />
+                  Clear
+                </button>
+              </>
+            )}
           </div>
-        )}
+
+          <button
+            onClick={handleSurpriseMe}
+            className="ml-auto inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 border border-brand-200 dark:border-brand-800/60 hover:bg-brand-100 dark:hover:bg-brand-900/50 transition-colors shadow-sm"
+          >
+            <Sparkles className="h-3.5 w-3.5 text-brand-500" />
+            Surprise Me
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -491,9 +609,52 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
       )}
 
       {!result && !loading && !error && (
-        <div className="text-center py-20 opacity-50">
-          <BookOpen className="h-16 w-16 mx-auto text-slate-300 dark:text-slate-600 mb-4" />
-          <p className="text-slate-400 dark:text-slate-500 text-lg">Search for a word to get started</p>
+        <div className="space-y-4 pt-2" aria-label="Curated word packs">
+          <div className="flex items-center gap-2 text-slate-700 dark:text-slate-200 px-1">
+            <Compass className="h-5 w-5 text-brand-500" />
+            <h2 className="text-lg font-serif font-bold">Discover Curated Word Packs</h2>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {CURATED_WORD_PACKS.map((pack) => (
+              <div
+                key={pack.title}
+                className="p-5 rounded-2xl bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 shadow-sm space-y-3"
+              >
+                <div>
+                  <h3 className="font-serif font-bold text-slate-900 dark:text-white text-base">
+                    {pack.title}
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    {pack.subtitle}
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {pack.words.map((word) => {
+                    const isAlreadyInDeck = existingCards.some(
+                      c => c.word.toLowerCase() === word.toLowerCase()
+                    );
+                    return (
+                      <button
+                        key={word}
+                        onClick={() => handleSuggestionClick(word)}
+                        onMouseEnter={() => prefetchWord(word)}
+                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                          isAlreadyInDeck
+                            ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/50'
+                            : 'bg-slate-50 dark:bg-slate-900/50 text-slate-700 dark:text-slate-300 border-slate-200/70 dark:border-slate-700 hover:border-brand-400 hover:text-brand-600 dark:hover:text-brand-400'
+                        }`}
+                      >
+                        {word}
+                        {isAlreadyInDeck && <Check className="h-3 w-3 text-emerald-500" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

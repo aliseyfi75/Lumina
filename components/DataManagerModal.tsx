@@ -25,7 +25,10 @@ interface DataManagerModalProps {
   // Cloud Props
   cloudConfig: CloudConfig | null;
   onConnectCloud: (pantryId: string) => Promise<void>;
-  onMigrateCloud?: (newPantryId: string, oldPantryId?: string) => Promise<{ cardCount: number; historyDays: number }>;
+  onMigrateCloud?: (
+    newPantryId: string,
+    oldPantryId?: string
+  ) => Promise<{ cardCount: number; localCount: number; cloudCount: number; historyDays: number }>;
   onDisconnectCloud: () => void;
   onCloudPull: () => Promise<void>;
   onCloudPush: () => Promise<void>;
@@ -86,11 +89,15 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
     setIsIframe(window.self !== window.top);
     if (isOpen && cloudConfig) {
       setPantryIdInput(cloudConfig.pantryId);
-      setOldPantryIdInput(cloudConfig.pantryId);
+    }
+    if (!cloudConfig) {
+      setPantryIdInput('');
+      setOldPantryIdInput('');
     }
     if (!isOpen) {
       setIsMigratingCloud(false);
       setNewPantryIdInput('');
+      setOldPantryIdInput('');
     }
   }, [isOpen, cloudConfig]);
 
@@ -177,14 +184,20 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
     setIsProcessing(true);
     try {
       if (onMigrateCloud) {
-        const res = await onMigrateCloud(pantryIdInput.trim(), oldPantryIdInput.trim() || undefined);
-        showMessage('success', `Connected & migrated ${res.cardCount} cards (${res.historyDays} study days) to Pantry!`);
+        const explicitOldId = isMigratingCloud ? oldPantryIdInput.trim() || undefined : undefined;
+        const res = await onMigrateCloud(pantryIdInput.trim(), explicitOldId);
+        const summary =
+          res.cloudCount > 0
+            ? `Connected & merged ${res.localCount} local + ${res.cloudCount} cloud cards → ${res.cardCount} total (${res.historyDays} study days)!`
+            : `Connected & synced ${res.cardCount} cards (${res.historyDays} study days) to Pantry!`;
+        showMessage('success', summary);
       } else {
         await onConnectCloud(pantryIdInput.trim());
         showMessage('success', 'Connected to Pantry!');
       }
       setIsMigratingCloud(false);
       setNewPantryIdInput('');
+      setOldPantryIdInput('');
     } catch (error: any) {
       showMessage('error', error.message || 'Failed to connect to Pantry');
     } finally {
@@ -203,14 +216,19 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
     setIsProcessing(true);
     try {
       if (onMigrateCloud) {
-        const res = await onMigrateCloud(targetId, cloudConfig?.pantryId || oldPantryIdInput.trim() || undefined);
-        showMessage('success', `Migrated ${res.cardCount} cards & ${res.historyDays} study days to new Pantry ID!`);
+        const res = await onMigrateCloud(targetId, oldPantryIdInput.trim() || undefined);
+        const summary =
+          res.cloudCount > 0
+            ? `Merged ${res.localCount} local + ${res.cloudCount} cloud cards → ${res.cardCount} total (${res.historyDays} study days)!`
+            : `Migrated ${res.cardCount} cards & ${res.historyDays} study days to new Pantry ID!`;
+        showMessage('success', summary);
       } else {
         await onConnectCloud(targetId);
         showMessage('success', 'Migrated to new Pantry ID!');
       }
       setIsMigratingCloud(false);
       setNewPantryIdInput('');
+      setOldPantryIdInput('');
     } catch (error: any) {
       showMessage('error', error.message || 'Failed to migrate to new Pantry ID');
     } finally {
@@ -559,7 +577,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                       </button>
                     </div>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
-                      Enter a new Pantry ID below. All {cardCount} flashcards, study history, and streaks will be transferred to the new ID.
+                      Enter a new or existing Pantry ID below. All {cardCount} local flashcards, study history, and streaks will be merged with any cards already in that Pantry so nothing is lost.
                     </p>
                     <input
                       type="text"

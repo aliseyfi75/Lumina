@@ -37,6 +37,9 @@ export default defineConfig({
         ],
       },
       workbox: {
+        cleanupOutdatedCaches: true,
+        clientsClaim: true,
+        skipWaiting: true,
         // Use NetworkFirst for API calls so online always wins; cache as fallback
         runtimeCaching: [
           {

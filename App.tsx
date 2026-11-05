@@ -10,7 +10,7 @@ import { DataManagerModal } from './components/DataManagerModal';
 import { AnkiImportModal } from './components/AnkiImportModal';
 import { PwaInstallBanner } from './components/PwaInstallBanner';
 import { generateJSON, parseFileContent, downloadJSON, saveToLocalFile } from './services/fileService';
-import { getDetails, getDeck, updateDeck } from './services/pantryService';
+import { getDetails, getDeck, updateDeck, keepAlivePantry } from './services/pantryService';
 import { saveFileHandleToIDB, loadFileHandleFromIDB, clearFileHandleFromIDB, saveAppDataToIDB, loadAppDataFromIDB, requestPersistentStorage, checkPersistentStorage, getStorageEstimate } from './services/idbService';
 import { initializeTracking, trackEvent, setTrackingUserId, trackPageView, PAGE_TITLES, TRACKING_CATEGORY, TRACKING_ACTION } from './services/trackingService';
 import { Book, Layers, Database, Save, Cloud, BarChart2, Home, Sun, Moon, RefreshCw } from 'lucide-react';
@@ -86,6 +86,9 @@ const App: React.FC = () => {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [pendingCloudSync, setPendingCloudSync] = useState(false);
   const skipNextCloudAutoSaveRef = useRef(false);
+  const hasInitializedCloudRef = useRef(false);
+  const isMigratingCloudRef = useRef(false);
+  const lastKeepAliveRef = useRef<number>(0);
 
   // Storage metadata
   const [persistenceStatus, setPersistenceStatus] = useState<'granted' | 'denied' | 'prompt' | 'unsupported'>('prompt');
@@ -110,38 +113,92 @@ const App: React.FC = () => {
     return result;
   };
 
-  // Pure helper: merge two card arrays while honoring tombstones
+  // Pure helper: merge two card arrays while honoring tombstones (unless ignoreTombstones is set)
   const mergeCardArrays = (
     baseCards: Flashcard[],
     incoming: Flashcard[],
-    tombstones: Record<string, number>
+    tombstones: Record<string, number>,
+    options?: { ignoreTombstones?: boolean }
   ): Flashcard[] => {
+    const ignoreTombstones = options?.ignoreTombstones ?? false;
     const liveMap = deletedCardsRef.current;
-    const isDeleted = (id: string) =>
-      liveMap.has(id) || Object.prototype.hasOwnProperty.call(tombstones, id);
+    const isDeleted = (card: Flashcard) => {
+      if (ignoreTombstones) return false;
+      const deletedAt = Math.max(liveMap.get(card.id) ?? 0, tombstones[card.id] ?? 0);
+      if (!deletedAt) return false;
+      const cardTs = Math.max(card.updatedAt ?? 0, card.lastReviewed ?? 0, card.createdAt ?? 0);
+      return deletedAt >= cardTs;
+    };
+
+    const statusRank: Record<FlashcardStatus, number> = {
+      [FlashcardStatus.New]: 0,
+      [FlashcardStatus.Learning]: 1,
+      [FlashcardStatus.Mastered]: 2,
+    };
+
+    const mergeTwoCards = (existing: Flashcard, inc: Flashcard, targetId: string): Flashcard => {
+      const incTs = inc.updatedAt ?? inc.lastReviewed ?? 0;
+      const extTs = existing.updatedAt ?? existing.lastReviewed ?? 0;
+      const incProgress = (inc.repetition ?? 0) * 10 + (statusRank[inc.status] ?? 0);
+      const extProgress = (existing.repetition ?? 0) * 10 + (statusRank[existing.status] ?? 0);
+
+      const useIncoming =
+        incTs > extTs || (incTs === extTs && incProgress > extProgress);
+      const winner = useIncoming ? inc : existing;
+      const fallback = useIncoming ? existing : inc;
+
+      return {
+        ...fallback,
+        ...winner,
+        id: targetId,
+        word: winner.word || fallback.word,
+        mainDefinition:
+          winner.mainDefinition && winner.mainDefinition !== '—'
+            ? winner.mainDefinition
+            : fallback.mainDefinition || winner.mainDefinition,
+        partOfSpeech: winner.partOfSpeech || fallback.partOfSpeech || '',
+        phonetic: winner.phonetic || fallback.phonetic,
+        audio: winner.audio || fallback.audio,
+        image: winner.image || fallback.image,
+        example: winner.example || fallback.example,
+        createdAt: Math.min(
+          existing.createdAt || Date.now(),
+          inc.createdAt || Date.now()
+        ),
+        lastReviewed: Math.max(existing.lastReviewed || 0, inc.lastReviewed || 0),
+        updatedAt: Math.max(
+          incTs,
+          extTs,
+          existing.createdAt || 0,
+          inc.createdAt || 0
+        ),
+      };
+    };
 
     const cardMap = new Map<string, Flashcard>();
     baseCards.forEach(c => {
-      if (!isDeleted(c.id)) cardMap.set(c.id, c);
+      if (!isDeleted(c)) cardMap.set(c.id, c);
     });
 
     incoming
-      .filter(c => !isDeleted(c.id))
+      .filter(c => !isDeleted(c))
       .forEach(c => {
-        const duplicateId = Array.from(cardMap.keys()).find(key => {
-          const existing = cardMap.get(key)!;
-          return existing.word.toLowerCase() === c.word.toLowerCase() &&
-            existing.mainDefinition === c.mainDefinition;
-        });
+        const normWord = c.word.trim().toLowerCase();
+        const normDef = c.mainDefinition.trim().toLowerCase();
+
+        const duplicateId = cardMap.has(c.id)
+          ? c.id
+          : Array.from(cardMap.keys()).find(key => {
+              const existing = cardMap.get(key)!;
+              return (
+                existing.word.trim().toLowerCase() === normWord &&
+                existing.mainDefinition.trim().toLowerCase() === normDef
+              );
+            });
 
         if (duplicateId) {
           const existing = cardMap.get(duplicateId)!;
-          const incomingTs = c.updatedAt ?? c.lastReviewed ?? 0;
-          const existingTs = existing.updatedAt ?? existing.lastReviewed ?? 0;
-
-          if (incomingTs > existingTs) {
-            cardMap.set(duplicateId, { ...existing, ...c, id: duplicateId });
-          }
+          cardMap.set(duplicateId, mergeTwoCards(existing, c, duplicateId));
         } else {
           cardMap.set(c.id, c);
         }
@@ -270,9 +327,10 @@ const App: React.FC = () => {
 
       setCards(initialCards);
 
-      // Step C: Check Cloud Config and Merge
+      // Step C: Check Cloud Config, Merge, and Send Keep-Alive Ping so Pantry never expires
       const savedCloudConfig = localStorage.getItem(CLOUD_CONFIG_KEY);
-      if (savedCloudConfig) {
+      if (savedCloudConfig && !hasInitializedCloudRef.current) {
+        hasInitializedCloudRef.current = true;
         try {
           const config = JSON.parse(savedCloudConfig);
           if (config.pantryId) {
@@ -299,6 +357,13 @@ const App: React.FC = () => {
             skipNextCloudAutoSaveRef.current = true;
             setCloudConfig(config);
             initializeTracking(config.pantryId);
+
+            // Always send a keep-alive write to Pantry when the user opens the app
+            // so the Pantry ID and baskets refresh their 30-day TTL even if no card status changes.
+            if (navigator.onLine) {
+              lastKeepAliveRef.current = Date.now();
+              void keepAlivePantry(config.pantryId, cloudData.chunkCount ?? 1);
+            }
           } else {
             initializeTracking();
           }
@@ -310,7 +375,7 @@ const App: React.FC = () => {
           }
           initializeTracking();
         }
-      } else {
+      } else if (!savedCloudConfig) {
         initializeTracking();
       }
 
@@ -396,7 +461,7 @@ const App: React.FC = () => {
 
   // 4. Auto-Save to Cloud
   useEffect(() => {
-    if (!cloudConfig || !cards.length) return;
+    if (!cloudConfig || !cards.length || isMigratingCloudRef.current) return;
 
     if (skipNextCloudAutoSaveRef.current) {
       skipNextCloudAutoSaveRef.current = false;
@@ -410,9 +475,11 @@ const App: React.FC = () => {
     }
 
     const timeoutId = setTimeout(async () => {
+      if (isMigratingCloudRef.current) return;
       setIsCloudSaving(true);
       try {
         await updateDeck(cloudConfig.pantryId, { cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() });
+        lastKeepAliveRef.current = Date.now();
         setPendingCloudSync(false);
       } catch (error) {
         console.error('Auto-save cloud failed:', error);
@@ -426,6 +493,30 @@ const App: React.FC = () => {
     return () => clearTimeout(timeoutId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cards, studyHistory, longestStreak, cloudConfig]);
+
+  // 4b. Keep Pantry alive when user re-opens / focuses an already-open tab or PWA window
+  useEffect(() => {
+    if (!cloudConfig?.pantryId) return;
+    const KEEP_ALIVE_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
+
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState !== 'visible' || !navigator.onLine || isMigratingCloudRef.current) {
+        return;
+      }
+      const now = Date.now();
+      if (now - lastKeepAliveRef.current >= KEEP_ALIVE_INTERVAL_MS) {
+        lastKeepAliveRef.current = now;
+        void keepAlivePantry(cloudConfig.pantryId);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+    };
+  }, [cloudConfig]);
 
   // 5. Flush pending sync when coming back online (or cloud config is restored)
   useEffect(() => {
@@ -561,91 +652,124 @@ const App: React.FC = () => {
   const handleMigrateCloud = async (
     newPantryId: string,
     oldPantryId?: string
-  ): Promise<{ cardCount: number; historyDays: number }> => {
+  ): Promise<{ cardCount: number; localCount: number; cloudCount: number; historyDays: number }> => {
     const cleanNewId = newPantryId.trim();
-    const cleanOldId = (oldPantryId ?? cloudConfig?.pantryId ?? '').trim();
+    const cleanOldId = (oldPantryId ?? '').trim();
 
-    // 1. Validate that the new Pantry ID exists on Pantry's servers
-    const details = await getDetails(cleanNewId);
+    isMigratingCloudRef.current = true;
+    try {
+      // 1. Validate that the new Pantry ID exists on Pantry's servers
+      const details = await getDetails(cleanNewId);
 
-    // 2. Best-effort pull from old Pantry ID (if provided and distinct from new ID)
-    let oldCloudData = { cards: [] as Flashcard[], studyHistory: {} as Record<string, number>, longestStreak: 0, deletedCards: {} as Record<string, number> };
-    if (cleanOldId && cleanOldId !== cleanNewId) {
-      try {
-        const fetchedOld = await getDeck(cleanOldId);
-        oldCloudData = {
-          cards: fetchedOld.cards ?? [],
-          studyHistory: fetchedOld.studyHistory ?? {},
-          longestStreak: fetchedOld.longestStreak ?? 0,
-          deletedCards: fetchedOld.deletedCards ?? {},
-        };
-      } catch {
-        // Old Pantry ID may have expired; local state already holds cached history
-      }
-    }
-
-    // 3. Pull any existing data on the new Pantry ID (skips network request if basket doesn't exist yet)
-    const newCloudData = await getDeck(cleanNewId, details.baskets);
-
-    // 4. Merge tombstones (local + old cloud + new cloud)
-    const cutoff = Date.now() - TOMBSTONE_TTL;
-    const mergedDeletedRecord: Record<string, number> = {
-      ...prunedDeletedCards(),
-    };
-    for (const src of [oldCloudData.deletedCards, newCloudData.deletedCards ?? {}]) {
-      for (const [id, deletedAt] of Object.entries(src)) {
-        if (deletedAt >= cutoff) {
-          mergedDeletedRecord[id] = Math.max(mergedDeletedRecord[id] || 0, deletedAt);
+      // 2. Best-effort pull from an explicitly specified old Pantry ID
+      // Skip if cleanOldId is already the active cloudConfig.pantryId (its data is already in local state)
+      let oldCloudData = {
+        cards: [] as Flashcard[],
+        studyHistory: {} as Record<string, number>,
+        longestStreak: 0,
+        deletedCards: {} as Record<string, number>,
+      };
+      if (
+        cleanOldId &&
+        cleanOldId !== cleanNewId &&
+        (cleanOldId !== cloudConfig?.pantryId || cards.length === 0)
+      ) {
+        try {
+          const fetchedOld = await getDeck(cleanOldId, undefined, { retries: 0 });
+          oldCloudData = {
+            cards: fetchedOld.cards ?? [],
+            studyHistory: fetchedOld.studyHistory ?? {},
+            longestStreak: fetchedOld.longestStreak ?? 0,
+            deletedCards: fetchedOld.deletedCards ?? {},
+          };
+        } catch {
+          // Old Pantry ID may have expired; local state already holds cached history
         }
       }
-    }
 
-    // 5. Merge cards, study history, and longest streak across all sources
-    const afterOldCards = mergeCardArrays(cards, oldCloudData.cards, mergedDeletedRecord);
-    const mergedCards = mergeCardArrays(afterOldCards, newCloudData.cards ?? [], mergedDeletedRecord);
-    const mergedHistory = mergeHistoryRecords(studyHistory, oldCloudData.studyHistory, newCloudData.studyHistory);
-    const mergedStreak = Math.max(
-      longestStreak,
-      oldCloudData.longestStreak || 0,
-      newCloudData.longestStreak || 0,
-      calculateCurrentStreak(mergedHistory)
-    );
+      // 3. Strictly pull any existing data on the target Pantry ID so we never lose cards already in Pantry
+      const newCloudData = await getDeck(cleanNewId, details.baskets, { strict: true });
 
-    // 6. Push complete migrated dataset to the new Pantry ID immediately
-    await updateDeck(cleanNewId, {
-      cards: mergedCards,
-      studyHistory: mergedHistory,
-      longestStreak: mergedStreak,
-      deletedCards: mergedDeletedRecord,
-    });
+      // 4. Merge cards across local + old Pantry + target Pantry WITHOUT dropping active cards via tombstones
+      const afterOldCards = mergeCardArrays(cards, oldCloudData.cards, {}, { ignoreTombstones: true });
+      const mergedCards = mergeCardArrays(
+        afterOldCards,
+        newCloudData.cards ?? [],
+        {},
+        { ignoreTombstones: true }
+      );
+      const mergedHistory = mergeHistoryRecords(
+        studyHistory,
+        oldCloudData.studyHistory,
+        newCloudData.studyHistory
+      );
+      const mergedStreak = Math.max(
+        longestStreak,
+        oldCloudData.longestStreak || 0,
+        newCloudData.longestStreak || 0,
+        calculateCurrentStreak(mergedHistory)
+      );
 
-    // 7. Update local state & persistence
-    setDeletedCards(new Map(Object.entries(mergedDeletedRecord)));
-    setCards(mergedCards);
-    setStudyHistory(mergedHistory);
-    setLongestStreak(mergedStreak);
-    setPendingCloudSync(false);
+      // 5. Merge tombstones, excluding any card ID that is present in our merged active deck
+      const activeIds = new Set(mergedCards.map(c => c.id));
+      const cutoff = Date.now() - TOMBSTONE_TTL;
+      const mergedDeletedRecord: Record<string, number> = {};
+      for (const src of [
+        prunedDeletedCards(),
+        oldCloudData.deletedCards,
+        newCloudData.deletedCards ?? {},
+      ]) {
+        for (const [id, deletedAt] of Object.entries(src)) {
+          if (deletedAt >= cutoff && !activeIds.has(id)) {
+            mergedDeletedRecord[id] = Math.max(mergedDeletedRecord[id] || 0, deletedAt);
+          }
+        }
+      }
 
-    skipNextCloudAutoSaveRef.current = true;
-    const config = { pantryId: cleanNewId };
-    setCloudConfig(config);
-    localStorage.setItem(CLOUD_CONFIG_KEY, JSON.stringify(config));
-    setTrackingUserId(cleanNewId);
-    trackEvent(TRACKING_ACTION.CONNECT_CLOUD, TRACKING_CATEGORY.CLOUD);
-
-    if (fileHandle) {
-      saveToLocalFile(fileHandle, {
+      // 6. Push complete merged dataset to the target Pantry ID immediately
+      await updateDeck(cleanNewId, {
         cards: mergedCards,
         studyHistory: mergedHistory,
         longestStreak: mergedStreak,
         deletedCards: mergedDeletedRecord,
-      }).catch(() => {});
-    }
+      });
 
-    return {
-      cardCount: mergedCards.length,
-      historyDays: Object.keys(mergedHistory).length,
-    };
+      const localCount = cards.length;
+      const cloudCount = (newCloudData.cards?.length ?? 0) + (oldCloudData.cards?.length ?? 0);
+
+      // 7. Update local state & persistence
+      setDeletedCards(new Map(Object.entries(mergedDeletedRecord)));
+      setCards(mergedCards);
+      setStudyHistory(mergedHistory);
+      setLongestStreak(mergedStreak);
+      setPendingCloudSync(false);
+      lastKeepAliveRef.current = Date.now();
+
+      skipNextCloudAutoSaveRef.current = true;
+      const config = { pantryId: cleanNewId };
+      setCloudConfig(config);
+      localStorage.setItem(CLOUD_CONFIG_KEY, JSON.stringify(config));
+      setTrackingUserId(cleanNewId);
+      trackEvent(TRACKING_ACTION.CONNECT_CLOUD, TRACKING_CATEGORY.CLOUD);
+
+      if (fileHandle) {
+        saveToLocalFile(fileHandle, {
+          cards: mergedCards,
+          studyHistory: mergedHistory,
+          longestStreak: mergedStreak,
+          deletedCards: mergedDeletedRecord,
+        }).catch(() => {});
+      }
+
+      return {
+        cardCount: mergedCards.length,
+        localCount,
+        cloudCount,
+        historyDays: Object.keys(mergedHistory).length,
+      };
+    } finally {
+      isMigratingCloudRef.current = false;
+    }
   };
 
   const handleConnectCloud = async (pantryId: string) => {
@@ -674,11 +798,13 @@ const App: React.FC = () => {
 
   const handleCloudPull = async () => {
     if (!cloudConfig) return;
-    const cloudData = await getDeck(cloudConfig.pantryId);
+    const cloudData = await getDeck(cloudConfig.pantryId, undefined, { strict: true });
     if (cloudData.cards && cloudData.cards.length > 0) {
       performMerge(cloudData.cards, cloudData.deletedCards ?? {});
     }
-    if (cloudData.studyHistory) setStudyHistory(prev => ({ ...prev, ...cloudData.studyHistory }));
+    if (cloudData.studyHistory) {
+      setStudyHistory(prev => mergeHistoryRecords(prev, cloudData.studyHistory));
+    }
     if (cloudData.longestStreak) setLongestStreak(prev => Math.max(prev, cloudData.longestStreak!));
     trackEvent(TRACKING_ACTION.CLOUD_PULL, TRACKING_CATEGORY.CLOUD);
     // Immediately flush to local file so both are in sync

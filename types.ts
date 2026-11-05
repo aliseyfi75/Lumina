@@ -72,4 +72,7 @@ export interface CloudData {
   longestStreak?: number;
   /** id → Unix-ms when the card was deleted. Tombstones are pruned after 30 days. */
   deletedCards?: Record<string, number>;
+  chunkCount?: number;
+  basketExists?: boolean;
+  lastAccessedAt?: number;
 }

@@ -62,11 +62,17 @@ async function handleAddToLumina(word) {
     let currentCards = [];
     let currentStudyHistory = {};
     let currentLongestStreak = 0;
+    let currentDeletedCards = {};
+    let currentChunkCount = 1;
     if (deckRes.ok) {
       const data = await deckRes.json();
       currentCards = data.cards || [];
       currentStudyHistory = data.studyHistory || {};
       currentLongestStreak = data.longestStreak || 0;
+      currentDeletedCards = data.deletedCards || {};
+      if (typeof data.chunkCount === 'number' && data.chunkCount > 1) {
+        currentChunkCount = data.chunkCount;
+      }
     }
 
     // Check for duplicates
@@ -84,7 +90,10 @@ async function handleAddToLumina(word) {
       body: JSON.stringify({
         cards: updatedCards,
         studyHistory: currentStudyHistory,
-        longestStreak: currentLongestStreak
+        longestStreak: currentLongestStreak,
+        deletedCards: currentDeletedCards,
+        chunkCount: currentChunkCount,
+        lastAccessedAt: Date.now()
       }),
     });
 

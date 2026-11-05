@@ -1,15 +1,17 @@
-import type { Flashcard, CloudData } from '../types';
+import { Flashcard, CloudData, FlashcardStatus } from '../types';
 
 const BASE_URL = 'https://getpantry.cloud/apiv1/pantry';
 const BASKET_NAME = 'Lumina';
-const REQUEST_TIMEOUT_MS = 15000;
+const REQUEST_TIMEOUT_MS = 20000;
 
-// Express body-parser default limit is 100 KB; keep each basket POST safely below 85 KB.
-const MAX_BASKET_BYTES = 85 * 1024;
+// Keep each basket POST <= 30 KB (~60-75 cards) so reverse proxies and Express never 502/413,
+// while a 143-card deck only requires 2 sequential POSTs.
+const MAX_BASKET_BYTES = 30 * 1024;
+const FALLBACK_BASKET_BYTES = 14 * 1024;
 // Pantry's total storage quota per Pantry ID is 1.44 MB.
 const MAX_PANTRY_BYTES = Math.floor(1.4 * 1024 * 1024);
-// Minimum delay between sequential Pantry API calls to respect ~2 req/sec rate limit.
-const RATE_LIMIT_DELAY_MS = 650;
+// True quiet time AFTER one Pantry request finishes before the next one starts.
+const RATE_LIMIT_DELAY_MS = 1400;
 
 // Standard options to avoid CORS/Referrer issues in sensitive browser environments
 const FETCH_OPTIONS: RequestInit = {
@@ -21,16 +23,31 @@ const FETCH_OPTIONS: RequestInit = {
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-let lastRequestTime = 0;
+let lastRequestCompletedAt = 0;
+let requestQueue: Promise<unknown> = Promise.resolve();
 
-// Ensure sequential Pantry requests are spaced out by at least RATE_LIMIT_DELAY_MS
-const throttlePantryRequest = async () => {
-  const now = Date.now();
-  const elapsed = now - lastRequestTime;
-  if (lastRequestTime > 0 && elapsed < RATE_LIMIT_DELAY_MS) {
-    await sleep(RATE_LIMIT_DELAY_MS - elapsed);
-  }
-  lastRequestTime = Date.now();
+// Strictly serialize all Pantry requests and enforce RATE_LIMIT_DELAY_MS
+// between the COMPLETION of one request and the START of the next.
+const enqueuePantryRequest = <T>(fn: () => Promise<T>): Promise<T> => {
+  const run = async (): Promise<T> => {
+    const now = Date.now();
+    const elapsed = now - lastRequestCompletedAt;
+    if (lastRequestCompletedAt > 0 && elapsed < RATE_LIMIT_DELAY_MS) {
+      await sleep(RATE_LIMIT_DELAY_MS - elapsed);
+    }
+    try {
+      return await fn();
+    } finally {
+      lastRequestCompletedAt = Date.now();
+    }
+  };
+
+  const next = requestQueue.then(run, run);
+  requestQueue = next.then(
+    () => undefined,
+    () => undefined
+  );
+  return next;
 };
 
 const normalizePantryId = (raw: string): string => {
@@ -60,23 +77,23 @@ const fetchWithRetry = async (
   url: string,
   options: RequestInit,
   retries = 3,
-  delayMs = 900
+  baseDelayMs = 2200
 ): Promise<Response> => {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      await throttlePantryRequest();
-      const response = await fetchWithTimeout(url, options);
+      const response = await enqueuePantryRequest(() => fetchWithTimeout(url, options));
       // Retry on rate-limit (429) or transient gateway/server errors (500, 502, 503, 504)
       if ((response.status === 429 || response.status >= 500) && attempt < retries) {
-        const waitTime = response.status === 429 ? Math.max(2000, delayMs * Math.pow(2, attempt)) : delayMs * Math.pow(2, attempt);
+        const waitTime = baseDelayMs * Math.pow(2, attempt);
         await sleep(waitTime);
         continue;
       }
       return response;
     } catch (err: any) {
-      // In Safari/WebKit, Cloudflare 502s or rate-limit drops without CORS headers throw TypeError("Load failed")
+      // In browsers, Cloudflare 502s or 429 rate-limit drops without CORS headers throw TypeError("Failed to fetch" / "Load failed")
       if (attempt < retries) {
-        await sleep(delayMs * Math.pow(2, attempt));
+        const waitTime = baseDelayMs * Math.pow(2, attempt);
+        await sleep(waitTime);
         continue;
       }
       const isGenericNetworkErr =
@@ -94,16 +111,53 @@ const fetchWithRetry = async (
   throw new Error('Unable to reach Pantry after multiple attempts.');
 };
 
+// Strip empty/default fields and any inline data: URIs so the JSON payload is compact
+const sanitizeCardsForCloud = (cards: Flashcard[]): Flashcard[] =>
+  cards.map(card => {
+    const clean: Flashcard = {
+      id: card.id,
+      word: card.word,
+      mainDefinition: card.mainDefinition,
+      partOfSpeech: card.partOfSpeech || '',
+      status: card.status || FlashcardStatus.New,
+      lastReviewed: card.lastReviewed || 0,
+      createdAt: card.createdAt || Date.now(),
+    };
+    if (card.phonetic) clean.phonetic = card.phonetic;
+    if (card.audio && !card.audio.startsWith('data:')) clean.audio = card.audio;
+    if (card.image && !card.image.startsWith('data:')) clean.image = card.image;
+    if (card.example) clean.example = card.example;
+    if (card.interval) clean.interval = card.interval;
+    if (card.repetition) clean.repetition = card.repetition;
+    if (card.easinessFactor && card.easinessFactor !== 2.5) clean.easinessFactor = card.easinessFactor;
+    if (card.nextReviewDate) clean.nextReviewDate = card.nextReviewDate;
+    if (card.lastQuality) clean.lastQuality = card.lastQuality;
+    if (card.updatedAt) clean.updatedAt = card.updatedAt;
+    return clean;
+  });
+
+const normalizeCardsFromCloud = (cards: Flashcard[]): Flashcard[] =>
+  cards.map(card => ({
+    ...card,
+    partOfSpeech: card.partOfSpeech ?? '',
+    status: card.status ?? FlashcardStatus.New,
+    lastReviewed: card.lastReviewed ?? 0,
+    createdAt: card.createdAt ?? Date.now(),
+  }));
+
 export interface PantryDetails {
   name: string;
   description?: string;
   percentFull?: number;
-  baskets?: Array<{ name: string; ttl?: number }>;
+  baskets?: Array<{ name: string; ttl?: number } | string>;
 }
+
+const getBasketName = (b: { name?: string } | string): string =>
+  typeof b === 'string' ? b : b?.name ?? '';
 
 export const getDetails = async (pantryId: string): Promise<PantryDetails> => {
   const cleanId = normalizePantryId(pantryId);
-  const response = await fetchWithRetry(`${BASE_URL}/${cleanId}`, {
+  const response = await fetchWithRetry(`${BASE_URL}/${cleanId}?t=${Date.now()}`, {
     ...FETCH_OPTIONS,
     method: 'GET',
   });
@@ -128,56 +182,149 @@ export const getDetails = async (pantryId: string): Promise<PantryDetails> => {
 
 export const getDeck = async (
   pantryId: string,
-  existingBaskets?: Array<{ name: string }>
+  existingBaskets?: Array<{ name: string; ttl?: number } | string>,
+  options?: { retries?: number; strict?: boolean }
 ): Promise<CloudData> => {
   const cleanId = normalizePantryId(pantryId);
+  const retries = options?.retries ?? 3;
+  const strict = options?.strict ?? false;
 
-  // If caller already fetched Pantry details, skip the GET call if the basket doesn't exist yet
-  if (existingBaskets) {
-    const hasMainBasket = existingBaskets.some(b => b.name === BASKET_NAME);
-    if (!hasMainBasket) {
-      return { cards: [] };
-    }
+  const basketNames = Array.isArray(existingBaskets)
+    ? existingBaskets.map(getBasketName).filter(Boolean)
+    : null;
+  const hasKnownMainBasket = basketNames
+    ? basketNames.some(name => name.toLowerCase() === BASKET_NAME.toLowerCase())
+    : false;
+
+  // If caller already fetched Pantry details and confirmed the Pantry has no Lumina basket yet, skip GET
+  if (basketNames && !hasKnownMainBasket) {
+    return { cards: [], chunkCount: 1, basketExists: false };
   }
 
   try {
-    const response = await fetchWithRetry(`${BASE_URL}/${cleanId}/basket/${BASKET_NAME}`, {
-      ...FETCH_OPTIONS,
-      method: 'GET',
-    });
+    const response = await fetchWithRetry(
+      `${BASE_URL}/${cleanId}/basket/${BASKET_NAME}?t=${Date.now()}`,
+      {
+        ...FETCH_OPTIONS,
+        method: 'GET',
+      },
+      retries
+    );
 
     if (!response.ok) {
-      // If 400/404, it likely means the basket doesn't exist yet, which is fine.
-      return { cards: [] };
+      // Only treat 400/404 as "basket does not exist yet" when we don't already know the basket exists
+      if ((response.status === 400 || response.status === 404) && !hasKnownMainBasket) {
+        return { cards: [], chunkCount: 1, basketExists: false };
+      }
+      const errText = await response.text().catch(() => response.statusText);
+      throw new Error(`Failed to fetch existing deck from Pantry (${response.status}): ${errText}`);
     }
 
     const data = await response.json();
     let allCards: Flashcard[] = Array.isArray(data.cards) ? data.cards : [];
-    const chunkCount = typeof data.chunkCount === 'number' ? data.chunkCount : 1;
 
-    // Fetch additional card chunks if the deck was split across multiple baskets
-    for (let i = 1; i < chunkCount; i++) {
-      const chunkRes = await fetchWithRetry(`${BASE_URL}/${cleanId}/basket/${BASKET_NAME}_${i}`, {
-        ...FETCH_OPTIONS,
-        method: 'GET',
-      });
-      if (chunkRes.ok) {
-        const chunkData = await chunkRes.json();
-        if (Array.isArray(chunkData.cards)) {
-          allCards = allCards.concat(chunkData.cards);
+    // Determine how many chunks exist: use data.chunkCount if present, or infer from existingBaskets
+    // (e.g., if the Chrome extension updated the main basket without preserving chunkCount)
+    let chunkCount = typeof data.chunkCount === 'number' && data.chunkCount > 1 ? data.chunkCount : 1;
+    if (typeof data.chunkCount !== 'number' && basketNames) {
+      for (const name of basketNames) {
+        const match = name.match(new RegExp(`^${BASKET_NAME}_(\\d+)$`, 'i'));
+        if (match) {
+          chunkCount = Math.max(chunkCount, parseInt(match[1], 10) + 1);
         }
       }
     }
 
+    // Fetch additional card chunks if the deck was split across multiple baskets
+    for (let i = 1; i < chunkCount; i++) {
+      if (
+        basketNames &&
+        !basketNames.some(name => name.toLowerCase() === `${BASKET_NAME}_${i}`.toLowerCase())
+      ) {
+        continue;
+      }
+      const chunkRes = await fetchWithRetry(
+        `${BASE_URL}/${cleanId}/basket/${BASKET_NAME}_${i}?t=${Date.now()}`,
+        {
+          ...FETCH_OPTIONS,
+          method: 'GET',
+        },
+        retries
+      );
+      if (!chunkRes.ok) {
+        if (strict || hasKnownMainBasket) {
+          throw new Error(
+            `Failed to load deck chunk ${i} from Pantry (${chunkRes.status}). Aborting to prevent losing cloud cards.`
+          );
+        }
+        continue;
+      }
+      const chunkData = await chunkRes.json();
+      if (Array.isArray(chunkData.cards)) {
+        allCards = allCards.concat(chunkData.cards);
+      }
+    }
+
     return {
-      cards: allCards,
+      cards: normalizeCardsFromCloud(allCards),
       studyHistory: data.studyHistory || {},
       longestStreak: data.longestStreak || 0,
       deletedCards: data.deletedCards || {},
+      chunkCount,
+      basketExists: true,
     };
   } catch (error) {
+    if (strict || hasKnownMainBasket) {
+      throw error;
+    }
     console.warn('Could not fetch deck from Pantry (might be new):', error);
-    return { cards: [] };
+    return { cards: [], chunkCount: 1, basketExists: false };
+  }
+};
+
+/**
+ * Sends a lightweight PUT request to Pantry to refresh the 30-day inactivity TTL
+ * on the main basket (and any overflow chunk baskets) every time the user opens the app,
+ * even if no flashcard status has changed.
+ */
+export const keepAlivePantry = async (pantryId: string, chunkCount = 1): Promise<boolean> => {
+  const cleanId = normalizePantryId(pantryId);
+  if (!cleanId) return false;
+
+  try {
+    const now = Date.now();
+    const res = await fetchWithRetry(
+      `${BASE_URL}/${cleanId}/basket/${BASKET_NAME}`,
+      {
+        ...FETCH_OPTIONS,
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lastAccessedAt: now }),
+      },
+      1
+    );
+
+    if (!res.ok) {
+      return false;
+    }
+
+    for (let i = 1; i < chunkCount; i++) {
+      await fetchWithRetry(
+        `${BASE_URL}/${cleanId}/basket/${BASKET_NAME}_${i}`,
+        {
+          ...FETCH_OPTIONS,
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lastAccessedAt: now }),
+        },
+        1
+      ).catch(() => {});
+    }
+
+    return true;
+  } catch (err) {
+    console.warn('Pantry keep-alive ping failed:', err);
+    return false;
   }
 };
 
@@ -185,14 +332,14 @@ const splitCardsIntoChunks = (cards: Flashcard[], maxChunkBytes: number): Flashc
   if (cards.length === 0) return [[]];
   const chunks: Flashcard[][] = [];
   let currentChunk: Flashcard[] = [];
-  let currentBytes = 20; // overhead for {"cards":[]}
+  let currentBytes = 32; // overhead for {"cards":[]}
 
   for (const card of cards) {
     const cardBytes = new Blob([JSON.stringify(card)]).size + 1;
     if (currentChunk.length > 0 && currentBytes + cardBytes > maxChunkBytes) {
       chunks.push(currentChunk);
       currentChunk = [card];
-      currentBytes = 20 + cardBytes;
+      currentBytes = 32 + cardBytes;
     } else {
       currentChunk.push(card);
       currentBytes += cardBytes;
@@ -204,9 +351,21 @@ const splitCardsIntoChunks = (cards: Flashcard[], maxChunkBytes: number): Flashc
   return chunks;
 };
 
-export const updateDeck = async (pantryId: string, cloudData: CloudData) => {
-  const cleanId = normalizePantryId(pantryId);
-  const fullPayload = JSON.stringify({ ...cloudData, chunkCount: 1 });
+const pushDeckWithChunkLimit = async (
+  cleanId: string,
+  sanitizedCards: Flashcard[],
+  cloudData: CloudData,
+  maxBasketBytes: number
+) => {
+  const now = Date.now();
+  const fullPayload = JSON.stringify({
+    cards: sanitizedCards,
+    studyHistory: cloudData.studyHistory,
+    longestStreak: cloudData.longestStreak,
+    deletedCards: cloudData.deletedCards,
+    chunkCount: 1,
+    lastAccessedAt: now,
+  });
   const totalBytes = new Blob([fullPayload]).size;
 
   if (totalBytes > MAX_PANTRY_BYTES) {
@@ -216,8 +375,8 @@ export const updateDeck = async (pantryId: string, cloudData: CloudData) => {
     );
   }
 
-  // Fast path: fits in a single basket under Express's 100 KB body-parser limit
-  if (totalBytes <= MAX_BASKET_BYTES) {
+  // Fast path: fits in a single basket under maxBasketBytes
+  if (totalBytes <= maxBasketBytes) {
     const response = await fetchWithRetry(`${BASE_URL}/${cleanId}/basket/${BASKET_NAME}`, {
       ...FETCH_OPTIONS,
       method: 'POST',
@@ -242,17 +401,18 @@ export const updateDeck = async (pantryId: string, cloudData: CloudData) => {
       longestStreak: cloudData.longestStreak,
       deletedCards: cloudData.deletedCards,
       chunkCount: 99,
+      lastAccessedAt: now,
     }),
   ]).size;
 
-  const firstChunkMax = Math.max(20 * 1024, MAX_BASKET_BYTES - metadataOverhead);
-  const allCards = cloudData.cards || [];
+  const firstChunkMax = Math.max(8 * 1024, maxBasketBytes - metadataOverhead);
 
   // Build chunk 0 with room for metadata, then chunk the remainder
-  const firstSplit = splitCardsIntoChunks(allCards, firstChunkMax);
+  const firstSplit = splitCardsIntoChunks(sanitizedCards, firstChunkMax);
   const chunk0 = firstSplit[0] || [];
-  const remainingCards = allCards.slice(chunk0.length);
-  const restChunks = remainingCards.length > 0 ? splitCardsIntoChunks(remainingCards, MAX_BASKET_BYTES - 1024) : [];
+  const remainingCards = sanitizedCards.slice(chunk0.length);
+  const restChunks =
+    remainingCards.length > 0 ? splitCardsIntoChunks(remainingCards, maxBasketBytes - 512) : [];
   const allChunks = [chunk0, ...restChunks];
 
   // 1. Save main basket (chunk 0 + metadata + chunkCount)
@@ -262,6 +422,7 @@ export const updateDeck = async (pantryId: string, cloudData: CloudData) => {
     longestStreak: cloudData.longestStreak,
     deletedCards: cloudData.deletedCards,
     chunkCount: allChunks.length,
+    lastAccessedAt: now,
   });
 
   const mainRes = await fetchWithRetry(`${BASE_URL}/${cleanId}/basket/${BASKET_NAME}`, {
@@ -282,12 +443,33 @@ export const updateDeck = async (pantryId: string, cloudData: CloudData) => {
       ...FETCH_OPTIONS,
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cards: allChunks[i] }),
+      body: JSON.stringify({ cards: allChunks[i], lastAccessedAt: now }),
     });
 
     if (!chunkRes.ok) {
       const errorText = await chunkRes.text().catch(() => chunkRes.statusText);
       throw new Error(`Failed to update Pantry chunk ${i} (${chunkRes.status}): ${errorText}`);
     }
+  }
+};
+
+export const updateDeck = async (pantryId: string, cloudData: CloudData) => {
+  const cleanId = normalizePantryId(pantryId);
+  const sanitizedCards = sanitizeCardsForCloud(cloudData.cards || []);
+
+  try {
+    await pushDeckWithChunkLimit(cleanId, sanitizedCards, cloudData, MAX_BASKET_BYTES);
+  } catch (err: any) {
+    // If a 30 KB basket POST still hit a gateway/payload limit, automatically retry with smaller 14 KB chunks
+    if (
+      sanitizedCards.length > 20 &&
+      /502|CORS|rate-limiting|Failed to update Pantry/i.test(err?.message || '') &&
+      !/not found/i.test(err?.message || '')
+    ) {
+      await sleep(3000);
+      await pushDeckWithChunkLimit(cleanId, sanitizedCards, cloudData, FALLBACK_BASKET_BYTES);
+      return;
+    }
+    throw err;
   }
 };

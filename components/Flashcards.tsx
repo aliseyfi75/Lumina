@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Flashcard, FlashcardStatus } from '../types';
-import { Play, BookOpen, CheckCircle, Brain, Trash2, RotateCw, Upload, Volume2, ChevronDown, Search, X, ArrowUpDown, Filter } from 'lucide-react';
+import { Play, BookOpen, CheckCircle, Brain, Trash2, RotateCw, Upload, Volume2, ChevronDown, Search, X, ArrowUpDown, Filter, Plus, Pencil } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { playAudio } from '../utils/audio';
 import { getDueCards } from '../utils/studyUtils';
@@ -9,11 +9,22 @@ const PAGE_SIZE = 24;
 
 export type FlashcardSortOption = 'priority' | 'newest' | 'oldest' | 'alpha' | 'due';
 
+export interface CustomCardFormData {
+  word: string;
+  partOfSpeech: string;
+  phonetic?: string;
+  mainDefinition: string;
+  example?: string;
+  image?: string;
+}
+
 interface FlashcardsProps {
   cards: Flashcard[];
   onStartStudy: () => void;
   onDeleteCard: (id: string) => void;
   onReviewCard: (id: string, quality: number) => void;
+  onCreateCard?: (data: CustomCardFormData) => void;
+  onUpdateCard?: (id: string, updates: CustomCardFormData) => void;
   onOpenImport: () => void;
 }
 
@@ -21,7 +32,8 @@ const FlashcardItem: React.FC<{
   card: Flashcard;
   onDelete: (id: string) => void;
   onReview: (id: string, quality: number) => void;
-}> = ({ card, onDelete, onReview }) => {
+  onEdit: (card: Flashcard) => void;
+}> = ({ card, onDelete, onReview, onEdit }) => {
   const [isFlipped, setIsFlipped] = useState(false);
 
   return (
@@ -41,6 +53,18 @@ const FlashcardItem: React.FC<{
           className="absolute inset-0 backface-hidden bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 flex flex-col items-center justify-center text-center hover:shadow-md hover:border-brand-200 transition-all"
           style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}
         >
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdit(card);
+            }}
+            aria-label={`Edit ${card.word}`}
+            title="Edit Card"
+            className="absolute top-3.5 left-3.5 p-1.5 text-slate-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg opacity-0 group-hover:opacity-100 focus:opacity-100 transition-all"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+
           <div className="absolute top-4 right-4 flex items-center gap-1.5 pl-2">
             {/* Added logic for displaying the due string for Learning cards */}
             {card.status === FlashcardStatus.Learning && card.nextReviewDate && (
@@ -138,7 +162,15 @@ const FlashcardItem: React.FC<{
               <CheckCircle className="h-4 w-4" />
               <span className="text-[8px] font-bold uppercase">Mastered</span>
             </button>
-            <div className="flex border-l border-slate-700 justify-center items-center ml-1 pl-1">
+            <div className="flex border-l border-slate-700 justify-center items-center ml-1 pl-1 gap-0.5">
+              <button
+                onClick={() => onEdit(card)}
+                className="p-1.5 text-slate-500 hover:text-brand-400 hover:bg-brand-500/10 rounded-lg transition-colors"
+                title="Edit Card"
+                aria-label={`Edit ${card.word} (back)`}
+              >
+                <Pencil className="h-4 w-4" />
+              </button>
               <button
                 onClick={() => onDelete(card.id)}
                 className="p-1.5 text-slate-600 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
@@ -154,13 +186,223 @@ const FlashcardItem: React.FC<{
   );
 };
 
-export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onDeleteCard, onReviewCard, onOpenImport }) => {
+const CardEditorModal: React.FC<{
+  isOpen: boolean;
+  editingCard: Flashcard | null;
+  onClose: () => void;
+  onSubmit: (data: CustomCardFormData) => void;
+}> = ({ isOpen, editingCard, onClose, onSubmit }) => {
+  const [word, setWord] = useState('');
+  const [partOfSpeech, setPartOfSpeech] = useState('noun');
+  const [phonetic, setPhonetic] = useState('');
+  const [mainDefinition, setMainDefinition] = useState('');
+  const [example, setExample] = useState('');
+  const [image, setImage] = useState('');
+
+  useEffect(() => {
+    if (editingCard) {
+      setWord(editingCard.word || '');
+      setPartOfSpeech(editingCard.partOfSpeech || 'noun');
+      setPhonetic(editingCard.phonetic || '');
+      setMainDefinition(editingCard.mainDefinition || '');
+      setExample(editingCard.example || '');
+      setImage(editingCard.image || '');
+    } else {
+      setWord('');
+      setPartOfSpeech('noun');
+      setPhonetic('');
+      setMainDefinition('');
+      setExample('');
+      setImage('');
+    }
+  }, [editingCard, isOpen]);
+
+  if (!isOpen) return null;
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!word.trim() || !mainDefinition.trim()) return;
+    onSubmit({
+      word: word.trim(),
+      partOfSpeech: partOfSpeech.trim() || 'noun',
+      phonetic: phonetic.trim() || undefined,
+      mainDefinition: mainDefinition.trim(),
+      example: example.trim() || undefined,
+      image: image.trim() || undefined,
+    });
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-lg bg-white dark:bg-slate-800 rounded-3xl shadow-2xl border border-slate-100 dark:border-slate-700 overflow-hidden z-10">
+        <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between bg-slate-50 dark:bg-slate-800/60">
+          <h2 className="text-xl font-serif font-bold text-slate-900 dark:text-white">
+            {editingCard ? 'Edit Flashcard' : 'Create Custom Card'}
+          </h2>
+          <button
+            onClick={onClose}
+            aria-label="Close card editor"
+            className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full transition-colors"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+                Word / Term *
+              </label>
+              <input
+                type="text"
+                required
+                aria-label="Word"
+                value={word}
+                onChange={(e) => setWord(e.target.value)}
+                placeholder="e.g. Perspicacious"
+                className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+                Part of Speech
+              </label>
+              <select
+                aria-label="Part of Speech"
+                value={partOfSpeech}
+                onChange={(e) => setPartOfSpeech(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-brand-500"
+              >
+                <option value="noun">noun</option>
+                <option value="verb">verb</option>
+                <option value="adjective">adjective</option>
+                <option value="adverb">adverb</option>
+                <option value="phrase">phrase</option>
+                <option value="idiom">idiom</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+                Phonetic (Optional)
+              </label>
+              <input
+                type="text"
+                aria-label="Phonetic"
+                value={phonetic}
+                onChange={(e) => setPhonetic(e.target.value)}
+                placeholder="e.g. /ˌpərspəˈkāSHəs/"
+                className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-brand-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+                Image URL (Optional)
+              </label>
+              <input
+                type="url"
+                aria-label="Image URL"
+                value={image}
+                onChange={(e) => setImage(e.target.value)}
+                placeholder="https://..."
+                className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-brand-500"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+              Definition *
+            </label>
+            <textarea
+              required
+              rows={3}
+              aria-label="Definition"
+              value={mainDefinition}
+              onChange={(e) => setMainDefinition(e.target.value)}
+              placeholder="Write a clear definition or personal study note..."
+              className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 resize-none"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+              Example Sentence (Optional)
+            </label>
+            <textarea
+              rows={2}
+              aria-label="Example Sentence"
+              value={example}
+              onChange={(e) => setExample(e.target.value)}
+              placeholder="e.g. Give an example showing the word in context..."
+              className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-brand-500 resize-none"
+            />
+          </div>
+
+          <div className="pt-2 flex items-center justify-end gap-3 border-t border-slate-100 dark:border-slate-700">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2.5 rounded-xl text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!word.trim() || !mainDefinition.trim()}
+              className="px-5 py-2.5 rounded-xl text-sm font-semibold bg-brand-600 hover:bg-brand-700 text-white shadow-md shadow-brand-500/20 disabled:opacity-50 transition-colors"
+            >
+              {editingCard ? 'Save Changes' : 'Create Card'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+export const Flashcards: React.FC<FlashcardsProps> = ({
+  cards,
+  onStartStudy,
+  onDeleteCard,
+  onReviewCard,
+  onCreateCard,
+  onUpdateCard,
+  onOpenImport,
+}) => {
   const [selectedStatus, setSelectedStatus] = useState<FlashcardStatus | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPos, setSelectedPos] = useState<string>('all');
   const [sortBy, setSortBy] = useState<FlashcardSortOption>('priority');
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const [editingCard, setEditingCard] = useState<Flashcard | null>(null);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
+
+  const handleOpenCreateModal = () => {
+    setEditingCard(null);
+    setIsEditorOpen(true);
+  };
+
+  const handleOpenEditModal = (card: Flashcard) => {
+    setEditingCard(card);
+    setIsEditorOpen(true);
+  };
+
+  const handleEditorSubmit = (data: CustomCardFormData) => {
+    if (editingCard) {
+      onUpdateCard?.(editingCard.id, data);
+    } else {
+      onCreateCard?.(data);
+    }
+  };
 
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
@@ -270,26 +512,43 @@ export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onD
 
   if (cards.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-[60vh] text-center space-y-6 animate-in fade-in zoom-in duration-500">
-        <div className="bg-slate-100 dark:bg-slate-800 p-6 rounded-full">
-          <BookOpen className="h-12 w-12 text-slate-400" />
-        </div>
-        <div className="space-y-4">
-          <div>
-            <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Your deck is empty</h2>
-            <p className="text-slate-500 dark:text-slate-400 max-w-sm mx-auto mt-2">
-              Search for words in the dictionary to add them, or import a previous backup.
-            </p>
+      <>
+        <div className="flex flex-col items-center justify-center h-[60vh] text-center space-y-6 animate-in fade-in zoom-in duration-500">
+          <div className="bg-slate-100 dark:bg-slate-800 p-6 rounded-full">
+            <BookOpen className="h-12 w-12 text-slate-400" />
           </div>
-          <button
-            onClick={onOpenImport}
-            className="inline-flex items-center gap-2 px-5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-xl text-slate-700 dark:text-slate-200 font-medium hover:bg-slate-50 dark:hover:bg-slate-700 hover:text-brand-600 dark:hover:text-brand-400 hover:border-brand-200 transition-all shadow-sm"
-          >
-            <Upload className="h-4 w-4" />
-            Import Deck
-          </button>
+          <div className="space-y-4">
+            <div>
+              <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Your deck is empty</h2>
+              <p className="text-slate-500 dark:text-slate-400 max-w-sm mx-auto mt-2">
+                Search for words in the dictionary to add them, create a custom card, or import a previous backup.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              <button
+                onClick={handleOpenCreateModal}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-brand-600 hover:bg-brand-700 rounded-xl text-white font-medium transition-all shadow-sm"
+              >
+                <Plus className="h-4 w-4" />
+                Create Card
+              </button>
+              <button
+                onClick={onOpenImport}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-xl text-slate-700 dark:text-slate-200 font-medium hover:bg-slate-50 dark:hover:bg-slate-700 hover:text-brand-600 dark:hover:text-brand-400 hover:border-brand-200 transition-all shadow-sm"
+              >
+                <Upload className="h-4 w-4" />
+                Import Deck
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
+        <CardEditorModal
+          isOpen={isEditorOpen}
+          editingCard={editingCard}
+          onClose={() => setIsEditorOpen(false)}
+          onSubmit={handleEditorSubmit}
+        />
+      </>
     );
   }
 
@@ -297,32 +556,41 @@ export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onD
     <div className="space-y-8 animate-in fade-in duration-500">
       {/* Header and Stats */}
       <div className="space-y-6">
-        <div className="flex flex-col md:flex-row gap-6 justify-between items-end">
+        <div className="flex flex-col md:flex-row gap-6 justify-between items-start md:items-end">
           <div>
             <h1 className="text-3xl font-serif font-bold text-slate-900 dark:text-white">My Deck</h1>
             <p className="text-slate-500 dark:text-slate-400 mt-1">{cards.length} cards total</p>
           </div>
-          <button
-            onClick={onStartStudy}
-            disabled={studyQueueCount === 0}
-            className={`flex items-center gap-2 px-6 py-3 rounded-xl font-medium shadow-lg transition-all 
-              ${studyQueueCount > 0
-                ? 'bg-brand-600 hover:bg-brand-700 text-white shadow-brand-500/30 hover:scale-105 active:scale-95'
-                : 'bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-500 cursor-not-allowed shadow-none'
-              }`}
-          >
-            {studyQueueCount > 0 ? (
-              <>
-                <Play className="h-5 w-5 fill-current" />
-                Start Study Session
-              </>
-            ) : (
-              <>
-                <CheckCircle className="h-5 w-5" />
-                All Mastered
-              </>
-            )}
-          </button>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              onClick={handleOpenCreateModal}
+              className="flex items-center gap-2 px-4 py-3 rounded-xl font-medium bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 hover:border-brand-300 transition-all shadow-sm"
+            >
+              <Plus className="h-4 w-4 text-brand-600 dark:text-brand-400" />
+              Create Card
+            </button>
+            <button
+              onClick={onStartStudy}
+              disabled={studyQueueCount === 0}
+              className={`flex items-center gap-2 px-6 py-3 rounded-xl font-medium shadow-lg transition-all 
+                ${studyQueueCount > 0
+                  ? 'bg-brand-600 hover:bg-brand-700 text-white shadow-brand-500/30 hover:scale-105 active:scale-95'
+                  : 'bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-500 cursor-not-allowed shadow-none'
+                }`}
+            >
+              {studyQueueCount > 0 ? (
+                <>
+                  <Play className="h-5 w-5 fill-current" />
+                  Start Study Session
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="h-5 w-5" />
+                  All Mastered
+                </>
+              )}
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -467,6 +735,7 @@ export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onD
                 card={card}
                 onDelete={onDeleteCard}
                 onReview={onReviewCard}
+                onEdit={handleOpenEditModal}
               />
             ))}
           </div>
@@ -498,6 +767,13 @@ export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onD
           </button>
         </div>
       )}
+
+      <CardEditorModal
+        isOpen={isEditorOpen}
+        editingCard={editingCard}
+        onClose={() => setIsEditorOpen(false)}
+        onSubmit={handleEditorSubmit}
+      />
     </div>
   );
 };

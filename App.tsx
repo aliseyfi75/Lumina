@@ -965,6 +965,64 @@ const App: React.FC = () => {
     );
   };
 
+  const handleCreateCustomCard = (data: {
+    word: string;
+    partOfSpeech: string;
+    phonetic?: string;
+    mainDefinition: string;
+    example?: string;
+    image?: string;
+  }) => {
+    const now = Date.now();
+    const newCard: Flashcard = {
+      id: crypto.randomUUID(),
+      word: data.word.trim(),
+      partOfSpeech: data.partOfSpeech.trim() || 'noun',
+      phonetic: data.phonetic?.trim() || undefined,
+      mainDefinition: data.mainDefinition.trim(),
+      example: data.example?.trim() || undefined,
+      image: data.image?.trim() || undefined,
+      status: FlashcardStatus.New,
+      lastReviewed: 0,
+      createdAt: now,
+      repetition: 0,
+      nextReviewDate: now,
+      updatedAt: now,
+    };
+    setCards(prev => [newCard, ...prev]);
+    recordActivity();
+    trackEvent(TRACKING_ACTION.ADD_CARD, TRACKING_CATEGORY.FLASHCARDS, newCard.word);
+  };
+
+  const handleUpdateCard = (
+    id: string,
+    updates: {
+      word?: string;
+      partOfSpeech?: string;
+      phonetic?: string;
+      mainDefinition?: string;
+      example?: string;
+      image?: string;
+    }
+  ) => {
+    setCards(prev =>
+      prev.map(card =>
+        card.id === id
+          ? {
+              ...card,
+              word: updates.word !== undefined ? updates.word.trim() : card.word,
+              partOfSpeech: updates.partOfSpeech !== undefined ? updates.partOfSpeech.trim() : card.partOfSpeech,
+              phonetic: updates.phonetic !== undefined ? (updates.phonetic.trim() || undefined) : card.phonetic,
+              mainDefinition: updates.mainDefinition !== undefined ? updates.mainDefinition.trim() : card.mainDefinition,
+              example: updates.example !== undefined ? (updates.example.trim() || undefined) : card.example,
+              image: updates.image !== undefined ? (updates.image.trim() || undefined) : card.image,
+              updatedAt: Date.now(),
+            }
+          : card
+      )
+    );
+  };
+
   const handleDeleteCard = (id: string) => {
     setCards(prev => prev.filter(c => c.id !== id));
     setDeletedCards(prev => new Map(prev).set(id, Date.now()));
@@ -1137,6 +1195,8 @@ const App: React.FC = () => {
                 onStartStudy={handleStartStudySession}
                 onDeleteCard={handleDeleteCard}
                 onReviewCard={handleReviewCard}
+                onCreateCard={handleCreateCustomCard}
+                onUpdateCard={handleUpdateCard}
                 onOpenImport={() => setIsDataModalOpen(true)}
               />
             }

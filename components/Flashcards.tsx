@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Flashcard, FlashcardStatus } from '../types';
-import { Play, BookOpen, CheckCircle, Brain, Trash2, RotateCw, Upload, Volume2, ThumbsUp, Zap } from 'lucide-react';
+import { Play, BookOpen, CheckCircle, Brain, Trash2, RotateCw, Upload, Volume2, ChevronDown } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { playAudio } from '../utils/audio';
+
+const PAGE_SIZE = 24;
 
 interface FlashcardsProps {
   cards: Flashcard[];
@@ -151,6 +153,12 @@ const FlashcardItem: React.FC<{
 
 export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onDeleteCard, onReviewCard, onOpenImport }) => {
   const [selectedStatus, setSelectedStatus] = useState<FlashcardStatus | null>(null);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [selectedStatus]);
 
   const newCount = cards.filter(c => c.status === FlashcardStatus.New).length;
   const learningCount = cards.filter(c => c.status === FlashcardStatus.Learning).length;
@@ -197,6 +205,26 @@ export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onD
       setSelectedStatus(status);
     }
   };
+
+  const visibleCards = filteredCards.slice(0, visibleCount);
+  const hasMoreCards = visibleCount < filteredCards.length;
+
+  useEffect(() => {
+    const sentinel = loadMoreRef.current;
+    if (!sentinel || !hasMoreCards) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setVisibleCount((prev) => Math.min(prev + PAGE_SIZE, filteredCards.length));
+        }
+      },
+      { rootMargin: '300px' }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMoreCards, filteredCards.length]);
 
 
 
@@ -332,15 +360,32 @@ export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onD
 
       {/* Grid of Flashcards */}
       {filteredCards.length > 0 ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 pb-20">
-          {filteredCards.map((card) => (
-            <FlashcardItem
-              key={card.id}
-              card={card}
-              onDelete={onDeleteCard}
-              onReview={onReviewCard}
-            />
-          ))}
+        <div className="space-y-8 pb-20">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            {visibleCards.map((card) => (
+              <FlashcardItem
+                key={card.id}
+                card={card}
+                onDelete={onDeleteCard}
+                onReview={onReviewCard}
+              />
+            ))}
+          </div>
+
+          {hasMoreCards && (
+            <div ref={loadMoreRef} className="flex flex-col items-center justify-center pt-2 gap-2">
+              <p className="text-xs text-slate-400 dark:text-slate-500">
+                Showing {visibleCards.length} of {filteredCards.length} cards
+              </p>
+              <button
+                onClick={() => setVisibleCount((prev) => Math.min(prev + PAGE_SIZE, filteredCards.length))}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 hover:border-brand-300 transition-colors shadow-sm"
+              >
+                <ChevronDown className="h-4 w-4" />
+                Load More Cards
+              </button>
+            </div>
+          )}
         </div>
       ) : (
         <div className="flex flex-col items-center justify-center py-20 text-slate-400 dark:text-slate-600">

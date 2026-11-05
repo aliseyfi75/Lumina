@@ -28,10 +28,15 @@
     rel="stylesheet">
 
   <script>
-    // Apply dark class before first paint based on system preference
-    if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-      document.documentElement.classList.add('dark');
-    }
+    // Apply dark class before first paint based on saved user preference or system preference
+    (function () {
+      var saved = localStorage.getItem('lumina_theme');
+      if (saved === 'dark' || (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+    })();
   </script>
   <style>
     /* Smooth theme transitions */

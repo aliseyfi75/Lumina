@@ -20,6 +20,7 @@ import { SessionConfigModal } from './components/SessionConfigModal';
 
 const LOCAL_STORAGE_KEY = 'lumina_cards_v1';
 const CLOUD_CONFIG_KEY = 'lumina_cloud_config';
+const THEME_STORAGE_KEY = 'lumina_theme';
 
 // ── RouteTracker ────────────────────────────────────────────────────────────
 // Fires a GA page_view event every time the hash route changes.
@@ -49,22 +50,37 @@ const App: React.FC = () => {
   const [studyHistory, setStudyHistory] = useState<Record<string, number>>({});
   const [longestStreak, setLongestStreak] = useState(0);
 
-  // Dark Mode — follow device theme in real-time
-  const [isDark, setIsDark] = useState(() =>
-    window.matchMedia('(prefers-color-scheme: dark)').matches
-  );
+  // Dark Mode — respect persisted user preference or follow device theme
+  const [isDark, setIsDark] = useState(() => {
+    const savedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+    if (savedTheme === 'dark') return true;
+    if (savedTheme === 'light') return false;
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  });
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', isDark);
   }, [isDark]);
 
-  // Keep in sync whenever the OS switches light/dark
+  // Keep in sync whenever the OS switches light/dark (unless user set a manual override)
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    const handler = (e: MediaQueryListEvent) => setIsDark(e.matches);
+    const handler = (e: MediaQueryListEvent) => {
+      if (!localStorage.getItem(THEME_STORAGE_KEY)) {
+        setIsDark(e.matches);
+      }
+    };
     mq.addEventListener('change', handler);
     return () => mq.removeEventListener('change', handler);
   }, []);
+
+  const handleToggleDark = () => {
+    setIsDark(prev => {
+      const next = !prev;
+      localStorage.setItem(THEME_STORAGE_KEY, next ? 'dark' : 'light');
+      return next;
+    });
+  };
 
   // Keep ref in sync so performMerge always sees the latest tombstone map
   useEffect(() => {
@@ -1089,7 +1105,7 @@ const App: React.FC = () => {
             </nav>
 
             <button
-              onClick={() => setIsDark(d => !d)}
+              onClick={handleToggleDark}
               className="p-2.5 rounded-xl transition-all bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-700 dark:hover:text-slate-200 mr-1"
               title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
               aria-label="Toggle dark mode"

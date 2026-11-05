@@ -18,6 +18,17 @@ interface StatisticsProps {
 export const Statistics: React.FC<StatisticsProps> = ({ cards, studyHistory, longestStreak }) => {
     const [activeChartTab, setActiveChartTab] = React.useState<'growth' | 'building' | 'remaining' | 'future'>('growth');
     const [timeframe, setTimeframe] = React.useState<'weekly' | 'monthly' | 'yearly'>('weekly');
+    const [isDark, setIsDark] = React.useState(() =>
+        typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
+    );
+
+    React.useEffect(() => {
+        const updateTheme = () => setIsDark(document.documentElement.classList.contains('dark'));
+        updateTheme();
+        const observer = new MutationObserver(updateTheme);
+        observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+        return () => observer.disconnect();
+    }, []);
     // Stats calculations
     const totalCards = cards.length;
     const newCount = cards.filter(c => c.status === FlashcardStatus.New).length;
@@ -292,47 +303,59 @@ export const Statistics: React.FC<StatisticsProps> = ({ cards, studyHistory, lon
                             <ResponsiveContainer width="100%" height="100%">
                                 {activeChartTab === 'future' ? (
                                     <BarChart data={chartData.future} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
-                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? '#334155' : '#e2e8f0'} />
                                         <XAxis
                                             dataKey="date"
                                             axisLine={false}
                                             tickLine={false}
-                                            tick={{ fill: '#64748b', fontSize: 12 }}
+                                            tick={{ fill: isDark ? '#94a3b8' : '#64748b', fontSize: 12 }}
                                             dy={10}
                                             minTickGap={20}
                                         />
                                         <YAxis
                                             axisLine={false}
                                             tickLine={false}
-                                            tick={{ fill: '#64748b', fontSize: 12 }}
+                                            tick={{ fill: isDark ? '#94a3b8' : '#64748b', fontSize: 12 }}
                                         />
                                         <Tooltip
-                                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)' }}
-                                            cursor={{ fill: '#f1f5f9' }}
-                                            labelStyle={{ color: '#0f172a', fontWeight: 'bold', marginBottom: '4px' }}
+                                            contentStyle={{
+                                                borderRadius: '12px',
+                                                border: isDark ? '1px solid #334155' : 'none',
+                                                backgroundColor: isDark ? '#1e293b' : '#ffffff',
+                                                color: isDark ? '#f8fafc' : '#0f172a',
+                                                boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
+                                            }}
+                                            cursor={{ fill: isDark ? '#334155' : '#f1f5f9' }}
+                                            labelStyle={{ color: isDark ? '#f8fafc' : '#0f172a', fontWeight: 'bold', marginBottom: '4px' }}
                                         />
                                         <Bar dataKey="reviews" name="# words" fill="#f59e0b" radius={[4, 4, 0, 0]} />
                                     </BarChart>
                                 ) : (
                                     <LineChart data={chartData.historical} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
-                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? '#334155' : '#e2e8f0'} />
                                         <XAxis
                                             dataKey="date"
                                             axisLine={false}
                                             tickLine={false}
-                                            tick={{ fill: '#64748b', fontSize: 12 }}
+                                            tick={{ fill: isDark ? '#94a3b8' : '#64748b', fontSize: 12 }}
                                             dy={10}
                                             minTickGap={30}
                                         />
                                         <YAxis
                                             axisLine={false}
                                             tickLine={false}
-                                            tick={{ fill: '#64748b', fontSize: 12 }}
+                                            tick={{ fill: isDark ? '#94a3b8' : '#64748b', fontSize: 12 }}
                                         />
                                         <Tooltip
-                                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)' }}
-                                            cursor={{ stroke: '#cbd5e1', strokeWidth: 2, strokeDasharray: '4 4' }}
-                                            labelStyle={{ color: '#0f172a', fontWeight: 'bold', marginBottom: '4px' }}
+                                            contentStyle={{
+                                                borderRadius: '12px',
+                                                border: isDark ? '1px solid #334155' : 'none',
+                                                backgroundColor: isDark ? '#1e293b' : '#ffffff',
+                                                color: isDark ? '#f8fafc' : '#0f172a',
+                                                boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
+                                            }}
+                                            cursor={{ stroke: isDark ? '#475569' : '#cbd5e1', strokeWidth: 2, strokeDasharray: '4 4' }}
+                                            labelStyle={{ color: isDark ? '#f8fafc' : '#0f172a', fontWeight: 'bold', marginBottom: '4px' }}
                                         />
                                         <Legend wrapperStyle={{ paddingTop: '20px' }} iconType="circle" />
 
@@ -410,11 +433,11 @@ export const Statistics: React.FC<StatisticsProps> = ({ cards, studyHistory, lon
                                         title={`${day.dateStr}: ${day.count} interaction${day.count === 1 ? '' : 's'}`}
                                         className={cn(
                                             "w-full h-full rounded-[3px] transition-colors duration-200 hover:ring-2 ring-slate-400 ring-offset-1 cursor-crosshair",
-                                            day.level === 0 && "bg-slate-200",
-                                            day.level === 1 && "bg-brand-200",
-                                            day.level === 2 && "bg-brand-300",
+                                            day.level === 0 && "bg-slate-200 dark:bg-slate-700",
+                                            day.level === 1 && "bg-brand-200 dark:bg-brand-900/60",
+                                            day.level === 2 && "bg-brand-300 dark:bg-brand-700",
                                             day.level === 3 && "bg-brand-500",
-                                            day.level === 4 && "bg-brand-700"
+                                            day.level === 4 && "bg-brand-700 dark:bg-brand-400"
                                         )}
                                     />
                                 ))}

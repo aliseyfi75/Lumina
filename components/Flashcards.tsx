@@ -1,11 +1,13 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Flashcard, FlashcardStatus } from '../types';
-import { Play, BookOpen, CheckCircle, Brain, Trash2, RotateCw, Upload, Volume2, ChevronDown } from 'lucide-react';
+import { Play, BookOpen, CheckCircle, Brain, Trash2, RotateCw, Upload, Volume2, ChevronDown, Search, X, ArrowUpDown, Filter } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { playAudio } from '../utils/audio';
 import { getDueCards } from '../utils/studyUtils';
 
 const PAGE_SIZE = 24;
+
+export type FlashcardSortOption = 'priority' | 'newest' | 'oldest' | 'alpha' | 'due';
 
 interface FlashcardsProps {
   cards: Flashcard[];
@@ -154,12 +156,15 @@ const FlashcardItem: React.FC<{
 
 export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onDeleteCard, onReviewCard, onOpenImport }) => {
   const [selectedStatus, setSelectedStatus] = useState<FlashcardStatus | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedPos, setSelectedPos] = useState<string>('all');
+  const [sortBy, setSortBy] = useState<FlashcardSortOption>('priority');
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
-  }, [selectedStatus]);
+  }, [selectedStatus, searchQuery, selectedPos, sortBy]);
 
   const newCount = cards.filter(c => c.status === FlashcardStatus.New).length;
   const learningCount = cards.filter(c => c.status === FlashcardStatus.Learning).length;
@@ -167,30 +172,64 @@ export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onD
 
   const studyQueueCount = getDueCards(cards).length;
 
+  const partsOfSpeech = useMemo(() => {
+    const posSet = new Set<string>();
+    for (const c of cards) {
+      const normalized = c.partOfSpeech?.trim().toLowerCase();
+      if (normalized) posSet.add(normalized);
+    }
+    return Array.from(posSet).sort();
+  }, [cards]);
+
   const statusPriority = {
     [FlashcardStatus.New]: 0,
     [FlashcardStatus.Learning]: 1,
     [FlashcardStatus.Mastered]: 2,
   };
 
-  const filteredCards = (selectedStatus
-    ? cards.filter(c => c.status === selectedStatus)
-    : [...cards]).sort((a, b) => {
-      // 1. Sort by Status Priority
-      if (a.status !== b.status) {
-        return statusPriority[a.status] - statusPriority[b.status];
-      }
+  const filteredCards = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return cards
+      .filter(c => {
+        if (selectedStatus && c.status !== selectedStatus) return false;
+        if (selectedPos !== 'all' && (c.partOfSpeech?.trim().toLowerCase() || '') !== selectedPos) return false;
+        if (q) {
+          const wordMatch = c.word.toLowerCase().includes(q);
+          const defMatch = c.mainDefinition.toLowerCase().includes(q);
+          const exMatch = (c.example || '').toLowerCase().includes(q);
+          if (!wordMatch && !defMatch && !exMatch) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        if (sortBy === 'newest') {
+          return (b.createdAt || 0) - (a.createdAt || 0);
+        }
+        if (sortBy === 'oldest') {
+          return (a.createdAt || 0) - (b.createdAt || 0);
+        }
+        if (sortBy === 'alpha') {
+          return a.word.localeCompare(b.word, undefined, { sensitivity: 'base' });
+        }
+        if (sortBy === 'due') {
+          const dueA = a.status === FlashcardStatus.New ? 0 : (a.nextReviewDate ?? Infinity);
+          const dueB = b.status === FlashcardStatus.New ? 0 : (b.nextReviewDate ?? Infinity);
+          if (dueA !== dueB) return dueA - dueB;
+          return (b.createdAt || 0) - (a.createdAt || 0);
+        }
 
-      // 2. If Learning, sort by nextReviewDate (earliest first)
-      if (a.status === FlashcardStatus.Learning) {
-        const dateA = a.nextReviewDate || Infinity;
-        const dateB = b.nextReviewDate || Infinity;
-        if (dateA !== dateB) return dateA - dateB;
-      }
-
-      // 3. Fallback to createdAt (newest first)
-      return b.createdAt - a.createdAt;
-    });
+        // Default 'priority' sort
+        if (a.status !== b.status) {
+          return statusPriority[a.status] - statusPriority[b.status];
+        }
+        if (a.status === FlashcardStatus.Learning) {
+          const dateA = a.nextReviewDate || Infinity;
+          const dateB = b.nextReviewDate || Infinity;
+          if (dateA !== dateB) return dateA - dateB;
+        }
+        return (b.createdAt || 0) - (a.createdAt || 0);
+      });
+  }, [cards, selectedStatus, selectedPos, searchQuery, sortBy]);
 
   const handleStatusClick = (status: FlashcardStatus) => {
     if (selectedStatus === status) {
@@ -198,6 +237,13 @@ export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onD
     } else {
       setSelectedStatus(status);
     }
+  };
+
+  const handleClearFilters = () => {
+    setSelectedStatus(null);
+    setSearchQuery('');
+    setSelectedPos('all');
+    setSortBy('priority');
   };
 
   const visibleCards = filteredCards.slice(0, visibleCount);
@@ -350,6 +396,65 @@ export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onD
             );
           })}
         </div>
+
+        {/* Search, Part-of-Speech Filter, and Sort Toolbar */}
+        <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center bg-white dark:bg-slate-800 p-3 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
+          <div className="relative flex-1">
+            <Search className="h-4 w-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search words, definitions, or examples..."
+              aria-label="Search flashcards"
+              className="w-full pl-10 pr-9 py-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                aria-label="Clear search"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-full"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="relative flex-1 sm:flex-initial">
+              <Filter className="h-3.5 w-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <select
+                value={selectedPos}
+                onChange={(e) => setSelectedPos(e.target.value)}
+                aria-label="Filter by part of speech"
+                className="w-full sm:w-auto pl-8 pr-8 py-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-700 dark:text-slate-200 focus:outline-none focus:border-brand-500"
+              >
+                <option value="all">All Parts of Speech</option>
+                {partsOfSpeech.map((pos) => (
+                  <option key={pos} value={pos}>
+                    {pos.charAt(0).toUpperCase() + pos.slice(1)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="relative flex-1 sm:flex-initial">
+              <ArrowUpDown className="h-3.5 w-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as FlashcardSortOption)}
+                aria-label="Sort flashcards"
+                className="w-full sm:w-auto pl-8 pr-8 py-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-700 dark:text-slate-200 focus:outline-none focus:border-brand-500"
+              >
+                <option value="priority">Sort: Priority</option>
+                <option value="newest">Sort: Newest First</option>
+                <option value="oldest">Sort: Oldest First</option>
+                <option value="alpha">Sort: Alphabetical (A–Z)</option>
+                <option value="due">Sort: Due Date</option>
+              </select>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Grid of Flashcards */}
@@ -384,9 +489,9 @@ export const Flashcards: React.FC<FlashcardsProps> = ({ cards, onStartStudy, onD
       ) : (
         <div className="flex flex-col items-center justify-center py-20 text-slate-400 dark:text-slate-600">
           <BookOpen className="h-10 w-10 mb-4 opacity-20" />
-          <p>No cards found in this category</p>
+          <p>No cards found matching your filters</p>
           <button
-            onClick={() => setSelectedStatus(null)}
+            onClick={handleClearFilters}
             className="mt-4 text-brand-600 dark:text-brand-400 font-medium hover:underline"
           >
             Show all cards

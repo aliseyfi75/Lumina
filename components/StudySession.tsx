@@ -44,13 +44,16 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
   const [actionToast, setActionToast] = useState<{ message: string; colorClass: string; bgColorClass: string } | null>(null);
 
   const location = useLocation();
-  const sessionConfig = location.state?.sessionConfig as { mode: SessionMode; count?: number } | undefined;
+  const sessionConfig = location.state?.sessionConfig as { mode: SessionMode; count?: number; tag?: string } | undefined;
   const isQuizMode = sessionConfig?.mode === 'quiz';
 
   useEffect(() => {
     if (isInitialized || cards.length === 0) return;
 
-    const dueCards = getDueCards(cards);
+    const allDueCards = getDueCards(cards);
+    const dueCards = sessionConfig?.tag
+      ? allDueCards.filter(c => c.tags?.some(t => t.trim() === sessionConfig.tag))
+      : allDueCards;
 
     let studySet: Flashcard[] = [];
 

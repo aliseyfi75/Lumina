@@ -1,14 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Play, Zap, BrainCircuit, ListChecks } from 'lucide-react';
+import { X, Play, Zap, BrainCircuit, ListChecks, Tag } from 'lucide-react';
+import { Flashcard } from '../types';
+import { getDueCards } from '../utils/studyUtils';
 
 export type SessionMode = 'full' | 'short' | 'quiz';
 
 interface SessionConfigModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onStart: (config: { mode: SessionMode; count?: number }) => void;
+    onStart: (config: { mode: SessionMode; count?: number; tag?: string }) => void;
     dueCount: number;
+    cards?: Flashcard[];
 }
 
 export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
@@ -16,16 +19,37 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
     onClose,
     onStart,
     dueCount,
+    cards = [],
 }) => {
     const [mode, setMode] = useState<SessionMode>('full');
     const [count, setCount] = useState(10);
+    const [selectedTag, setSelectedTag] = useState<string>('');
+
+    const dueCards = useMemo(() => getDueCards(cards), [cards]);
+
+    const availableTags = useMemo(() => {
+        const tagMap = new Map<string, number>();
+        for (const card of dueCards) {
+            for (const rawTag of card.tags || []) {
+                const t = rawTag.trim();
+                if (t) tagMap.set(t, (tagMap.get(t) || 0) + 1);
+            }
+        }
+        return Array.from(tagMap.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+    }, [dueCards]);
+
+    const effectiveDueCount = useMemo(() => {
+        if (!selectedTag) return dueCount;
+        return dueCards.filter(c => c.tags?.some(t => t.trim() === selectedTag)).length;
+    }, [selectedTag, dueCount, dueCards]);
 
     if (!isOpen) return null;
 
     const handleStart = () => {
         onStart({
             mode,
-            count: mode === 'short' || mode === 'quiz' ? Math.min(count, dueCount) : undefined,
+            count: mode === 'short' || mode === 'quiz' ? Math.min(count, effectiveDueCount) : undefined,
+            tag: selectedTag || undefined,
         });
         onClose();
     };
@@ -58,7 +82,29 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
                 </div>
 
                 {/* Content */}
-                <div className="p-6 space-y-6">
+                <div className="p-6 space-y-5 max-h-[75vh] overflow-y-auto custom-scrollbar">
+                    {availableTags.length > 0 && (
+                        <div className="space-y-2">
+                            <label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                                <Tag className="h-3.5 w-3.5" />
+                                Collection / Tag Filter
+                            </label>
+                            <select
+                                aria-label="Study tag filter"
+                                value={selectedTag}
+                                onChange={(e) => setSelectedTag(e.target.value)}
+                                className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-800 dark:text-slate-100 focus:outline-none focus:border-brand-500"
+                            >
+                                <option value="">All Due Cards ({dueCount})</option>
+                                {availableTags.map(([tag, tagDueCount]) => (
+                                    <option key={tag} value={tag}>
+                                        #{tag} ({tagDueCount} due)
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
+
                     <div className="space-y-4">
 
                         {/* Full Session Option */}
@@ -88,7 +134,7 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
                                     </h3>
                                     <p className={`text-sm mt-1 ${mode === 'full' ? 'text-brand-700 dark:text-brand-300/70' : 'text-slate-500'
                                         }`}>
-                                        Review all {dueCount} cards that are due today. Best for keeping up with your daily goal.
+                                        Review all {effectiveDueCount} cards that are due today{selectedTag ? ` in #${selectedTag}` : ''}. Best for keeping up with your daily goal.
                                     </p>
                                 </div>
                             </div>
@@ -138,14 +184,14 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
                                                     <input
                                                         type="range"
                                                         min="5"
-                                                        max={Math.max(10, Math.ceil(dueCount / 5) * 5)}
+                                                        max={Math.max(10, Math.ceil(effectiveDueCount / 5) * 5)}
                                                         step="5"
                                                         value={count}
                                                         onChange={(e) => setCount(Number(e.target.value))}
                                                         className="flex-1 accent-amber-500"
                                                     />
                                                     <span className="text-sm font-bold text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/50 px-3 py-1 rounded-lg w-12 text-center">
-                                                        {Math.min(count, dueCount)}
+                                                        {Math.min(count, effectiveDueCount)}
                                                     </span>
                                                 </div>
                                             </motion.div>
@@ -198,14 +244,14 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
                                                     <input
                                                         type="range"
                                                         min="5"
-                                                        max={Math.max(10, Math.ceil(dueCount / 5) * 5)}
+                                                        max={Math.max(10, Math.ceil(effectiveDueCount / 5) * 5)}
                                                         step="5"
                                                         value={count}
                                                         onChange={(e) => setCount(Number(e.target.value))}
                                                         className="flex-1 accent-indigo-500"
                                                     />
                                                     <span className="text-sm font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-100 dark:bg-indigo-900/50 px-3 py-1 rounded-lg w-12 text-center">
-                                                        {Math.min(count, dueCount)}
+                                                        {Math.min(count, effectiveDueCount)}
                                                     </span>
                                                 </div>
                                             </motion.div>

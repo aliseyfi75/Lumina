@@ -33,6 +33,7 @@ export interface Flashcard {
   mainDefinition: string;
   example?: string;
   partOfSpeech: string;
+  tags?: string[];
   status: FlashcardStatus;
   lastReviewed: number;
   createdAt: number;

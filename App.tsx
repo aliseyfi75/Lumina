@@ -179,6 +179,12 @@ const App: React.FC = () => {
         audio: winner.audio || fallback.audio,
         image: winner.image || fallback.image,
         example: winner.example || fallback.example,
+        tags:
+          winner.tags && winner.tags.length > 0
+            ? winner.tags
+            : fallback.tags && fallback.tags.length > 0
+              ? fallback.tags
+              : undefined,
         createdAt: Math.min(
           existing.createdAt || Date.now(),
           inc.createdAt || Date.now()
@@ -897,7 +903,7 @@ const App: React.FC = () => {
     setIsSessionConfigOpen(true);
   };
 
-  const handleSessionStart = (config: { mode: SessionMode; count?: number }) => {
+  const handleSessionStart = (config: { mode: SessionMode; count?: number; tag?: string }) => {
     navigate('/study', { state: { sessionConfig: config } });
   };
 
@@ -972,8 +978,12 @@ const App: React.FC = () => {
     mainDefinition: string;
     example?: string;
     image?: string;
+    tags?: string[];
   }) => {
     const now = Date.now();
+    const cleanedTags = data.tags
+      ? Array.from(new Set(data.tags.map(t => t.trim()).filter(Boolean)))
+      : [];
     const newCard: Flashcard = {
       id: crypto.randomUUID(),
       word: data.word.trim(),
@@ -982,6 +992,7 @@ const App: React.FC = () => {
       mainDefinition: data.mainDefinition.trim(),
       example: data.example?.trim() || undefined,
       image: data.image?.trim() || undefined,
+      tags: cleanedTags.length > 0 ? cleanedTags : undefined,
       status: FlashcardStatus.New,
       lastReviewed: 0,
       createdAt: now,
@@ -1003,23 +1014,27 @@ const App: React.FC = () => {
       mainDefinition?: string;
       example?: string;
       image?: string;
+      tags?: string[];
     }
   ) => {
     setCards(prev =>
-      prev.map(card =>
-        card.id === id
-          ? {
-              ...card,
-              word: updates.word !== undefined ? updates.word.trim() : card.word,
-              partOfSpeech: updates.partOfSpeech !== undefined ? updates.partOfSpeech.trim() : card.partOfSpeech,
-              phonetic: updates.phonetic !== undefined ? (updates.phonetic.trim() || undefined) : card.phonetic,
-              mainDefinition: updates.mainDefinition !== undefined ? updates.mainDefinition.trim() : card.mainDefinition,
-              example: updates.example !== undefined ? (updates.example.trim() || undefined) : card.example,
-              image: updates.image !== undefined ? (updates.image.trim() || undefined) : card.image,
-              updatedAt: Date.now(),
-            }
-          : card
-      )
+      prev.map(card => {
+        if (card.id !== id) return card;
+        const cleanedTags = updates.tags !== undefined
+          ? Array.from(new Set(updates.tags.map(t => t.trim()).filter(Boolean)))
+          : card.tags;
+        return {
+          ...card,
+          word: updates.word !== undefined ? updates.word.trim() : card.word,
+          partOfSpeech: updates.partOfSpeech !== undefined ? updates.partOfSpeech.trim() : card.partOfSpeech,
+          phonetic: updates.phonetic !== undefined ? (updates.phonetic.trim() || undefined) : card.phonetic,
+          mainDefinition: updates.mainDefinition !== undefined ? updates.mainDefinition.trim() : card.mainDefinition,
+          example: updates.example !== undefined ? (updates.example.trim() || undefined) : card.example,
+          image: updates.image !== undefined ? (updates.image.trim() || undefined) : card.image,
+          tags: cleanedTags && cleanedTags.length > 0 ? cleanedTags : undefined,
+          updatedAt: Date.now(),
+        };
+      })
     );
   };
 
@@ -1288,6 +1303,7 @@ const App: React.FC = () => {
         onClose={() => setIsSessionConfigOpen(false)}
         onStart={handleSessionStart}
         dueCount={getDueCards(cards).length}
+        cards={cards}
       />
     </div>
   );

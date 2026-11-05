@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Flashcard, FlashcardStatus } from '../types';
-import { Play, BookOpen, CheckCircle, Brain, Trash2, RotateCw, Upload, Volume2, ChevronDown, Search, X, ArrowUpDown, Filter, Plus, Pencil } from 'lucide-react';
+import { Play, BookOpen, CheckCircle, Brain, Trash2, RotateCw, Upload, Volume2, ChevronDown, Search, X, ArrowUpDown, Filter, Plus, Pencil, Tag } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { playAudio } from '../utils/audio';
 import { getDueCards } from '../utils/studyUtils';
@@ -16,6 +16,7 @@ export interface CustomCardFormData {
   mainDefinition: string;
   example?: string;
   image?: string;
+  tags?: string[];
 }
 
 interface FlashcardsProps {
@@ -95,6 +96,22 @@ const FlashcardItem: React.FC<{
               <Volume2 className="h-4 w-4" />
             </button>
           </div>
+
+          {card.tags && card.tags.length > 0 && (
+            <div className="flex flex-wrap items-center justify-center gap-1.5 mt-3 max-w-full px-2">
+              {card.tags.slice(0, 3).map((tag) => (
+                <span
+                  key={tag}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 dark:bg-slate-700/80 text-slate-600 dark:text-slate-300 border border-slate-200/70 dark:border-slate-600"
+                >
+                  #{tag}
+                </span>
+              ))}
+              {card.tags.length > 3 && (
+                <span className="text-[10px] font-medium text-slate-400">+{card.tags.length - 3}</span>
+              )}
+            </div>
+          )}
 
           <div className="absolute bottom-6 text-slate-300 dark:text-slate-600 group-hover:text-brand-400 transition-colors flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider">
             <RotateCw className="h-3.5 w-3.5" />
@@ -198,6 +215,7 @@ const CardEditorModal: React.FC<{
   const [mainDefinition, setMainDefinition] = useState('');
   const [example, setExample] = useState('');
   const [image, setImage] = useState('');
+  const [tagsInput, setTagsInput] = useState('');
 
   useEffect(() => {
     if (editingCard) {
@@ -207,6 +225,7 @@ const CardEditorModal: React.FC<{
       setMainDefinition(editingCard.mainDefinition || '');
       setExample(editingCard.example || '');
       setImage(editingCard.image || '');
+      setTagsInput((editingCard.tags || []).join(', '));
     } else {
       setWord('');
       setPartOfSpeech('noun');
@@ -214,6 +233,7 @@ const CardEditorModal: React.FC<{
       setMainDefinition('');
       setExample('');
       setImage('');
+      setTagsInput('');
     }
   }, [editingCard, isOpen]);
 
@@ -222,6 +242,14 @@ const CardEditorModal: React.FC<{
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!word.trim() || !mainDefinition.trim()) return;
+    const parsedTags = Array.from(
+      new Set(
+        tagsInput
+          .split(',')
+          .map(t => t.trim().replace(/^#+/, ''))
+          .filter(Boolean)
+      )
+    );
     onSubmit({
       word: word.trim(),
       partOfSpeech: partOfSpeech.trim() || 'noun',
@@ -229,6 +257,7 @@ const CardEditorModal: React.FC<{
       mainDefinition: mainDefinition.trim(),
       example: example.trim() || undefined,
       image: image.trim() || undefined,
+      tags: parsedTags,
     });
     onClose();
   };
@@ -346,6 +375,20 @@ const CardEditorModal: React.FC<{
             />
           </div>
 
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+              Tags / Collections (Optional, comma-separated)
+            </label>
+            <input
+              type="text"
+              aria-label="Tags"
+              value={tagsInput}
+              onChange={(e) => setTagsInput(e.target.value)}
+              placeholder="e.g. GRE, Literary, Book: Dune"
+              className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-brand-500"
+            />
+          </div>
+
           <div className="pt-2 flex items-center justify-end gap-3 border-t border-slate-100 dark:border-slate-700">
             <button
               type="button"
@@ -380,6 +423,7 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
   const [selectedStatus, setSelectedStatus] = useState<FlashcardStatus | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPos, setSelectedPos] = useState<string>('all');
+  const [selectedTag, setSelectedTag] = useState<string>('all');
   const [sortBy, setSortBy] = useState<FlashcardSortOption>('priority');
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
@@ -406,7 +450,7 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
 
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
-  }, [selectedStatus, searchQuery, selectedPos, sortBy]);
+  }, [selectedStatus, searchQuery, selectedPos, selectedTag, sortBy]);
 
   const newCount = cards.filter(c => c.status === FlashcardStatus.New).length;
   const learningCount = cards.filter(c => c.status === FlashcardStatus.Learning).length;
@@ -423,6 +467,17 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
     return Array.from(posSet).sort();
   }, [cards]);
 
+  const availableTags = useMemo(() => {
+    const tagCounts = new Map<string, number>();
+    for (const c of cards) {
+      for (const raw of c.tags || []) {
+        const t = raw.trim();
+        if (t) tagCounts.set(t, (tagCounts.get(t) || 0) + 1);
+      }
+    }
+    return Array.from(tagCounts.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [cards]);
+
   const statusPriority = {
     [FlashcardStatus.New]: 0,
     [FlashcardStatus.Learning]: 1,
@@ -435,11 +490,13 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
       .filter(c => {
         if (selectedStatus && c.status !== selectedStatus) return false;
         if (selectedPos !== 'all' && (c.partOfSpeech?.trim().toLowerCase() || '') !== selectedPos) return false;
+        if (selectedTag !== 'all' && !c.tags?.some(t => t.trim() === selectedTag)) return false;
         if (q) {
           const wordMatch = c.word.toLowerCase().includes(q);
           const defMatch = c.mainDefinition.toLowerCase().includes(q);
           const exMatch = (c.example || '').toLowerCase().includes(q);
-          if (!wordMatch && !defMatch && !exMatch) return false;
+          const tagMatch = (c.tags || []).some(t => t.toLowerCase().includes(q));
+          if (!wordMatch && !defMatch && !exMatch && !tagMatch) return false;
         }
         return true;
       })
@@ -471,7 +528,7 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
         }
         return (b.createdAt || 0) - (a.createdAt || 0);
       });
-  }, [cards, selectedStatus, selectedPos, searchQuery, sortBy]);
+  }, [cards, selectedStatus, selectedPos, selectedTag, searchQuery, sortBy]);
 
   const handleStatusClick = (status: FlashcardStatus) => {
     if (selectedStatus === status) {
@@ -485,6 +542,7 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
     setSelectedStatus(null);
     setSearchQuery('');
     setSelectedPos('all');
+    setSelectedTag('all');
     setSortBy('priority');
   };
 
@@ -723,6 +781,39 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Tag / Collection Filter Pills */}
+        {availableTags.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2" aria-label="Tag filter pills">
+            <span className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mr-1">
+              <Tag className="h-3.5 w-3.5" />
+              Collections:
+            </span>
+            <button
+              onClick={() => setSelectedTag('all')}
+              className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors duration-150 border ${
+                selectedTag === 'all'
+                  ? 'bg-brand-600 text-white border-brand-600 shadow-sm'
+                  : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-brand-300'
+              }`}
+            >
+              All ({cards.length})
+            </button>
+            {availableTags.map(([tag, count]) => (
+              <button
+                key={tag}
+                onClick={() => setSelectedTag(selectedTag === tag ? 'all' : tag)}
+                className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors duration-150 border ${
+                  selectedTag === tag
+                    ? 'bg-brand-600 text-white border-brand-600 shadow-sm'
+                    : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-brand-300'
+                }`}
+              >
+                #{tag} ({count})
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Grid of Flashcards */}

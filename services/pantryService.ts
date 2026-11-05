@@ -137,6 +137,7 @@ const sanitizeCardsForCloud = (cards: Flashcard[]): Flashcard[] =>
     if (card.audio && !card.audio.startsWith('data:')) clean.audio = card.audio;
     if (card.image && !card.image.startsWith('data:')) clean.image = card.image;
     if (card.example) clean.example = card.example;
+    if (card.tags && card.tags.length > 0) clean.tags = card.tags;
     if (card.interval) clean.interval = card.interval;
     if (card.repetition) clean.repetition = card.repetition;
     if (card.easinessFactor && card.easinessFactor !== 2.5) clean.easinessFactor = card.easinessFactor;

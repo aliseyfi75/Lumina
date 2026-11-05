@@ -15,7 +15,7 @@ import {
 import {
   GutenbergBook,
   BookExtractedWord,
-  searchGutenbergBooks,
+  searchPublicDomainBooks,
   fetchGutenbergBookText,
   extractTextFromBookFile,
   extractComplexWordsFromText,
@@ -38,6 +38,8 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
   const [isSearching, setIsSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [searchResults, setSearchResults] = useState<GutenbergBook[]>([]);
+  const [similarResults, setSimilarResults] = useState<GutenbergBook[]>([]);
+  const [failedCovers, setFailedCovers] = useState<Set<string>>(new Set());
   const [searchError, setSearchError] = useState<string | null>(null);
 
   // Extraction state
@@ -57,6 +59,7 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
     setIsSearching(false);
     setHasSearched(false);
     setSearchResults([]);
+    setSimilarResults([]);
     setSearchError(null);
     setIsExtracting(false);
     setExtractionStage('');
@@ -82,14 +85,16 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
     setExtractedWords([]);
 
     try {
-      const results = await searchGutenbergBooks(trimmed);
-      setSearchResults(results);
+      const { exactMatches, similarMatches } = await searchPublicDomainBooks(trimmed);
+      setSearchResults(exactMatches);
+      setSimilarResults(similarMatches);
       setHasSearched(true);
-      if (results.length === 0) {
+      if (exactMatches.length === 0) {
         setActiveBookTitle(trimmed);
       }
     } catch {
       setSearchResults([]);
+      setSimilarResults([]);
       setHasSearched(true);
       setActiveBookTitle(trimmed);
     } finally {
@@ -398,23 +403,31 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                 </div>
               )}
 
-              {/* Tier 1 Results: Matching Gutenberg Books */}
+              {/* Tier 1 Results: Matching Public Domain Books */}
               {hasSearched && searchResults.length > 0 && (
-                <div className="space-y-3">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                    Matching Books Found ({searchResults.length})
-                  </p>
+                <div className="space-y-3" data-testid="exact-books-section">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                      Matching Books Found ({searchResults.length})
+                    </p>
+                    <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                      Multi-Source Public Domain Catalog
+                    </span>
+                  </div>
                   <div className="grid grid-cols-1 gap-3">
                     {searchResults.map((book) => (
                       <div
-                        key={book.id}
+                        key={`${book.source || 'cat'}-${book.id}-${book.title}`}
                         className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 flex items-center justify-between gap-4 hover:border-brand-300 dark:hover:border-brand-600 transition-all"
                       >
                         <div className="flex items-center gap-3.5 min-w-0">
-                          {book.coverUrl ? (
+                          {book.coverUrl && !failedCovers.has(book.coverUrl) ? (
                             <img
                               src={book.coverUrl}
                               alt={book.title}
+                              onError={() =>
+                                setFailedCovers(prev => new Set(prev).add(book.coverUrl!))
+                              }
                               className="w-11 h-16 object-cover rounded-lg border border-slate-200 dark:border-slate-700 shrink-0 bg-slate-200"
                             />
                           ) : (
@@ -423,9 +436,16 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                             </div>
                           )}
                           <div className="min-w-0">
-                            <h4 className="font-serif font-bold text-slate-900 dark:text-white truncate">
-                              {book.title}
-                            </h4>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h4 className="font-serif font-bold text-slate-900 dark:text-white truncate">
+                                {book.title}
+                              </h4>
+                              {book.source && (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 border border-brand-200/70 dark:border-brand-800/70 shrink-0">
+                                  {book.source}
+                                </span>
+                              )}
+                            </div>
                             <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">
                               {book.authors.join(', ')}
                             </p>
@@ -446,7 +466,80 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                 </div>
               )}
 
-              {/* Tier 1 -> Tier 2 Handoff when Book Not Found */}
+              {/* Fuzzy / Similarity Matches ("Did you mean / Similar Books") */}
+              {hasSearched && searchResults.length === 0 && similarResults.length > 0 && (
+                <div className="space-y-3" data-testid="similar-books-section">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-brand-600 dark:text-brand-400 flex items-center gap-1.5">
+                      <Sparkles className="h-3.5 w-3.5" />
+                      Similar Books You Might Mean ({similarResults.length})
+                    </p>
+                    <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                      Fuzzy Title & Author Match
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3">
+                    {similarResults.map((book) => {
+                      const matchPct = Math.round((book.similarity ?? 0.72) * 100);
+                      return (
+                        <div
+                          key={`similar-${book.source || 'cat'}-${book.id}-${book.title}`}
+                          className="p-4 rounded-2xl bg-brand-50/40 dark:bg-brand-900/15 border border-brand-200/80 dark:border-brand-800/60 flex items-center justify-between gap-4 hover:border-brand-400 dark:hover:border-brand-500 transition-all"
+                        >
+                          <div className="flex items-center gap-3.5 min-w-0">
+                            {book.coverUrl && !failedCovers.has(book.coverUrl) ? (
+                              <img
+                                src={book.coverUrl}
+                                alt={book.title}
+                                onError={() =>
+                                  setFailedCovers(prev => new Set(prev).add(book.coverUrl!))
+                                }
+                                className="w-11 h-16 object-cover rounded-lg border border-slate-200 dark:border-slate-700 shrink-0 bg-slate-200"
+                              />
+                            ) : (
+                              <div className="w-11 h-16 rounded-lg bg-brand-100 dark:bg-brand-900/40 text-brand-600 dark:text-brand-400 flex items-center justify-center shrink-0">
+                                <BookOpen className="h-5 w-5" />
+                              </div>
+                            )}
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <h4 className="font-serif font-bold text-slate-900 dark:text-white truncate">
+                                  {book.title}
+                                </h4>
+                                <span
+                                  data-testid="similarity-badge"
+                                  className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 shrink-0"
+                                >
+                                  {matchPct}% similar
+                                </span>
+                                {book.source && (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-200/70 dark:bg-slate-700 text-slate-600 dark:text-slate-300 shrink-0">
+                                    {book.source}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                                {book.authors.join(', ')}
+                              </p>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => handleSelectGutenbergBook(book)}
+                            className="px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-xs font-semibold rounded-xl shadow-sm transition-colors flex items-center gap-1.5 shrink-0"
+                          >
+                            <Sparkles className="h-3.5 w-3.5" />
+                            Extract Words
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Tier 1 -> Tier 2 Handoff when Exact Book Not Found */}
               {hasSearched && searchResults.length === 0 && (
                 <div
                   data-testid="book-not-found-upload-prompt"
@@ -456,7 +549,9 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                     <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
                     <div className="space-y-1">
                       <h4 className="text-sm font-bold text-amber-900 dark:text-amber-200">
-                        “{searchQuery.trim()}” wasn’t found in the public domain catalog
+                        {similarResults.length > 0
+                          ? `No exact title match for “${searchQuery.trim()}” — pick a similar book above or upload your file`
+                          : `“${searchQuery.trim()}” wasn’t found in the public domain catalog`}
                       </h4>
                       <p className="text-xs text-amber-800/90 dark:text-amber-300/80 leading-relaxed">
                         Upload your own <strong>.epub</strong> or <strong>.txt</strong> copy of the book below—Lumina will scan it right in your browser, extract its complex words along with the actual sentences from the book, and create your study dock.

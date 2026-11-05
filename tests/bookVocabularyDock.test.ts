@@ -49,6 +49,18 @@ const MOCK_DEFINITIONS: Record<string, { pos: string; def: string; phonetic: str
     phonetic: '/ɪnˈskɹuːtəbəl/',
     freq: '0.95',
   },
+  hypochondriacal: {
+    pos: 'adjective',
+    def: 'Afflicted with extreme depression of mind or spirits often centered on imaginary physical ailments.',
+    phonetic: '/ˌhaɪpəkɒnˈdɹaɪəkəl/',
+    freq: '0.18',
+  },
+  circumambulate: {
+    pos: 'verb',
+    def: 'To walk all the way around something, especially ritualistically.',
+    phonetic: '/ˌsɜːkəmˈæmbjʊleɪt/',
+    freq: '0.12',
+  },
 };
 
 test('supports Tier 1 Gutenberg book vocabulary extraction with real book sentences and Tier 2 file upload fallback when book is not found', async ({ page }) => {
@@ -84,6 +96,31 @@ test('supports Tier 1 Gutenberg book vocabulary extraction with real book senten
         body: JSON.stringify({ count: 0, results: [] }),
       });
     }
+  });
+
+  // Mock Open Library & Wikisource in Test 1 so 'Dune' returns empty public domain matches
+  await page.route('https://openlibrary.org/search.json**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ docs: [] }),
+    });
+  });
+
+  await page.route('https://en.wikisource.org/w/api.php**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ query: { search: [] } }),
+    });
+  });
+
+  await page.route('https://api.datamuse.com/sug**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([]),
+    });
   });
 
   // Mock Gutenberg text download
@@ -271,4 +308,195 @@ test('supports Tier 1 Gutenberg book vocabulary extraction with real book senten
   const tagSelect = page.getByLabel('Study tag filter');
   await expect(tagSelect).toBeVisible();
   await expect(tagSelect).toHaveValue('Book: Dune');
+});
+
+test('supports backup catalog providers when Gutendex fails and shows fuzzy Similar Books when searching with typos', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  // Simulate primary Gutendex API completely failing (502 Bad Gateway)
+  await page.route('https://gutendex.com/books**', async (route) => {
+    await route.fulfill({
+      status: 502,
+      body: 'Bad Gateway',
+    });
+  });
+
+  // Simulate Open Library backup provider returning Moby-Dick
+  await page.route('https://openlibrary.org/search.json**', async (route) => {
+    const url = new URL(route.request().url());
+    const q = (url.searchParams.get('q') || '').toLowerCase();
+    if (q.includes('moby')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          docs: [
+            {
+              key: '/works/OL102749W',
+              title: 'Moby-Dick; or, The Whale',
+              author_name: ['Herman Melville'],
+              id_project_gutenberg: ['2701'],
+              cover_i: 8231996,
+              public_scan_b: true,
+              first_publish_year: 1851,
+            },
+          ],
+        }),
+      });
+    } else {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ docs: [] }),
+      });
+    }
+  });
+
+  await page.route('https://en.wikisource.org/w/api.php**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ query: { search: [] } }),
+    });
+  });
+
+  await page.route('https://api.datamuse.com/sug**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([]),
+    });
+  });
+
+  // Mock Datamuse frequency & fallback defs
+  await page.route('https://api.datamuse.com/words**', async (route) => {
+    const url = new URL(route.request().url());
+    const sp = (url.searchParams.get('sp') || '').toLowerCase();
+    const entry = MOCK_DEFINITIONS[sp];
+
+    if (entry) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            word: sp,
+            score: 1000,
+            tags: [`f:${entry.freq}`, `pron:${entry.phonetic}`],
+            defs: [`adj\t${entry.def}`],
+          },
+        ]),
+      });
+    } else {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            word: sp,
+            score: 100,
+            tags: ['f:45.0'],
+          },
+        ]),
+      });
+    }
+  });
+
+  // Mock primary dictionary API
+  await page.route('https://api.dictionaryapi.dev/api/v2/entries/en/**', async (route) => {
+    const word = decodeURIComponent(route.request().url().split('/').pop() || '').toLowerCase();
+    const entry = MOCK_DEFINITIONS[word];
+    if (!entry) {
+      await route.fulfill({ status: 404, body: 'Not Found' });
+      return;
+    }
+
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          word,
+          phonetic: entry.phonetic,
+          meanings: [
+            {
+              partOfSpeech: entry.pos,
+              definitions: [
+                {
+                  definition: entry.def,
+                },
+              ],
+            },
+          ],
+        },
+      ]),
+    });
+  });
+
+  await page.route('https://en.wikipedia.org/api/rest_v1/page/summary/**', async (route) => {
+    await route.fulfill({ status: 404, body: '{}' });
+  });
+
+  // Block external CORS proxies & direct Gutenberg cache so fallback excerpt from Classic Catalog is verified immediately
+  await page.route('https://www.gutenberg.org/**', async (route) => {
+    await route.fulfill({ status: 404, body: 'Not Found' });
+  });
+  await page.route('https://corsproxy.io/**', async (route) => {
+    await route.fulfill({ status: 503, body: 'Unavailable' });
+  });
+  await page.route('https://api.codetabs.com/**', async (route) => {
+    await route.fulfill({ status: 503, body: 'Unavailable' });
+  });
+  await page.route('https://api.allorigins.win/**', async (route) => {
+    await route.fulfill({ status: 503, body: 'Unavailable' });
+  });
+
+  await page.addInitScript(() => {
+    const initialCards = [
+      {
+        id: 'seed-1',
+        word: 'Ephemeral',
+        partOfSpeech: 'adjective',
+        phonetic: '/əˈfɛm(ə)ɹəl/',
+        mainDefinition: 'Lasting for a very short time.',
+        status: 'New',
+        lastReviewed: 0,
+        createdAt: Date.now() - 50000,
+        repetition: 0,
+        nextReviewDate: Date.now() - 1000,
+      },
+    ];
+    localStorage.setItem('lumina_cards_v1', JSON.stringify(initialCards));
+  });
+
+  await page.goto('/#/flashcards');
+  await page.getByRole('button', { name: /Prepare for a Book/i }).click();
+
+  // 1. Search with a typo ("Mobi dik") -> should display "Similar Books You Might Mean"
+  await page.getByLabel('Search book title').fill('Mobi dik');
+  await page.getByRole('button', { name: /Find Book/i }).click();
+
+  const similarSection = page.getByTestId('similar-books-section');
+  await expect(similarSection).toBeVisible();
+  await expect(similarSection.getByText('Moby-Dick; or, The Whale')).toBeVisible();
+  await expect(similarSection.getByTestId('similarity-badge').first()).toContainText('% similar');
+
+  await page.waitForTimeout(300);
+  await page.screenshot({
+    path: '/Users/aliseyfi/.gemini/antigravity/brain/a96b9d77-0d1a-4784-ac20-758650393c58/scratch/feature_book_similar_matches.png',
+  });
+
+  // 2. Search "Moby dick" directly even while Gutendex is down -> finds exact match via backup catalog
+  await page.getByLabel('Search book title').fill('Moby dick');
+  await page.getByRole('button', { name: /Find Book/i }).click();
+
+  const exactSection = page.getByTestId('exact-books-section');
+  await expect(exactSection).toBeVisible();
+  await expect(exactSection.getByText('Moby-Dick; or, The Whale')).toBeVisible();
+
+  // Extract words from Moby-Dick
+  await exactSection.getByRole('button', { name: /Extract Words/i }).first().click();
+
+  await expect(page.getByText('Hypochondriacal', { exact: true })).toBeVisible();
+  await expect(page.getByText('Circumambulate', { exact: true })).toBeVisible();
 });

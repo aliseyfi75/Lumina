@@ -138,6 +138,8 @@ const sanitizeCardsForCloud = (cards: Flashcard[]): Flashcard[] =>
     if (card.image && !card.image.startsWith('data:')) clean.image = card.image;
     if (card.example) clean.example = card.example;
     if (card.tags && card.tags.length > 0) clean.tags = card.tags;
+    if (card.synonyms && card.synonyms.length > 0) clean.synonyms = card.synonyms;
+    if (card.antonyms && card.antonyms.length > 0) clean.antonyms = card.antonyms;
     if (card.interval) clean.interval = card.interval;
     if (card.repetition) clean.repetition = card.repetition;
     if (card.easinessFactor && card.easinessFactor !== 2.5) clean.easinessFactor = card.easinessFactor;

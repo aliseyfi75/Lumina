@@ -58,13 +58,38 @@ const lookupPrimary = async (word: string): Promise<WordEntry | null> => {
       word: entry.word,
       phonetic: entry.phonetic || entry.phonetics?.find((p: any) => p.text)?.text,
       audio: entry.phonetics?.find((p: any) => p.audio)?.audio,
-      meanings: entry.meanings.map((m: any) => ({
-        partOfSpeech: m.partOfSpeech,
-        definitions: m.definitions.map((d: any) => ({
-          definition: d.definition,
-          example: d.example
-        }))
-      }))
+      origin: entry.origin || undefined,
+      meanings: entry.meanings.map((m: any) => {
+        const mergedSyns = Array.from(
+          new Set<string>([
+            ...(Array.isArray(m.synonyms) ? m.synonyms : []),
+            ...(Array.isArray(m.definitions)
+              ? m.definitions.flatMap((d: any) => (Array.isArray(d.synonyms) ? d.synonyms : []))
+              : []),
+          ].map((s: string) => String(s).trim()).filter(Boolean))
+        ).slice(0, 10);
+
+        const mergedAnts = Array.from(
+          new Set<string>([
+            ...(Array.isArray(m.antonyms) ? m.antonyms : []),
+            ...(Array.isArray(m.definitions)
+              ? m.definitions.flatMap((d: any) => (Array.isArray(d.antonyms) ? d.antonyms : []))
+              : []),
+          ].map((s: string) => String(s).trim()).filter(Boolean))
+        ).slice(0, 10);
+
+        return {
+          partOfSpeech: m.partOfSpeech,
+          synonyms: mergedSyns.length > 0 ? mergedSyns : undefined,
+          antonyms: mergedAnts.length > 0 ? mergedAnts : undefined,
+          definitions: m.definitions.map((d: any) => ({
+            definition: d.definition,
+            example: d.example,
+            synonyms: Array.isArray(d.synonyms) && d.synonyms.length > 0 ? d.synonyms.slice(0, 6) : undefined,
+            antonyms: Array.isArray(d.antonyms) && d.antonyms.length > 0 ? d.antonyms.slice(0, 6) : undefined,
+          })),
+        };
+      }),
     };
 
     return wordEntry;

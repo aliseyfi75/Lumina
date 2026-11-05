@@ -143,6 +143,19 @@ const FlashcardItem: React.FC<{
                 "{card.example}"
               </p>
             )}
+            {card.synonyms && card.synonyms.length > 0 && (
+              <div className="flex flex-wrap items-center justify-center gap-1.5 pt-2 mt-2 w-full">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Syn:</span>
+                {card.synonyms.slice(0, 4).map((syn) => (
+                  <span
+                    key={syn}
+                    className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-800 text-emerald-300 border border-slate-700"
+                  >
+                    {syn}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="pt-4 w-full grid grid-cols-4 gap-1 border-t border-slate-800 mt-2" onClick={(e) => e.stopPropagation()}>

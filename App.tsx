@@ -185,6 +185,18 @@ const App: React.FC = () => {
             : fallback.tags && fallback.tags.length > 0
               ? fallback.tags
               : undefined,
+        synonyms:
+          winner.synonyms && winner.synonyms.length > 0
+            ? winner.synonyms
+            : fallback.synonyms && fallback.synonyms.length > 0
+              ? fallback.synonyms
+              : undefined,
+        antonyms:
+          winner.antonyms && winner.antonyms.length > 0
+            ? winner.antonyms
+            : fallback.antonyms && fallback.antonyms.length > 0
+              ? fallback.antonyms
+              : undefined,
         createdAt: Math.min(
           existing.createdAt || Date.now(),
           inc.createdAt || Date.now()
@@ -861,6 +873,9 @@ const App: React.FC = () => {
   // --- App Logic ---
 
   const handleAddCard = (entry: WordEntry, definition: string, example: string, partOfSpeech: string) => {
+    const matchingMeaning = entry.meanings?.find(m => m.partOfSpeech === partOfSpeech) || entry.meanings?.[0];
+    const synonyms = matchingMeaning?.synonyms?.slice(0, 6);
+    const antonyms = matchingMeaning?.antonyms?.slice(0, 6);
     const newCard: Flashcard = {
       id: crypto.randomUUID(),
       word: entry.word,
@@ -870,6 +885,8 @@ const App: React.FC = () => {
       mainDefinition: definition,
       example: example,
       partOfSpeech: partOfSpeech,
+      synonyms: synonyms && synonyms.length > 0 ? synonyms : undefined,
+      antonyms: antonyms && antonyms.length > 0 ? antonyms : undefined,
       status: FlashcardStatus.New,
       lastReviewed: 0,
       createdAt: Date.now(),

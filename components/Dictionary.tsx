@@ -13,6 +13,58 @@ interface DictionaryProps {
   existingCards: Flashcard[];
 }
 
+const STOP_WORDS = new Set([
+  'the', 'and', 'for', 'that', 'with', 'from', 'this', 'have', 'not', 'are',
+  'was', 'were', 'been', 'being', 'into', 'such', 'one', 'who', 'whom', 'whose',
+  'which', 'what', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each',
+]);
+
+const ClickableDefinitionText: React.FC<{
+  text: string;
+  onWordClick: (word: string) => void;
+}> = ({ text, onWordClick }) => {
+  const tokens = text.split(/(\s+)/);
+  return (
+    <>
+      {tokens.map((token, idx) => {
+        if (/^\s+$/.test(token)) {
+          return <React.Fragment key={idx}>{token}</React.Fragment>;
+        }
+        const match = token.match(/^([^a-zA-Z]*)([a-zA-Z'-]+)([^a-zA-Z]*)$/);
+        if (!match) {
+          return <React.Fragment key={idx}>{token}</React.Fragment>;
+        }
+        const [, prefix, coreWord, suffix] = match;
+        const cleanLower = coreWord.toLowerCase();
+        if (coreWord.length < 4 || STOP_WORDS.has(cleanLower)) {
+          return <React.Fragment key={idx}>{token}</React.Fragment>;
+        }
+        return (
+          <React.Fragment key={idx}>
+            {prefix}
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={() => onWordClick(coreWord)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onWordClick(coreWord);
+                }
+              }}
+              title={`Look up "${coreWord}"`}
+              className="cursor-pointer rounded px-0.5 -mx-0.5 hover:bg-brand-100/70 dark:hover:bg-brand-900/40 hover:text-brand-700 dark:hover:text-brand-300 transition-colors"
+            >
+              {coreWord}
+            </span>
+            {suffix}
+          </React.Fragment>
+        );
+      })}
+    </>
+  );
+};
+
 export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard, existingCards }) => {
   const location = useLocation();
   const initialQuery: string | undefined = (location.state as { query?: string } | null)?.query;
@@ -294,7 +346,7 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
 
       {result && (
         <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-xl shadow-slate-200/50 dark:shadow-none overflow-hidden border border-slate-100 dark:border-slate-700">
-          <div className="p-8 border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/30">
+          <div className="p-8 border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/30 space-y-3">
             <div className="flex items-baseline gap-4 flex-wrap">
               <h2 className="text-4xl font-serif font-bold text-slate-900 dark:text-white">{result.word}</h2>
               {result.phonetic && (
@@ -308,6 +360,14 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
                 <Volume2 className="h-6 w-6" />
               </button>
             </div>
+            {result.origin && (
+              <div className="text-sm text-slate-500 dark:text-slate-400 bg-white/70 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-700/70 rounded-xl px-4 py-2.5">
+                <span className="font-semibold uppercase tracking-wider text-[11px] text-slate-400 dark:text-slate-500 mr-2">
+                  Origin
+                </span>
+                <span>{result.origin}</span>
+              </div>
+            )}
           </div>
 
           <div className="p-8 space-y-8">
@@ -338,7 +398,10 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
                     return (
                       <div key={dIdx} className="group relative pl-4 border-l-2 border-transparent hover:border-brand-200 transition-colors">
                         <p className="text-slate-800 dark:text-slate-200 text-lg leading-relaxed">
-                          {def.definition}
+                          <ClickableDefinitionText
+                            text={def.definition}
+                            onWordClick={handleSuggestionClick}
+                          />
                         </p>
                         {def.example && (
                           <p className="mt-2 text-slate-500 dark:text-slate-400 italic font-serif">
@@ -380,6 +443,47 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
                     );
                   })}
                 </div>
+
+                {((meaning.synonyms && meaning.synonyms.length > 0) ||
+                  (meaning.antonyms && meaning.antonyms.length > 0)) && (
+                  <div className="pt-3 pl-4 space-y-2.5">
+                    {meaning.synonyms && meaning.synonyms.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-2" aria-label="Synonyms">
+                        <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 mr-1">
+                          Synonyms
+                        </span>
+                        {meaning.synonyms.map((syn) => (
+                          <button
+                            key={syn}
+                            onClick={() => handleSuggestionClick(syn)}
+                            onMouseEnter={() => prefetchWord(syn)}
+                            className="px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border border-emerald-200/70 dark:border-emerald-800/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors"
+                          >
+                            {syn}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {meaning.antonyms && meaning.antonyms.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-2" aria-label="Antonyms">
+                        <span className="text-xs font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400 mr-1">
+                          Antonyms
+                        </span>
+                        {meaning.antonyms.map((ant) => (
+                          <button
+                            key={ant}
+                            onClick={() => handleSuggestionClick(ant)}
+                            onMouseEnter={() => prefetchWord(ant)}
+                            className="px-2.5 py-1 rounded-full text-xs font-medium bg-rose-50 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300 border border-rose-200/70 dark:border-rose-800/60 hover:bg-rose-100 dark:hover:bg-rose-900/50 transition-colors"
+                          >
+                            {ant}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>

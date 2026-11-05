@@ -9,11 +9,15 @@ export enum FlashcardStatus {
 export interface Definition {
   definition: string;
   example?: string;
+  synonyms?: string[];
+  antonyms?: string[];
 }
 
 export interface Meaning {
   partOfSpeech: string;
   definitions: Definition[];
+  synonyms?: string[];
+  antonyms?: string[];
 }
 
 export interface WordEntry {
@@ -21,6 +25,7 @@ export interface WordEntry {
   phonetic?: string;
   audio?: string;
   image?: string;
+  origin?: string;
   meanings: Meaning[];
 }
 
@@ -34,6 +39,8 @@ export interface Flashcard {
   example?: string;
   partOfSpeech: string;
   tags?: string[];
+  synonyms?: string[];
+  antonyms?: string[];
   status: FlashcardStatus;
   lastReviewed: number;
   createdAt: number;

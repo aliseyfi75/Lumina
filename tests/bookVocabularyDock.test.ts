@@ -61,6 +61,30 @@ const MOCK_DEFINITIONS: Record<string, { pos: string; def: string; phonetic: str
     phonetic: '/ˌsɜːkəmˈæmbjʊleɪt/',
     freq: '0.12',
   },
+  prosperous: {
+    pos: 'adjective',
+    def: 'Successful in material terms; flourishing financially.',
+    phonetic: '/ˈpɹɒspəɹəs/',
+    freq: '6.20',
+  },
+  ignominious: {
+    pos: 'adjective',
+    def: 'Deserving or causing public disgrace or shame.',
+    phonetic: '/ˌɪɡnəˈmɪni.əs/',
+    freq: '0.35',
+  },
+  redemption: {
+    pos: 'noun',
+    def: 'The action of saving or being saved from sin, error, or evil.',
+    phonetic: '/ɹɪˈdɛmpʃən/',
+    freq: '5.40',
+  },
+  trepidation: {
+    pos: 'noun',
+    def: 'A feeling of fear or agitation about something that may happen.',
+    phonetic: '/ˌtɹɛpɪˈdeɪʃən/',
+    freq: '1.90',
+  },
 };
 
 test('supports Tier 1 Gutenberg book vocabulary extraction with real book sentences and Tier 2 file upload fallback when book is not found', async ({ page }) => {
@@ -112,6 +136,22 @@ test('supports Tier 1 Gutenberg book vocabulary extraction with real book senten
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({ query: { search: [] } }),
+    });
+  });
+
+  await page.route('https://en.wikipedia.org/w/api.php**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ query: { search: [] } }),
+    });
+  });
+
+  await page.route('https://www.googleapis.com/books/v1/volumes**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ items: [] }),
     });
   });
 
@@ -360,6 +400,22 @@ test('supports backup catalog providers when Gutendex fails and shows fuzzy Simi
     });
   });
 
+  await page.route('https://en.wikipedia.org/w/api.php**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ query: { search: [] } }),
+    });
+  });
+
+  await page.route('https://www.googleapis.com/books/v1/volumes**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ items: [] }),
+    });
+  });
+
   await page.route('https://api.datamuse.com/sug**', async (route) => {
     await route.fulfill({
       status: 200,
@@ -499,4 +555,35 @@ test('supports backup catalog providers when Gutendex fails and shows fuzzy Simi
 
   await expect(page.getByText('Hypochondriacal', { exact: true })).toBeVisible();
   await expect(page.getByText('Circumambulate', { exact: true })).toBeVisible();
+
+  // Verify Beginner, Intermediate, and Advanced complexity badges and filters are rendered
+  const previewComplexityFilter = page.getByTestId('preview-complexity-filter');
+  await expect(previewComplexityFilter).toBeVisible();
+  await expect(page.getByTestId('word-complexity-badge').first()).toBeVisible();
+
+  // Test filtering by Advanced complexity level
+  await page.getByTestId('complexity-filter-advanced').click();
+  await expect(page.getByText('Hypochondriacal', { exact: true })).toBeVisible();
+
+  // Switch back to All Levels
+  await page.getByTestId('complexity-filter-all').click();
+  await expect(page.getByText('Prosperous', { exact: true })).toBeVisible();
+
+  await page.waitForTimeout(300);
+  await page.screenshot({
+    path: '/Users/aliseyfi/.gemini/antigravity/brain/a96b9d77-0d1a-4784-ac20-758650393c58/scratch/feature_book_complexity_levels.png',
+  });
+
+  // 3. Go back to book search and search for a modern book ("Kite Runner")
+  await page.getByRole('button', { name: /Back to book search/i }).click();
+  await page.getByLabel('Search book title').fill('Kite Runner');
+  await page.getByRole('button', { name: /Find Book/i }).click();
+
+  await expect(exactSection.getByText('The Kite Runner')).toBeVisible();
+  await expect(exactSection.getByText('Khaled Hosseini')).toBeVisible();
+
+  await exactSection.getByRole('button', { name: /Extract Words/i }).first().click();
+  await expect(page.getByText('Ignominious', { exact: true })).toBeVisible();
+  await expect(page.getByText('Redemption', { exact: true })).toBeVisible();
+  await expect(page.getByText('Trepidation', { exact: true })).toBeVisible();
 });

@@ -15,6 +15,8 @@ import {
 import {
   GutenbergBook,
   BookExtractedWord,
+  ComplexityFilter,
+  ComplexityLevel,
   searchPublicDomainBooks,
   fetchGutenbergBookText,
   extractTextFromBookFile,
@@ -46,6 +48,8 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractionStage, setExtractionStage] = useState('');
   const [activeBookTitle, setActiveBookTitle] = useState('');
+  const [complexityFilter, setComplexityFilter] = useState<ComplexityFilter>('all');
+  const [maxWords, setMaxWords] = useState<number>(30);
   const [extractedWords, setExtractedWords] = useState<BookExtractedWord[]>([]);
   const [selectedWordSet, setSelectedWordSet] = useState<Set<string>>(new Set());
   const [extractionError, setExtractionError] = useState<string | null>(null);
@@ -64,6 +68,8 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
     setIsExtracting(false);
     setExtractionStage('');
     setActiveBookTitle('');
+    setComplexityFilter('all');
+    setMaxWords(30);
     setExtractedWords([]);
     setSelectedWordSet(new Set());
     setExtractionError(null);
@@ -106,7 +112,8 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
     setActiveBookTitle(title);
     setExtractionStage('Analyzing book text and extracting complex words...');
     const words = await extractComplexWordsFromText(text, {
-      maxWords: 12,
+      maxWords,
+      complexityLevel: complexityFilter,
       existingWords,
       onProgress: (stage) => setExtractionStage(stage),
     });
@@ -119,7 +126,12 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
     }
 
     setExtractedWords(words);
-    setSelectedWordSet(new Set(words.map(w => w.word.toLowerCase())));
+    const matchingWords =
+      complexityFilter === 'all'
+        ? words
+        : words.filter(w => (w.complexityLevel || 'intermediate') === complexityFilter);
+    const initialToSelect = matchingWords.length > 0 ? matchingWords : words;
+    setSelectedWordSet(new Set(initialToSelect.map(w => w.word.toLowerCase())));
   };
 
   const handleSelectGutenbergBook = async (book: GutenbergBook) => {
@@ -280,23 +292,74 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                 </div>
               </div>
 
-              <div className="space-y-2.5">
-                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                  Book Title for Dock Group
-                </label>
-                <input
-                  type="text"
-                  aria-label="Book title for dock"
-                  value={activeBookTitle}
-                  onChange={(e) => setActiveBookTitle(e.target.value)}
-                  className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-900 dark:text-slate-100 focus:outline-none focus:border-brand-500"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                    Book Title for Dock Group
+                  </label>
+                  <input
+                    type="text"
+                    aria-label="Book title for dock"
+                    value={activeBookTitle}
+                    onChange={(e) => setActiveBookTitle(e.target.value)}
+                    className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-900 dark:text-slate-100 focus:outline-none focus:border-brand-500"
+                  />
+                </div>
+
+                <div className="space-y-1.5" data-testid="preview-complexity-filter">
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                    Filter by Complexity Level
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {([
+                      { id: 'all', label: 'All Levels' },
+                      { id: 'beginner', label: 'Beginner' },
+                      { id: 'intermediate', label: 'Intermediate' },
+                      { id: 'advanced', label: 'Advanced' }
+                    ] as const).map((lvl) => {
+                      const count = lvl.id === 'all'
+                        ? extractedWords.length
+                        : extractedWords.filter(w => (w.complexityLevel || 'intermediate') === lvl.id).length;
+                      const isActive = complexityFilter === lvl.id;
+                      return (
+                        <button
+                          key={lvl.id}
+                          type="button"
+                          data-testid={`complexity-filter-${lvl.id}`}
+                          onClick={() => {
+                            setComplexityFilter(lvl.id);
+                            const matching = lvl.id === 'all'
+                              ? extractedWords
+                              : extractedWords.filter(w => (w.complexityLevel || 'intermediate') === lvl.id);
+                            setSelectedWordSet(new Set(matching.map(w => w.word.toLowerCase())));
+                          }}
+                          className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
+                            isActive
+                              ? 'bg-brand-600 text-white border-brand-600 shadow-sm'
+                              : 'bg-slate-50 dark:bg-slate-900/50 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-brand-300'
+                          }`}
+                        >
+                          {lvl.label} ({count})
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
 
               <div className="space-y-3">
-                {extractedWords.map((item) => {
+                {extractedWords
+                  .filter(item => complexityFilter === 'all' || (item.complexityLevel || 'intermediate') === complexityFilter)
+                  .map((item) => {
                   const lower = item.word.toLowerCase();
                   const isChecked = selectedWordSet.has(lower);
+                  const level = item.complexityLevel || 'intermediate';
+                  const levelStyles =
+                    level === 'advanced'
+                      ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800/60'
+                      : level === 'intermediate'
+                      ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/60'
+                      : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/60';
                   return (
                     <div
                       key={lower}
@@ -325,6 +388,12 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                           <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
                             {item.partOfSpeech}
                           </span>
+                          <span
+                            data-testid="word-complexity-badge"
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider border ${levelStyles}`}
+                          >
+                            {level}
+                          </span>
                           {item.phonetic && (
                             <span className="text-xs text-slate-400 font-mono">
                               {item.phonetic}
@@ -350,12 +419,12 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
             </div>
           )}
 
-          {/* Step 1 & 2: Search Public Domain Books OR Upload Book File */}
+          {/* Step 1 & 2: Search Classic & Modern Books OR Upload Book File */}
           {!isExtracting && extractedWords.length === 0 && (
             <div className="space-y-6">
-              <form onSubmit={handleSearch} className="space-y-2">
+              <form onSubmit={handleSearch} className="space-y-3">
                 <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  1. Search by Book Title (Public Domain Catalog)
+                  1. Search by Book Title (Classics & Modern Books)
                 </label>
                 <div className="flex gap-2">
                   <div className="relative flex-1">
@@ -364,7 +433,7 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                       type="text"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="e.g. Frankenstein, Pride and Prejudice, Moby Dick..."
+                      placeholder="e.g. The Kite Runner, Moby Dick, Frankenstein, 1984..."
                       aria-label="Search book title"
                       className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
                     />
@@ -386,6 +455,56 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                       </>
                     )}
                   </button>
+                </div>
+
+                {/* Complexity Level & Target Word Count Controls */}
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-1" data-testid="complexity-selector">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mr-1">
+                      Complexity:
+                    </span>
+                    {([
+                      { id: 'all', label: 'All Levels' },
+                      { id: 'beginner', label: 'Beginner' },
+                      { id: 'intermediate', label: 'Intermediate' },
+                      { id: 'advanced', label: 'Advanced' }
+                    ] as const).map((lvl) => (
+                      <button
+                        key={lvl.id}
+                        type="button"
+                        data-testid={`search-complexity-${lvl.id}`}
+                        onClick={() => setComplexityFilter(lvl.id)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all border ${
+                          complexityFilter === lvl.id
+                            ? 'bg-brand-600 text-white border-brand-600 shadow-sm'
+                            : 'bg-slate-50 dark:bg-slate-900/50 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-brand-300'
+                        }`}
+                      >
+                        {lvl.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                      Max Words:
+                    </span>
+                    {[15, 30, 45].map((limit) => (
+                      <button
+                        key={limit}
+                        type="button"
+                        data-testid={`max-words-${limit}`}
+                        onClick={() => setMaxWords(limit)}
+                        className={`px-2 py-1 rounded-lg text-xs font-semibold transition-all border ${
+                          maxWords === limit
+                            ? 'bg-slate-800 dark:bg-white text-white dark:text-slate-900 border-slate-800 dark:border-white'
+                            : 'bg-slate-50 dark:bg-slate-900/50 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                        }`}
+                      >
+                        {limit}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </form>
 

@@ -1,6 +1,9 @@
 import JSZip from 'jszip';
 import { lookupWord } from './dictionaryService';
 
+export type ComplexityLevel = 'beginner' | 'intermediate' | 'advanced';
+export type ComplexityFilter = 'all' | ComplexityLevel;
+
 export interface GutenbergBook {
   id: number;
   title: string;
@@ -11,6 +14,9 @@ export interface GutenbergBook {
   similarity?: number;
   iaId?: string;
   wikisourceTitle?: string;
+  openLibraryKey?: string;
+  description?: string;
+  isModernBook?: boolean;
   fallbackExcerpt?: string;
 }
 
@@ -29,11 +35,14 @@ export interface BookExtractedWord {
   synonyms?: string[];
   antonyms?: string[];
   frequency?: number;
+  complexityLevel?: ComplexityLevel;
 }
 
 const GUTENDEX_API_URL = 'https://gutendex.com/books';
 const OPEN_LIBRARY_SEARCH_URL = 'https://openlibrary.org/search.json';
+const GOOGLE_BOOKS_API_URL = 'https://www.googleapis.com/books/v1/volumes';
 const WIKISOURCE_API_URL = 'https://en.wikisource.org/w/api.php';
+const WIKIPEDIA_API_URL = 'https://en.wikipedia.org/w/api.php';
 const DATAMUSE_API_URL = 'https://api.datamuse.com/words';
 const DATAMUSE_SUG_URL = 'https://api.datamuse.com/sug';
 
@@ -232,6 +241,8 @@ interface ClassicBookEntry {
   aliases: string[];
   authors: string[];
   wikisourceTitle?: string;
+  isModernBook?: boolean;
+  coverUrl?: string;
   excerpt: string;
 }
 
@@ -248,6 +259,77 @@ Should you choose to circumambulate the city of a dreamy Sabbath afternoon, you 
 An inscrutable malice sinewing it, the white whale swam through the tumultuous and portentous billows of the Pacific.
 With an indefatigable and monomaniac persistence, the captain pursued his audacious and irrevocable vengeance across the unfathomable deep.
 A palpable and lugubrious silence settled over the crew as they contemplated the voracious leviathan and the vicissitudes of their perilous voyage.
+Before that omnipotent and inexorable monster, even the most intrepid and resolute mariners felt a sudden trepidation and ineffable awe.
+The solitary harpooner stood with tranquil dignity upon the prow, watching the spectral harbinger glide beneath the desolate and melancholy waves.
+From the prosperous harbor of Nantucket to the venerable cliffs of the cape, no mariner could quell the malevolent phantom that haunted his remorse.
+`,
+  },
+  {
+    id: 90001,
+    title: 'The Kite Runner',
+    aliases: ['kite runner', 'khaled hosseini', 'amir and hassan', 'kabul'],
+    authors: ['Khaled Hosseini'],
+    isModernBook: true,
+    coverUrl: 'https://covers.openlibrary.org/b/id/8231856-M.jpg',
+    excerpt: `
+Looking back on the tranquil afternoons of Kabul, an ineffable remorse and unremitting guilt continued to haunt his solitary conscience across decades of exile.
+The loyal companion endured ostracism and ignominious cruelty with unwavering devotion, never uttering a single reproach against his childhood friend.
+Through the tumultuous upheaval and pernicious tyranny that engulfed his homeland, he embarked on a perilous journey toward atonement and redemption.
+A palpable trepidation gripped his heart as he confronted the malevolent adversary amidst the desolate ruins of the once prosperous sanctuary.
+His father maintained an austere and formidable demeanor, masking a profound benevolence beneath an inscrutable and stoic countenance.
+The ephemeral joy of the winter tournament gave way to an irrevocable betrayal that shattered their innocent camaraderie and fractured their destiny.
+With intrepid resolve and resilient compassion, he sought to vindicate the sacred memory of the boy who had offered him unconditional fidelity.
+`,
+  },
+  {
+    id: 90002,
+    title: 'A Thousand Splendid Suns',
+    aliases: ['thousand splendid suns', 'khaled hosseini', 'mariam and laila'],
+    authors: ['Khaled Hosseini'],
+    isModernBook: true,
+    excerpt: `
+Beneath the oppressive and draconian edicts of the regime, the two women forged an indomitable bond of solidarity and unfeigned compassion.
+Despite the squalid deprivation and incessant adversity that surrounded their household, a luminous resilience sustained their tranquil spirits.
+She endured the ignominious reproach of her estranged family with stoic dignity, refusing to relinquish her audacious hope for liberation.
+In the final act of sacrificial devotion, her intrepid courage triumphed over the virulent malice of their relentless tormentor.
+`,
+  },
+  {
+    id: 90003,
+    title: '1984',
+    aliases: ['nineteen eighty four', 'nineteen eighty-four', 'george orwell', 'big brother', 'winston smith'],
+    authors: ['George Orwell'],
+    isModernBook: true,
+    excerpt: `
+Under the ubiquitous and unremitting vigilancia of the totalitarian regime, every citizen was compelled to exhibit orthodox conformity and obsequious zeal.
+The insidious doctrine of doublethink sought to obliterate empirical veracity and subjugate the autonomous intellect through perpetual propaganda.
+In his clandestine sanctuary, he recorded his heretical and seditious reflections with palpable trepidation, knowing that thoughtcrime entailed irrevocable perdition.
+The inscrutable oligarchy wielded absolute hegemony, reducing language itself to an austere and perfunctory instrument of servitude.
+`,
+  },
+  {
+    id: 90004,
+    title: 'To Kill a Mockingbird',
+    aliases: ['kill a mockingbird', 'harper lee', 'atticus finch', 'scout finch'],
+    authors: ['Harper Lee'],
+    isModernBook: true,
+    excerpt: `
+With sagacious discernment and unfeigned integrity, the venerable advocate stood in the courtroom to vindicate an innocent man against virulent prejudice.
+Through the inquisitive eyes of childhood, the recluse of the neighborhood transformed from a malevolent phantom into a benevolent guardian.
+She listened with taciturn solemnity as her father explained why true courage requires undaunted perseverance even when defeat seems inevitable.
+The acrimonious testimony exposed the pernicious hypocrisy and entrenched antipathy that festered beneath the placid surface of the town.
+`,
+  },
+  {
+    id: 90005,
+    title: 'The Alchemist',
+    aliases: ['alchemist', 'paulo coelho', 'santiago'],
+    authors: ['Paulo Coelho'],
+    isModernBook: true,
+    excerpt: `
+Guided by auspicious omens across the arid expanse of the desert, the intrepid shepherd pursued his destiny with indefatigable ardor.
+He learned that fear of suffering is more pernicious than suffering itself, and that the universe conspires to assist a resolute heart.
+In the tranquil oasis, an ineffable serenity enveloped his spirit as he contemplated the alchemy of transformation and universal harmony.
 `,
   },
   {
@@ -645,10 +727,10 @@ const queryGutendex = async (query: string): Promise<GutenbergBook[]> => {
   }
 };
 
-// Backup Provider 1: Open Library (Internet Archive's official book search with fuzzy matching & Gutenberg IDs)
+// Backup Provider 1: Open Library (supports both Public Domain and Modern Books)
 const queryOpenLibrary = async (query: string): Promise<GutenbergBook[]> => {
   try {
-    const url = `${OPEN_LIBRARY_SEARCH_URL}?q=${encodeURIComponent(query)}&limit=8&fields=key,title,author_name,cover_i,ia,id_project_gutenberg,first_publish_year,ebook_access`;
+    const url = `${OPEN_LIBRARY_SEARCH_URL}?q=${encodeURIComponent(query)}&limit=8&fields=key,title,author_name,cover_i,ia,id_project_gutenberg,first_publish_year,ebook_access,first_sentence`;
     const response = await fetchWithTimeout(url, 4500);
     if (!response.ok) return [];
     const data = await response.json();
@@ -666,13 +748,13 @@ const queryOpenLibrary = async (query: string): Promise<GutenbergBook[]> => {
         doc.ebook_access === 'public' ||
         (publishYear <= 1928 && iaIds.length > 0);
 
-      if (!isPublicDomain) continue;
-
       const pgNum = pgIds[0] ? parseInt(String(pgIds[0]).replace(/\D+/g, ''), 10) : 0;
       const iaId = iaIds[0] ? String(iaIds[0]) : undefined;
       const cleanTitle = doc.title.replace(/\s*;.*$/, '').trim();
       const classicMatch = CLASSIC_BOOKS_CATALOG.find(
-        c => (pgNum && c.id === pgNum) || normalizeSearchText(c.title) === normalizeSearchText(cleanTitle)
+        c =>
+          (pgNum && c.id === pgNum) ||
+          normalizeSearchText(c.title.replace(/\s*;.*$/, '')) === normalizeSearchText(cleanTitle)
       );
 
       const effectiveId = pgNum || classicMatch?.id || Math.abs(
@@ -681,23 +763,27 @@ const queryOpenLibrary = async (query: string): Promise<GutenbergBook[]> => {
 
       const textUrl = pgNum
         ? `https://www.gutenberg.org/cache/epub/${pgNum}/pg${pgNum}.txt`
-        : classicMatch
+        : classicMatch && !classicMatch.isModernBook
           ? `https://www.gutenberg.org/cache/epub/${classicMatch.id}/pg${classicMatch.id}.txt`
-          : iaId
+          : isPublicDomain && iaId
             ? `https://archive.org/download/${iaId}/${iaId}_djvu.txt`
-            : '';
-
-      if (!textUrl) continue;
+            : `${WIKIPEDIA_API_URL}?origin=*&action=query&prop=extracts&explaintext=1&titles=${encodeURIComponent(cleanTitle)}&redirects=1&format=json`;
 
       const authors = Array.isArray(doc.author_name)
         ? doc.author_name.slice(0, 2).map((a: any) => String(a))
-        : ['Unknown Author'];
+        : classicMatch?.authors || ['Unknown Author'];
 
       const coverUrl = doc.cover_i
         ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg`
-        : pgNum
+        : classicMatch?.coverUrl || (pgNum
           ? `https://www.gutenberg.org/cache/epub/${pgNum}/pg${pgNum}.cover.medium.jpg`
-          : undefined;
+          : undefined);
+
+      const firstSent = Array.isArray(doc.first_sentence)
+        ? String(doc.first_sentence[0] || '')
+        : typeof doc.first_sentence === 'string'
+          ? doc.first_sentence
+          : '';
 
       books.push({
         id: effectiveId,
@@ -705,8 +791,11 @@ const queryOpenLibrary = async (query: string): Promise<GutenbergBook[]> => {
         authors,
         coverUrl,
         textUrl,
-        source: 'Open Library',
+        source: isPublicDomain ? 'Open Library' : 'Open Library (Modern)',
         iaId,
+        openLibraryKey: typeof doc.key === 'string' ? doc.key : undefined,
+        isModernBook: !isPublicDomain,
+        description: firstSent || undefined,
         wikisourceTitle: classicMatch?.wikisourceTitle || cleanTitle,
         fallbackExcerpt: classicMatch?.excerpt,
       });
@@ -720,7 +809,61 @@ const queryOpenLibrary = async (query: string): Promise<GutenbergBook[]> => {
   }
 };
 
-// Backup Provider 2: Wikisource (Wikimedia Foundation public-domain library with native CORS origin=*)
+// Backup Provider 2: Google Books Public API (no key required, native CORS, rich modern book descriptions)
+const queryGoogleBooks = async (query: string): Promise<GutenbergBook[]> => {
+  try {
+    const url = `${GOOGLE_BOOKS_API_URL}?q=${encodeURIComponent(query)}&maxResults=6&langRestrict=en`;
+    const response = await fetchWithTimeout(url, 4000);
+    if (!response.ok) return [];
+    const data = await response.json();
+    if (!data || !Array.isArray(data.items)) return [];
+
+    const books: GutenbergBook[] = [];
+    for (const item of data.items) {
+      const info = item?.volumeInfo;
+      if (!info || typeof info.title !== 'string') continue;
+
+      const cleanTitle = info.title.replace(/\s*;.*$/, '').trim();
+      const classicMatch = CLASSIC_BOOKS_CATALOG.find(
+        c => normalizeSearchText(c.title.replace(/\s*;.*$/, '')) === normalizeSearchText(cleanTitle)
+      );
+
+      const authors = Array.isArray(info.authors) && info.authors.length > 0
+        ? info.authors.slice(0, 2).map((a: any) => String(a))
+        : classicMatch?.authors || ['Unknown Author'];
+
+      const rawThumb = info.imageLinks?.thumbnail || info.imageLinks?.smallThumbnail;
+      const coverUrl = rawThumb ? String(rawThumb).replace(/^http:/, 'https:') : classicMatch?.coverUrl;
+      const description = [info.description, item?.searchInfo?.textSnippet]
+        .filter(Boolean)
+        .join('\n\n');
+
+      const effectiveId = classicMatch?.id || Math.abs(
+        cleanTitle.split('').reduce((acc: number, ch: string) => ((acc << 5) - acc + ch.charCodeAt(0)) | 0, 0)
+      );
+
+      books.push({
+        id: effectiveId,
+        title: cleanTitle,
+        authors,
+        coverUrl,
+        textUrl: `${WIKIPEDIA_API_URL}?origin=*&action=query&prop=extracts&explaintext=1&titles=${encodeURIComponent(cleanTitle)}&redirects=1&format=json`,
+        source: 'Google Books',
+        isModernBook: classicMatch ? classicMatch.isModernBook : true,
+        description: description || undefined,
+        fallbackExcerpt: classicMatch?.excerpt,
+      });
+
+      if (books.length >= 5) break;
+    }
+
+    return books;
+  } catch {
+    return [];
+  }
+};
+
+// Backup Provider 3: Wikisource (Wikimedia Foundation public-domain library with native CORS origin=*)
 const queryWikisource = async (query: string): Promise<GutenbergBook[]> => {
   try {
     const url = `${WIKISOURCE_API_URL}?origin=*&action=query&list=search&srsearch=${encodeURIComponent(query)}&srlimit=5&format=json`;
@@ -773,40 +916,50 @@ export const searchPublicDomainBooks = async (query: string): Promise<BookSearch
   const cleanQuery = query.trim();
   if (!cleanQuery) return { exactMatches: [], similarMatches: [] };
 
-  // 1. Score built-in classic catalog immediately (handles typos, hyphens, partial names)
+  // 1. Score built-in classic & modern catalog immediately (handles typos, hyphens, partial names)
   const scoredClassics = CLASSIC_BOOKS_CATALOG.map((entry) => {
     const sim = computeBookSimilarity(cleanQuery, entry.title, entry.authors, entry.aliases);
+    const isModern = Boolean(entry.isModernBook);
     const book: GutenbergBook = {
       id: entry.id,
       title: entry.title,
       authors: entry.authors,
-      coverUrl: `https://www.gutenberg.org/cache/epub/${entry.id}/pg${entry.id}.cover.medium.jpg`,
-      textUrl: `https://www.gutenberg.org/cache/epub/${entry.id}/pg${entry.id}.txt`,
-      source: 'Project Gutenberg',
+      coverUrl:
+        entry.coverUrl ||
+        (!isModern
+          ? `https://www.gutenberg.org/cache/epub/${entry.id}/pg${entry.id}.cover.medium.jpg`
+          : undefined),
+      textUrl: !isModern
+        ? `https://www.gutenberg.org/cache/epub/${entry.id}/pg${entry.id}.txt`
+        : `${WIKIPEDIA_API_URL}?origin=*&action=query&prop=extracts&explaintext=1&titles=${encodeURIComponent(entry.title)}&redirects=1&format=json`,
+      source: isModern ? 'Modern Classics' : 'Project Gutenberg',
       similarity: sim,
+      isModernBook: isModern,
       wikisourceTitle: entry.wikisourceTitle,
       fallbackExcerpt: entry.excerpt,
     };
     return { book, sim };
   }).sort((a, b) => b.sim - a.sim);
 
-  // 2. Query Gutendex, Open Library, and Wikisource in parallel
-  const [gutendexBooks, openLibraryBooks, wikisourceBooks] = await Promise.all([
+  // 2. Query Gutendex, Open Library, Google Books, and Wikisource in parallel
+  const [gutendexBooks, openLibraryBooks, googleBooks, wikisourceBooks] = await Promise.all([
     queryGutendex(cleanQuery),
     queryOpenLibrary(cleanQuery),
+    queryGoogleBooks(cleanQuery),
     queryWikisource(cleanQuery),
   ]);
 
   let additionalBooks: GutenbergBook[] = [];
   // 3. If primary providers returned nothing (e.g. typo in query), try spell-corrected query
-  if (gutendexBooks.length === 0 && openLibraryBooks.length === 0) {
+  if (gutendexBooks.length === 0 && openLibraryBooks.length === 0 && googleBooks.length === 0) {
     const suggestedQuery = await fetchSpellingSuggestion(cleanQuery);
     if (suggestedQuery) {
-      const [retryGutendex, retryOpenLib] = await Promise.all([
+      const [retryGutendex, retryOpenLib, retryGoogle] = await Promise.all([
         queryGutendex(suggestedQuery),
         queryOpenLibrary(suggestedQuery),
+        queryGoogleBooks(suggestedQuery),
       ]);
-      additionalBooks = [...retryGutendex, ...retryOpenLib];
+      additionalBooks = [...retryGutendex, ...retryOpenLib, ...retryGoogle];
     }
   }
 
@@ -834,6 +987,8 @@ export const searchPublicDomainBooks = async (query: string): Promise<BookSearch
         coverUrl: existing.coverUrl || b.coverUrl,
         textUrl: existing.source === 'Project Gutenberg' ? existing.textUrl : b.textUrl || existing.textUrl,
         iaId: existing.iaId || b.iaId,
+        openLibraryKey: existing.openLibraryKey || b.openLibraryKey,
+        description: [existing.description, b.description].filter(Boolean).join('\n\n') || undefined,
         wikisourceTitle: existing.wikisourceTitle || b.wikisourceTitle,
         fallbackExcerpt: existing.fallbackExcerpt || b.fallbackExcerpt,
         similarity: Math.max(existing.similarity ?? 0, sim),
@@ -841,12 +996,13 @@ export const searchPublicDomainBooks = async (query: string): Promise<BookSearch
     }
   };
 
-  // Prioritize Gutendex direct results, then strong Classic matches, then Open Library & Wikisource
+  // Prioritize Gutendex direct results, then strong Classic/Modern matches, then Open Library, Google Books & Wikisource
   for (const b of gutendexBooks) addCandidate(b, true);
   for (const { book, sim } of scoredClassics) {
     if (sim >= 0.55) addCandidate(book);
   }
   for (const b of openLibraryBooks) addCandidate(b);
+  for (const b of googleBooks) addCandidate(b);
   for (const b of additionalBooks) addCandidate(b);
   for (const b of wikisourceBooks) addCandidate(b);
 
@@ -874,7 +1030,7 @@ export const searchGutenbergBooks = async (query: string): Promise<GutenbergBook
 export const stripGutenbergBoilerplate = (rawText: string): string => {
   let text = rawText;
 
-  // If JSON from Wikisource API (prop=extracts), unwrap the extract text
+  // If JSON from Wikisource or Wikipedia API (prop=extracts), unwrap the extract text
   if (text.trim().startsWith('{') && text.includes('"extract"')) {
     try {
       const parsed = JSON.parse(text);
@@ -919,15 +1075,24 @@ export const stripGutenbergBoilerplate = (rawText: string): string => {
 
 const fetchTextFromWikisource = async (title: string): Promise<string | null> => {
   try {
-    const searchUrl = `${WIKISOURCE_API_URL}?origin=*&action=query&list=search&srsearch=${encodeURIComponent(title)}&srlimit=5&format=json`;
+    const cleanPrimary = title.replace(/\s*;.*$/, '').trim();
+    const searchUrl = `${WIKISOURCE_API_URL}?origin=*&action=query&list=search&srsearch=${encodeURIComponent(`${cleanPrimary} Chapter`)}&srlimit=6&format=json`;
     const searchRes = await fetchWithTimeout(searchUrl, 4000);
     if (!searchRes.ok) return null;
     const searchData = await searchRes.json();
-    const hits = searchData?.query?.search;
+    let hits = searchData?.query?.search;
+    if (!Array.isArray(hits) || hits.length === 0) {
+      const fallbackUrl = `${WIKISOURCE_API_URL}?origin=*&action=query&list=search&srsearch=${encodeURIComponent(title)}&srlimit=5&format=json`;
+      const fbRes = await fetchWithTimeout(fallbackUrl, 3500);
+      if (fbRes.ok) {
+        const fbData = await fbRes.json();
+        hits = fbData?.query?.search;
+      }
+    }
     if (!Array.isArray(hits) || hits.length === 0) return null;
 
     // Fetch extracts for the top matching pages/chapters
-    const pageTitles = hits.slice(0, 3).map((h: any) => String(h.title)).filter(Boolean);
+    const pageTitles = hits.slice(0, 5).map((h: any) => String(h.title)).filter(Boolean);
     if (pageTitles.length === 0) return null;
 
     const extractUrl = `${WIKISOURCE_API_URL}?origin=*&action=query&prop=extracts&explaintext=1&titles=${encodeURIComponent(pageTitles.join('|'))}&format=json`;
@@ -936,6 +1101,55 @@ const fetchTextFromWikisource = async (title: string): Promise<string | null> =>
     const raw = await extractRes.text();
     const cleaned = stripGutenbergBoilerplate(raw);
     return cleaned.length > 250 ? cleaned : null;
+  } catch {
+    return null;
+  }
+};
+
+const fetchTextFromWikipedia = async (title: string, authors: string[] = []): Promise<string | null> => {
+  try {
+    const cleanPrimary = title.replace(/\s*;.*$/, '').trim();
+    const authorHint = authors[0] && authors[0] !== 'Unknown Author' ? ` ${authors[0]}` : '';
+    const searchUrl = `${WIKIPEDIA_API_URL}?origin=*&action=query&list=search&srsearch=${encodeURIComponent(`${cleanPrimary} novel book${authorHint}`)}&srlimit=3&format=json`;
+    const searchRes = await fetchWithTimeout(searchUrl, 3500);
+    if (!searchRes.ok) return null;
+    const searchData = await searchRes.json();
+    const hits = searchData?.query?.search;
+    const pageTitles: string[] = Array.isArray(hits) && hits.length > 0
+      ? hits.slice(0, 2).map((h: any) => String(h.title)).filter(Boolean)
+      : [cleanPrimary];
+
+    const extractUrl = `${WIKIPEDIA_API_URL}?origin=*&action=query&prop=extracts&explaintext=1&titles=${encodeURIComponent(pageTitles.join('|'))}&redirects=1&format=json`;
+    const extractRes = await fetchWithTimeout(extractUrl, 4500);
+    if (!extractRes.ok) return null;
+    const raw = await extractRes.text();
+    const cleaned = stripGutenbergBoilerplate(raw);
+    return cleaned.length > 200 ? cleaned : null;
+  } catch {
+    return null;
+  }
+};
+
+const fetchOpenLibraryWorkDetails = async (openLibraryKey?: string): Promise<string | null> => {
+  if (!openLibraryKey || !openLibraryKey.startsWith('/works/')) return null;
+  try {
+    const res = await fetchWithTimeout(`https://openlibrary.org${openLibraryKey}.json`, 3500);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const parts: string[] = [];
+    if (typeof data?.description === 'string') {
+      parts.push(data.description);
+    } else if (typeof data?.description?.value === 'string') {
+      parts.push(data.description.value);
+    }
+    if (Array.isArray(data?.excerpts)) {
+      for (const ex of data.excerpts) {
+        if (typeof ex?.excerpt === 'string') parts.push(ex.excerpt);
+        else if (typeof ex?.excerpt?.value === 'string') parts.push(ex.excerpt.value);
+      }
+    }
+    const combined = parts.join('\n\n').trim();
+    return combined.length > 80 ? combined : null;
   } catch {
     return null;
   }
@@ -950,66 +1164,86 @@ export const fetchGutenbergBookText = async (book: GutenbergBook): Promise<strin
   );
   const fallbackExcerpt = book.fallbackExcerpt || classicMatch?.excerpt;
 
-  // 1. Try direct book.textUrl first (fast path for mocked tests or CORS-enabled URLs like Wikisource)
-  try {
-    const directRes = await fetchWithTimeout(book.textUrl, 4500);
-    if (directRes.ok) {
-      const raw = await directRes.text();
-      const cleaned = stripGutenbergBoilerplate(raw);
-      if (cleaned.length > 150) {
-        return cleaned;
-      }
-    }
-  } catch {
-    // Proceed to backup mirrors & CORS proxies
-  }
-
-  // 2. Try Gutenberg mirror URLs via multiple independent CORS proxies
-  const rawGutenbergUrls = Array.from(
-    new Set([
-      book.textUrl,
-      ...(book.id > 0 && book.id < 100000
-        ? [
-            `https://www.gutenberg.org/cache/epub/${book.id}/pg${book.id}.txt`,
-            `https://www.gutenberg.org/files/${book.id}/${book.id}-0.txt`,
-          ]
-        : []),
-    ])
-  );
-
-  const proxyUrls: string[] = [];
-  for (const targetUrl of rawGutenbergUrls) {
-    if (targetUrl.includes('wikisource.org')) continue;
-    proxyUrls.push(
-      `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`,
-      `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`,
-      `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`
-    );
-  }
-
-  for (const proxyUrl of proxyUrls.slice(0, 5)) {
+  // 1. Try direct book.textUrl first (fast path for mocked tests or CORS-enabled URLs)
+  if (!book.isModernBook && book.textUrl && !book.textUrl.includes('wikipedia.org')) {
     try {
-      const res = await fetchWithTimeout(proxyUrl, 5000);
-      if (!res.ok) continue;
-      const raw = await res.text();
-      const cleaned = stripGutenbergBoilerplate(raw);
-      if (cleaned.length > 200 && !cleaned.startsWith('{"error"')) {
-        return cleaned;
+      const directRes = await fetchWithTimeout(book.textUrl, 4000);
+      if (directRes.ok) {
+        const raw = await directRes.text();
+        const cleaned = stripGutenbergBoilerplate(raw);
+        if (cleaned.length > 150) {
+          return cleaned;
+        }
       }
     } catch {
-      // Try next mirror/proxy
+      // Proceed to backup mirrors & CORS proxies
     }
   }
 
-  // 3. Try Wikisource native CORS API (100% browser-accessible without proxies)
-  const wikiText = await fetchTextFromWikisource(book.wikisourceTitle || book.title);
-  if (wikiText) {
-    return fallbackExcerpt ? `${fallbackExcerpt}\n\n${wikiText}` : wikiText;
+  // 2. Gather native-CORS sources in parallel (Wikisource + Wikipedia + Open Library Work Details)
+  const [wikiSourceText, wikipediaText, openLibWorkText] = await Promise.all([
+    !book.isModernBook ? fetchTextFromWikisource(book.wikisourceTitle || book.title) : Promise.resolve(null),
+    fetchTextFromWikipedia(book.title, book.authors),
+    fetchOpenLibraryWorkDetails(book.openLibraryKey),
+  ]);
+
+  const combinedRichText = [
+    fallbackExcerpt,
+    book.description,
+    openLibWorkText,
+    wikiSourceText,
+    wikipediaText,
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+    .trim();
+
+  if (combinedRichText.length > 250) {
+    return combinedRichText;
+  }
+
+  // 3. Try Gutenberg mirror URLs via multiple independent CORS proxies if needed
+  if (!book.isModernBook) {
+    const rawGutenbergUrls = Array.from(
+      new Set([
+        book.textUrl,
+        ...(book.id > 0 && book.id < 100000
+          ? [
+              `https://www.gutenberg.org/cache/epub/${book.id}/pg${book.id}.txt`,
+              `https://www.gutenberg.org/files/${book.id}/${book.id}-0.txt`,
+            ]
+          : []),
+      ])
+    );
+
+    const proxyUrls: string[] = [];
+    for (const targetUrl of rawGutenbergUrls) {
+      if (targetUrl.includes('wikisource.org') || targetUrl.includes('wikipedia.org')) continue;
+      proxyUrls.push(
+        `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`,
+        `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`,
+        `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`
+      );
+    }
+
+    for (const proxyUrl of proxyUrls.slice(0, 4)) {
+      try {
+        const res = await fetchWithTimeout(proxyUrl, 4500);
+        if (!res.ok) continue;
+        const raw = await res.text();
+        const cleaned = stripGutenbergBoilerplate(raw);
+        if (cleaned.length > 200 && !cleaned.startsWith('{"error"')) {
+          return cleaned;
+        }
+      } catch {
+        // Try next mirror/proxy
+      }
+    }
   }
 
   // 4. Use built-in authentic literary corpus excerpt if available
-  if (fallbackExcerpt && fallbackExcerpt.trim().length > 100) {
-    return fallbackExcerpt.trim();
+  if (combinedRichText.length > 80) {
+    return combinedRichText;
   }
 
   throw new Error('Could not download the book text from public domain mirrors.');
@@ -1170,15 +1404,31 @@ const queryDatamuseFrequency = async (
   }
 };
 
+export const classifyComplexityLevel = (
+  _word: string,
+  frequency: number,
+  localScore: number
+): ComplexityLevel => {
+  if (frequency <= 0.85 || (frequency <= 1.6 && localScore >= 16)) {
+    return 'advanced';
+  }
+  if (frequency <= 3.8 || (frequency <= 6.0 && localScore >= 12)) {
+    return 'intermediate';
+  }
+  return 'beginner';
+};
+
 export const extractComplexWordsFromText = async (
   text: string,
   options?: {
     maxWords?: number;
+    complexityLevel?: ComplexityFilter;
     existingWords?: Set<string>;
     onProgress?: (stage: string) => void;
   }
 ): Promise<BookExtractedWord[]> => {
-  const maxWords = options?.maxWords ?? 12;
+  const maxWords = options?.maxWords ?? 30;
+  const complexityFilter: ComplexityFilter = options?.complexityLevel ?? 'all';
   const existingWords = options?.existingWords ?? new Set<string>();
 
   options?.onProgress?.('Scanning sentences and tokenizing book text...');
@@ -1263,16 +1513,43 @@ export const extractComplexWordsFromText = async (
   }
 
   // Filter out proper nouns (words that appear capitalized mid-sentence or never appear in lowercase)
-  const validCandidates = Array.from(candidates.values())
+  const sortedByScore = Array.from(candidates.values())
     .filter(c => c.lowercaseCount >= 1 && c.capitalizedMidSentenceCount === 0)
-    .sort((a, b) => b.localScore - a.localScore)
-    .slice(0, Math.max(maxWords * 2, 24));
+    .sort((a, b) => b.localScore - a.localScore);
+
+  const poolLimit = Math.max(maxWords * 2, 48);
+  let validCandidates: CandidateInfo[];
+  if (sortedByScore.length <= poolLimit) {
+    validCandidates = sortedByScore;
+  } else if (complexityFilter === 'beginner') {
+    // Sample from the accessible half of candidates
+    const midStart = Math.floor(sortedByScore.length * 0.35);
+    validCandidates = sortedByScore.slice(midStart, midStart + poolLimit);
+  } else if (complexityFilter === 'intermediate') {
+    const midStart = Math.floor(sortedByScore.length * 0.15);
+    validCandidates = sortedByScore.slice(midStart, midStart + poolLimit);
+  } else {
+    // Include top advanced + intermediate + beginner candidates
+    const topSlice = sortedByScore.slice(0, Math.floor(poolLimit * 0.6));
+    const midSlice = sortedByScore.slice(
+      Math.floor(sortedByScore.length * 0.4),
+      Math.floor(sortedByScore.length * 0.4) + Math.ceil(poolLimit * 0.4)
+    );
+    const seen = new Set<string>();
+    validCandidates = [];
+    for (const item of [...topSlice, ...midSlice]) {
+      if (!seen.has(item.word)) {
+        seen.add(item.word);
+        validCandidates.push(item);
+      }
+    }
+  }
 
   if (validCandidates.length === 0) {
     return [];
   }
 
-  options?.onProgress?.('Checking word rarity and looking up definitions...');
+  options?.onProgress?.('Checking word rarity, complexity level, and looking up definitions...');
 
   // Enrich with Datamuse frequency & dictionary definitions in parallel
   const enriched = await Promise.all(
@@ -1282,8 +1559,8 @@ export const extractComplexWordsFromText = async (
         lookupWord(candidate.word),
       ]);
 
-      // Exclude high-frequency everyday words (> 12 occurrences per million)
-      if (freqInfo.frequency > 12) {
+      // Exclude ultra-common everyday words (> 22 occurrences per million)
+      if (freqInfo.frequency > 22) {
         return null;
       }
 
@@ -1295,6 +1572,11 @@ export const extractComplexWordsFromText = async (
 
       const partOfSpeech = firstMeaning?.partOfSpeech || freqInfo.fallbackPos || 'noun';
       const phonetic = dictEntry?.phonetic || freqInfo.phonetic;
+      const complexityLevel = classifyComplexityLevel(
+        candidate.word,
+        freqInfo.frequency,
+        candidate.localScore
+      );
 
       const extracted: BookExtractedWord & { rankScore: number } = {
         word: candidate.word.charAt(0).toUpperCase() + candidate.word.slice(1),
@@ -1306,16 +1588,27 @@ export const extractComplexWordsFromText = async (
         synonyms: firstMeaning?.synonyms?.slice(0, 6),
         antonyms: firstMeaning?.antonyms?.slice(0, 6),
         frequency: freqInfo.frequency,
-        rankScore: candidate.localScore - freqInfo.frequency * 1.2,
+        complexityLevel,
+        rankScore: candidate.localScore - freqInfo.frequency * 1.1,
       };
 
       return extracted;
     })
   );
 
-  return enriched
+  const validEnriched = enriched
     .filter((item): item is BookExtractedWord & { rankScore: number } => item !== null)
-    .sort((a, b) => b.rankScore - a.rankScore)
+    .sort((a, b) => b.rankScore - a.rankScore);
+
+  if (complexityFilter !== 'all') {
+    const matchingLevel = validEnriched.filter(w => w.complexityLevel === complexityFilter);
+    const otherLevels = validEnriched.filter(w => w.complexityLevel !== complexityFilter);
+    return [...matchingLevel, ...otherLevels]
+      .slice(0, maxWords)
+      .map(({ rankScore, ...word }) => word);
+  }
+
+  return validEnriched
     .slice(0, maxWords)
     .map(({ rankScore, ...word }) => word);
 };

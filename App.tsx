@@ -955,6 +955,16 @@ const App: React.FC = () => {
     trackEvent(TRACKING_ACTION.UPDATE_STATUS, TRACKING_CATEGORY.FLASHCARDS, `quality_${quality}`);
   };
 
+  const handleRestoreCard = (previousCard: Flashcard) => {
+    setCards(prev =>
+      prev.map(card =>
+        card.id === previousCard.id
+          ? { ...previousCard, updatedAt: Date.now() }
+          : card
+      )
+    );
+  };
+
   const handleDeleteCard = (id: string) => {
     setCards(prev => prev.filter(c => c.id !== id));
     setDeletedCards(prev => new Map(prev).set(id, Date.now()));
@@ -1137,6 +1147,7 @@ const App: React.FC = () => {
               <StudySession
                 cards={cards}
                 onReviewCard={handleReviewCard}
+                onRestoreCard={handleRestoreCard}
                 onSessionComplete={handleSessionComplete}
                 onExit={() => navigate('/flashcards')}
               />

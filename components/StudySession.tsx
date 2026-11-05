@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Flashcard, FlashcardStatus } from '../types';
-import { RotateCw, CheckCircle, Brain, ArrowLeft, Volume2, MoveUp, MoveDown, MoveLeft, MoveRight, XCircle, ArrowRight, ListChecks } from 'lucide-react';
+import { RotateCw, CheckCircle, Brain, ArrowLeft, Volume2, MoveUp, MoveDown, MoveLeft, MoveRight, XCircle, ArrowRight, ListChecks, Undo2, RefreshCw } from 'lucide-react';
 import Confetti from 'react-confetti';
 import { useWindowSize } from 'react-use';
 import { motion, useMotionValue, useTransform, PanInfo, AnimatePresence } from 'framer-motion';
@@ -17,19 +17,27 @@ const FALLBACK_DISTRACTORS = [
   'Open to more than one interpretation; not having one obvious meaning.',
 ];
 
+interface ReviewHistoryItem {
+  index: number;
+  previousCard: Flashcard;
+  quality: number;
+}
+
 interface StudySessionProps {
   cards: Flashcard[];
   onReviewCard: (id: string, quality: number) => void;
+  onRestoreCard?: (previousCard: Flashcard) => void;
   onSessionComplete: () => void;
   onExit: () => void;
 }
 
-export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard, onSessionComplete, onExit }) => {
+export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard, onRestoreCard, onSessionComplete, onExit }) => {
   const [queue, setQueue] = useState<Flashcard[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
   const [selectedQuizOption, setSelectedQuizOption] = useState<string | null>(null);
+  const [reviewHistory, setReviewHistory] = useState<ReviewHistoryItem[]>([]);
 
   const { width, height } = useWindowSize();
   const [showConfetti, setShowConfetti] = useState(false);
@@ -113,6 +121,8 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
     if (!currentCard) return;
 
     if (quality !== null) {
+      const snapshot = cards.find(c => c.id === currentCard.id) || currentCard;
+      setReviewHistory(prev => [...prev, { index: currentIndex, previousCard: { ...snapshot }, quality }]);
       onReviewCard(currentCard.id, quality);
 
       let toastMsg = "";
@@ -150,20 +160,61 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
         return nextIndex;
       });
     }, isQuizMode ? 100 : 300);
-  }, [currentCard, onReviewCard, queue.length, onSessionComplete, x, y, isQuizMode]);
+  }, [currentCard, cards, currentIndex, onReviewCard, queue.length, onSessionComplete, x, y, isQuizMode]);
 
   const handleSelectQuizOption = useCallback((option: string) => {
     if (!currentCard || selectedQuizOption !== null) return;
     setSelectedQuizOption(option);
     const isCorrect = option === currentCard.mainDefinition.trim();
-    onReviewCard(currentCard.id, isCorrect ? 3 : 1);
-  }, [currentCard, selectedQuizOption, onReviewCard]);
+    const quality = isCorrect ? 3 : 1;
+    const snapshot = cards.find(c => c.id === currentCard.id) || currentCard;
+    setReviewHistory(prev => [...prev, { index: currentIndex, previousCard: { ...snapshot }, quality }]);
+    onReviewCard(currentCard.id, quality);
+  }, [currentCard, cards, currentIndex, selectedQuizOption, onReviewCard]);
+
+  const handleUndo = useCallback(() => {
+    if (reviewHistory.length === 0) return;
+    const lastEntry = reviewHistory[reviewHistory.length - 1];
+    setReviewHistory(prev => prev.slice(0, -1));
+    onRestoreCard?.(lastEntry.previousCard);
+    x.set(0);
+    y.set(0);
+    setIsFlipped(false);
+    setSelectedQuizOption(null);
+    setShowConfetti(false);
+    setCurrentIndex(lastEntry.index);
+    setActionToast({
+      message: "Undone",
+      colorClass: "text-amber-500",
+      bgColorClass: "bg-amber-500/10 border-amber-500/20",
+    });
+    setTimeout(() => setActionToast(null), 1800);
+  }, [reviewHistory, onRestoreCard, x, y]);
+
+  const handleReviewMissedCards = useCallback((missedCards: Flashcard[]) => {
+    if (missedCards.length === 0) return;
+    setQueue(missedCards);
+    setCurrentIndex(0);
+    setReviewHistory([]);
+    setIsFlipped(false);
+    setSelectedQuizOption(null);
+    setShowConfetti(false);
+  }, []);
 
   // Keyboard support for desktop
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!currentCard) return;
       if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
+
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+        if (reviewHistory.length > 0) {
+          e.preventDefault();
+          handleUndo();
+        }
+        return;
+      }
+
+      if (!currentCard) return;
 
       if (isQuizMode) {
         if (selectedQuizOption === null) {
@@ -200,7 +251,7 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleNext, currentCard, isFlipped, isQuizMode, selectedQuizOption, quizOptions, handleSelectQuizOption]);
+  }, [handleNext, handleUndo, reviewHistory.length, currentCard, isFlipped, isQuizMode, selectedQuizOption, quizOptions, handleSelectQuizOption]);
 
   const handleDragEnd = (_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
     if (!isFlipped) return;
@@ -218,9 +269,18 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
 
   if (!currentCard) {
     const isAllMastered = cards.length > 0 && cards.every(c => c.status === FlashcardStatus.Mastered);
+    const totalReviewed = reviewHistory.length;
+    const masteredInSession = reviewHistory.filter(r => r.quality === 5).length;
+    const learnedInSession = reviewHistory.filter(r => r.quality === 3).length;
+    const againEntries = reviewHistory.filter(r => r.quality === 1);
+    const againInSession = againEntries.length;
+    const accuracy = totalReviewed > 0 ? Math.round(((masteredInSession + learnedInSession) / totalReviewed) * 100) : 100;
+    const missedCards = Array.from(
+      new Map<string, Flashcard>(againEntries.map(r => [r.previousCard.id, r.previousCard])).values()
+    );
 
     return (
-      <div className="flex flex-col items-center justify-center h-[60vh] space-y-6 animate-in fade-in slide-in-from-bottom-4">
+      <div className="max-w-lg mx-auto flex flex-col items-center justify-center min-h-[65vh] py-8 px-4 space-y-6 animate-in fade-in slide-in-from-bottom-4">
         {showConfetti && (
           <div className="fixed inset-0 z-[100] pointer-events-none">
             <Confetti
@@ -232,23 +292,71 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
             />
           </div>
         )}
-        <div className="p-6 bg-green-50 dark:bg-green-900/20 rounded-full">
-          <CheckCircle className="h-16 w-16 text-green-500" />
+        <div className="p-5 bg-green-50 dark:bg-green-900/20 rounded-full">
+          <CheckCircle className="h-14 w-14 text-green-500" />
         </div>
         <div className="text-center space-y-2">
           <h2 className="text-3xl font-serif font-bold text-slate-900 dark:text-white">
             {isAllMastered ? "All Cards Mastered!" : "Session Complete!"}
           </h2>
           <p className="text-slate-500 dark:text-slate-400">
-            {isAllMastered ? "Great job! You've mastered all your cards." : "You've reviewed all your cards for now."}
+            {isAllMastered
+              ? "Great job! You've mastered all your cards."
+              : totalReviewed > 0
+                ? `You reviewed ${totalReviewed} card${totalReviewed === 1 ? '' : 's'} with ${accuracy}% accuracy.`
+                : "You've reviewed all your cards for now."}
           </p>
         </div>
-        <button
-          onClick={onExit}
-          className="px-8 py-3 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 rounded-xl font-medium hover:bg-slate-800 dark:hover:bg-white transition-colors shadow-lg shadow-slate-900/20 z-10"
-        >
-          Return to Dashboard
-        </button>
+
+        {totalReviewed > 0 && (
+          <div className="w-full bg-white dark:bg-slate-800 rounded-3xl border border-slate-100 dark:border-slate-700 p-6 shadow-sm space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+              <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-700/60">
+                <p className="text-2xl font-bold text-slate-900 dark:text-white">{totalReviewed}</p>
+                <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mt-0.5">Reviewed</p>
+              </div>
+              <div className="p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800/40">
+                <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{accuracy}%</p>
+                <p className="text-xs font-medium text-emerald-700/80 dark:text-emerald-300/80 mt-0.5">Accuracy</p>
+              </div>
+              <div className="p-3 rounded-2xl bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800/40">
+                <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{masteredInSession + learnedInSession}</p>
+                <p className="text-xs font-medium text-blue-700/80 dark:text-blue-300/80 mt-0.5">Recalled</p>
+              </div>
+              <div className="p-3 rounded-2xl bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800/40">
+                <p className="text-2xl font-bold text-red-600 dark:text-red-400">{againInSession}</p>
+                <p className="text-xs font-medium text-red-700/80 dark:text-red-300/80 mt-0.5">Missed</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="flex flex-col sm:flex-row items-center gap-3 w-full justify-center z-10">
+          {missedCards.length > 0 && (
+            <button
+              onClick={() => handleReviewMissedCards(missedCards)}
+              className="w-full sm:w-auto whitespace-nowrap inline-flex items-center justify-center gap-2 px-6 py-3 bg-brand-600 hover:bg-brand-700 text-white rounded-xl font-semibold transition-colors shadow-lg shadow-brand-500/25"
+            >
+              <RefreshCw className="h-4 w-4 shrink-0" />
+              Review Missed Cards ({missedCards.length})
+            </button>
+          )}
+          {reviewHistory.length > 0 && (
+            <button
+              onClick={handleUndo}
+              className="w-full sm:w-auto whitespace-nowrap inline-flex items-center justify-center gap-2 px-5 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-xl font-medium transition-colors"
+            >
+              <Undo2 className="h-4 w-4 shrink-0" />
+              Undo Last
+            </button>
+          )}
+          <button
+            onClick={onExit}
+            className="w-full sm:w-auto whitespace-nowrap px-6 py-3 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 rounded-xl font-medium hover:bg-slate-800 dark:hover:bg-white transition-colors shadow-lg shadow-slate-900/20"
+          >
+            Return to Dashboard
+          </button>
+        </div>
       </div>
     );
   }
@@ -269,15 +377,27 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
         >
           <ArrowLeft className="h-6 w-6" />
         </button>
-        <div className="flex-1 mx-8 bg-slate-200 dark:bg-slate-700 rounded-full h-2">
+        <div className="flex-1 mx-6 bg-slate-200 dark:bg-slate-700 rounded-full h-2">
           <div
             className="bg-brand-500 h-2 rounded-full transition-all duration-300"
             style={{ width: `${progress}%` }}
           />
         </div>
-        <span className="text-sm font-medium text-slate-500 dark:text-slate-400 tabular-nums">
-          {currentIndex + 1} / {queue.length}
-        </span>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleUndo}
+            disabled={reviewHistory.length === 0}
+            title="Undo last review (⌘Z / Ctrl+Z)"
+            aria-label="Undo last review"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+          >
+            <Undo2 className="h-4 w-4" />
+            <span className="hidden sm:inline">Undo</span>
+          </button>
+          <span className="text-sm font-medium text-slate-500 dark:text-slate-400 tabular-nums">
+            {currentIndex + 1} / {queue.length}
+          </span>
+        </div>
       </div>
 
       {/* Action Toast */}

@@ -10,7 +10,7 @@ import { DataManagerModal } from './components/DataManagerModal';
 import { AnkiImportModal } from './components/AnkiImportModal';
 import { PwaInstallBanner } from './components/PwaInstallBanner';
 import { generateJSON, parseFileContent, downloadJSON, saveToLocalFile } from './services/fileService';
-import { getDetails, getDeck, updateDeck, keepAlivePantry } from './services/pantryService';
+import { getDetails, getDeck, updateDeck, keepAlivePantry, getKnownChunkCount } from './services/pantryService';
 import { saveFileHandleToIDB, loadFileHandleFromIDB, clearFileHandleFromIDB, saveAppDataToIDB, loadAppDataFromIDB, requestPersistentStorage, checkPersistentStorage, getStorageEstimate } from './services/idbService';
 import { initializeTracking, trackEvent, setTrackingUserId, trackPageView, PAGE_TITLES, TRACKING_CATEGORY, TRACKING_ACTION } from './services/trackingService';
 import { Book, Layers, Database, Save, Cloud, BarChart2, Home, Sun, Moon, RefreshCw } from 'lucide-react';
@@ -506,7 +506,7 @@ const App: React.FC = () => {
       const now = Date.now();
       if (now - lastKeepAliveRef.current >= KEEP_ALIVE_INTERVAL_MS) {
         lastKeepAliveRef.current = now;
-        void keepAlivePantry(cloudConfig.pantryId);
+        void keepAlivePantry(cloudConfig.pantryId, getKnownChunkCount(cloudConfig.pantryId));
       }
     };
 

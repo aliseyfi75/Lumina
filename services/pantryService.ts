@@ -11,7 +11,17 @@ const FALLBACK_BASKET_BYTES = 14 * 1024;
 // Pantry's total storage quota per Pantry ID is 1.44 MB.
 const MAX_PANTRY_BYTES = Math.floor(1.4 * 1024 * 1024);
 // True quiet time AFTER one Pantry request finishes before the next one starts.
-const RATE_LIMIT_DELAY_MS = 1400;
+let rateLimitDelayMs = 1400;
+const knownChunkCounts = new Map<string, number>();
+
+export const setPantryRateLimitDelayForTests = (ms: number) => {
+  rateLimitDelayMs = ms;
+  lastRequestCompletedAt = 0;
+};
+
+export const getKnownChunkCount = (pantryId: string): number => {
+  return knownChunkCounts.get(normalizePantryId(pantryId)) ?? 1;
+};
 
 // Standard options to avoid CORS/Referrer issues in sensitive browser environments
 const FETCH_OPTIONS: RequestInit = {
@@ -26,14 +36,14 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 let lastRequestCompletedAt = 0;
 let requestQueue: Promise<unknown> = Promise.resolve();
 
-// Strictly serialize all Pantry requests and enforce RATE_LIMIT_DELAY_MS
+// Strictly serialize all Pantry requests and enforce rateLimitDelayMs
 // between the COMPLETION of one request and the START of the next.
 const enqueuePantryRequest = <T>(fn: () => Promise<T>): Promise<T> => {
   const run = async (): Promise<T> => {
     const now = Date.now();
     const elapsed = now - lastRequestCompletedAt;
-    if (lastRequestCompletedAt > 0 && elapsed < RATE_LIMIT_DELAY_MS) {
-      await sleep(RATE_LIMIT_DELAY_MS - elapsed);
+    if (lastRequestCompletedAt > 0 && elapsed < rateLimitDelayMs) {
+      await sleep(rateLimitDelayMs - elapsed);
     }
     try {
       return await fn();
@@ -265,6 +275,8 @@ export const getDeck = async (
       }
     }
 
+    knownChunkCounts.set(cleanId, chunkCount);
+
     return {
       cards: normalizeCardsFromCloud(allCards),
       studyHistory: data.studyHistory || {},
@@ -287,7 +299,7 @@ export const getDeck = async (
  * on the main basket (and any overflow chunk baskets) every time the user opens the app,
  * even if no flashcard status has changed.
  */
-export const keepAlivePantry = async (pantryId: string, chunkCount = 1): Promise<boolean> => {
+export const keepAlivePantry = async (pantryId: string, chunkCount?: number): Promise<boolean> => {
   const cleanId = normalizePantryId(pantryId);
   if (!cleanId) return false;
 
@@ -308,7 +320,14 @@ export const keepAlivePantry = async (pantryId: string, chunkCount = 1): Promise
       return false;
     }
 
-    for (let i = 1; i < chunkCount; i++) {
+    let effectiveChunkCount = chunkCount ?? knownChunkCounts.get(cleanId) ?? 1;
+    const updatedMain = await res.json().catch(() => null);
+    if (typeof updatedMain?.chunkCount === 'number' && updatedMain.chunkCount > effectiveChunkCount) {
+      effectiveChunkCount = updatedMain.chunkCount;
+    }
+    knownChunkCounts.set(cleanId, effectiveChunkCount);
+
+    for (let i = 1; i < effectiveChunkCount; i++) {
       await fetchWithRetry(
         `${BASE_URL}/${cleanId}/basket/${BASKET_NAME}_${i}`,
         {
@@ -325,6 +344,23 @@ export const keepAlivePantry = async (pantryId: string, chunkCount = 1): Promise
   } catch (err) {
     console.warn('Pantry keep-alive ping failed:', err);
     return false;
+  }
+};
+
+const cleanupStaleOverflowChunks = async (
+  cleanId: string,
+  previousChunkCount: number,
+  newChunkCount: number
+) => {
+  for (let i = Math.max(1, newChunkCount); i < previousChunkCount; i++) {
+    await fetchWithRetry(
+      `${BASE_URL}/${cleanId}/basket/${BASKET_NAME}_${i}`,
+      {
+        ...FETCH_OPTIONS,
+        method: 'DELETE',
+      },
+      1
+    ).catch(() => {});
   }
 };
 
@@ -357,6 +393,7 @@ const pushDeckWithChunkLimit = async (
   cloudData: CloudData,
   maxBasketBytes: number
 ) => {
+  const previousChunkCount = knownChunkCounts.get(cleanId) ?? cloudData.chunkCount ?? 1;
   const now = Date.now();
   const fullPayload = JSON.stringify({
     cards: sanitizedCards,
@@ -389,6 +426,10 @@ const pushDeckWithChunkLimit = async (
     if (!response.ok) {
       const errorText = await response.text().catch(() => response.statusText);
       throw new Error(`Failed to update Pantry storage (${response.status}): ${errorText}`);
+    }
+    knownChunkCounts.set(cleanId, 1);
+    if (previousChunkCount > 1) {
+      await cleanupStaleOverflowChunks(cleanId, previousChunkCount, 1);
     }
     return;
   }
@@ -450,6 +491,11 @@ const pushDeckWithChunkLimit = async (
       const errorText = await chunkRes.text().catch(() => chunkRes.statusText);
       throw new Error(`Failed to update Pantry chunk ${i} (${chunkRes.status}): ${errorText}`);
     }
+  }
+
+  knownChunkCounts.set(cleanId, allChunks.length);
+  if (previousChunkCount > allChunks.length) {
+    await cleanupStaleOverflowChunks(cleanId, previousChunkCount, allChunks.length);
   }
 };
 

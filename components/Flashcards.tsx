@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Flashcard, FlashcardStatus } from '../types';
-import { Play, BookOpen, CheckCircle, Brain, Trash2, RotateCw, Upload, Volume2, ChevronDown, Search, X, ArrowUpDown, Filter, Plus, Pencil, Tag } from 'lucide-react';
+import { Play, BookOpen, CheckCircle, Brain, Trash2, RotateCw, Upload, Volume2, ChevronDown, Search, X, ArrowUpDown, Filter, Plus, Pencil, Tag, Sparkles } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { playAudio } from '../utils/audio';
 import { getDueCards } from '../utils/studyUtils';
+import { BookPrepModal } from './BookPrepModal';
+import { BookExtractedWord } from '../services/bookService';
 
 const PAGE_SIZE = 24;
 
@@ -21,11 +23,12 @@ export interface CustomCardFormData {
 
 interface FlashcardsProps {
   cards: Flashcard[];
-  onStartStudy: () => void;
+  onStartStudy: (initialTag?: string) => void;
   onDeleteCard: (id: string) => void;
   onReviewCard: (id: string, quality: number) => void;
   onCreateCard?: (data: CustomCardFormData) => void;
   onUpdateCard?: (id: string, updates: CustomCardFormData) => void;
+  onImportBookWords?: (bookTitle: string, words: BookExtractedWord[]) => void;
   onOpenImport: () => void;
 }
 
@@ -431,6 +434,7 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
   onReviewCard,
   onCreateCard,
   onUpdateCard,
+  onImportBookWords,
   onOpenImport,
 }) => {
   const [selectedStatus, setSelectedStatus] = useState<FlashcardStatus | null>(null);
@@ -441,7 +445,66 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [editingCard, setEditingCard] = useState<Flashcard | null>(null);
+  const [isBookPrepOpen, setIsBookPrepOpen] = useState(false);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
+
+  const existingWordsSet = useMemo(
+    () => new Set(cards.map(c => c.word.trim().toLowerCase())),
+    [cards]
+  );
+
+  const bookGroups = useMemo(() => {
+    const groups = new Map<
+      string,
+      {
+        tag: string;
+        title: string;
+        cards: Flashcard[];
+      }
+    >();
+
+    for (const card of cards) {
+      for (const rawTag of card.tags || []) {
+        const trimmed = rawTag.trim();
+        const match = trimmed.match(/^book:\s*(.+)$/i);
+        if (match && match[1]) {
+          const title = match[1].trim();
+          const existing = groups.get(trimmed);
+          if (!existing) {
+            groups.set(trimmed, { tag: trimmed, title, cards: [card] });
+          } else {
+            existing.cards.push(card);
+          }
+        }
+      }
+    }
+
+    return Array.from(groups.values())
+      .map(group => {
+        const total = group.cards.length;
+        const mastered = group.cards.filter(c => c.status === FlashcardStatus.Mastered).length;
+        const learning = group.cards.filter(c => c.status === FlashcardStatus.Learning).length;
+        const newWords = group.cards.filter(c => c.status === FlashcardStatus.New).length;
+        const dueCount = getDueCards(group.cards).length;
+        const readiness = total > 0 ? Math.round(((mastered + learning * 0.5) / total) * 100) : 0;
+
+        return {
+          ...group,
+          total,
+          mastered,
+          learning,
+          newWords,
+          dueCount,
+          readiness,
+        };
+      })
+      .sort((a, b) => a.title.localeCompare(b.title));
+  }, [cards]);
+
+  const handleBookWordsImported = (bookTitle: string, words: BookExtractedWord[]) => {
+    onImportBookWords?.(bookTitle, words);
+    setSelectedTag(`Book: ${bookTitle.trim()}`);
+  };
 
   const handleOpenCreateModal = () => {
     setEditingCard(null);
@@ -592,7 +655,7 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
             <div>
               <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Your deck is empty</h2>
               <p className="text-slate-500 dark:text-slate-400 max-w-sm mx-auto mt-2">
-                Search for words in the dictionary to add them, create a custom card, or import a previous backup.
+                Search for words in the dictionary to add them, prepare for a book, create a custom card, or import a previous backup.
               </p>
             </div>
             <div className="flex flex-wrap items-center justify-center gap-3">
@@ -602,6 +665,13 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
               >
                 <Plus className="h-4 w-4" />
                 Create Card
+              </button>
+              <button
+                onClick={() => setIsBookPrepOpen(true)}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-xl text-slate-700 dark:text-slate-200 font-medium hover:bg-slate-50 dark:hover:bg-slate-700 hover:text-brand-600 dark:hover:text-brand-400 hover:border-brand-200 transition-all shadow-sm"
+              >
+                <Sparkles className="h-4 w-4 text-brand-600 dark:text-brand-400" />
+                Prepare for a Book
               </button>
               <button
                 onClick={onOpenImport}
@@ -619,6 +689,12 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
           onClose={() => setIsEditorOpen(false)}
           onSubmit={handleEditorSubmit}
         />
+        <BookPrepModal
+          isOpen={isBookPrepOpen}
+          onClose={() => setIsBookPrepOpen(false)}
+          existingWords={existingWordsSet}
+          onImportBookWords={handleBookWordsImported}
+        />
       </>
     );
   }
@@ -634,6 +710,13 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <button
+              onClick={() => setIsBookPrepOpen(true)}
+              className="flex items-center gap-2 px-4 py-3 rounded-xl font-medium bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 hover:border-brand-300 transition-all shadow-sm"
+            >
+              <BookOpen className="h-4 w-4 text-brand-600 dark:text-brand-400" />
+              Prepare for a Book
+            </button>
+            <button
               onClick={handleOpenCreateModal}
               className="flex items-center gap-2 px-4 py-3 rounded-xl font-medium bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 hover:border-brand-300 transition-all shadow-sm"
             >
@@ -641,7 +724,7 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
               Create Card
             </button>
             <button
-              onClick={onStartStudy}
+              onClick={() => onStartStudy()}
               disabled={studyQueueCount === 0}
               className={`flex items-center gap-2 px-6 py-3 rounded-xl font-medium shadow-lg transition-all 
                 ${studyQueueCount > 0
@@ -663,6 +746,97 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Book Vocabulary Dock (Pre-Reading Study Groups) */}
+        {bookGroups.length > 0 && (
+          <div
+            data-testid="book-vocabulary-dock"
+            className="bg-white dark:bg-slate-800/90 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm space-y-3"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-lg bg-brand-50 dark:bg-brand-900/40 text-brand-600 dark:text-brand-400">
+                  <BookOpen className="h-4 w-4" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-serif font-bold text-slate-900 dark:text-white">
+                    Book Vocabulary Dock
+                  </h2>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Pre-study complex vocabulary from your books before reading
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsBookPrepOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 hover:bg-brand-100 dark:hover:bg-brand-900/50 transition-colors"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Add Book
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {bookGroups.map((book) => {
+                const isSelected = selectedTag === book.tag;
+                return (
+                  <div
+                    key={book.tag}
+                    onClick={() => setSelectedTag(isSelected ? 'all' : book.tag)}
+                    className={`p-3.5 rounded-xl border transition-all cursor-pointer flex flex-col justify-between gap-3 ${
+                      isSelected
+                        ? 'bg-brand-50/70 dark:bg-brand-900/30 border-brand-400 dark:border-brand-500 ring-1 ring-brand-400/50 shadow-sm'
+                        : 'bg-slate-50/70 dark:bg-slate-900/50 border-slate-200 dark:border-slate-700 hover:border-brand-300 dark:hover:border-brand-700'
+                    }`}
+                  >
+                    <div className="space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <h3 className="font-serif font-bold text-base text-slate-900 dark:text-white truncate">
+                            {book.title}
+                          </h3>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            {book.total} complex {book.total === 1 ? 'word' : 'words'} • {book.mastered} mastered
+                          </p>
+                        </div>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-brand-100 dark:bg-brand-900/50 text-brand-700 dark:text-brand-300 shrink-0">
+                          {book.readiness}% Ready
+                        </span>
+                      </div>
+
+                      <div className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-brand-600 dark:bg-brand-400 rounded-full transition-all"
+                          style={{ width: `${Math.max(book.readiness, book.total > 0 ? 6 : 0)}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 pt-1">
+                      <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                        {isSelected ? 'Showing book words' : 'Click to filter deck'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onStartStudy(book.tag);
+                        }}
+                        disabled={book.dueCount === 0}
+                        aria-label={`Study ${book.title}`}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-brand-600 hover:bg-brand-700 text-white shadow-sm disabled:opacity-50 transition-colors inline-flex items-center gap-1.5"
+                      >
+                        <Play className="h-3 w-3 fill-current" />
+                        Study Book
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {[
@@ -877,6 +1051,13 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
         editingCard={editingCard}
         onClose={() => setIsEditorOpen(false)}
         onSubmit={handleEditorSubmit}
+      />
+
+      <BookPrepModal
+        isOpen={isBookPrepOpen}
+        onClose={() => setIsBookPrepOpen(false)}
+        existingWords={existingWordsSet}
+        onImportBookWords={handleBookWordsImported}
       />
     </div>
   );

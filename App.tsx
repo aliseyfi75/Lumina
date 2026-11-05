@@ -18,6 +18,7 @@ import { Book, Layers, Database, Save, Cloud, BarChart2, Home, Sun, Moon, Refres
 import Confetti from 'react-confetti';
 import { useWindowSize } from 'react-use';
 import { SessionConfigModal, SessionMode } from './components/SessionConfigModal';
+import { BookExtractedWord } from './services/bookService';
 
 const LOCAL_STORAGE_KEY = 'lumina_cards_v1';
 const CLOUD_CONFIG_KEY = 'lumina_cloud_config';
@@ -114,6 +115,7 @@ const App: React.FC = () => {
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
 
   const [isSessionConfigOpen, setIsSessionConfigOpen] = useState(false);
+  const [sessionInitialTag, setSessionInitialTag] = useState<string | undefined>(undefined);
 
   // Confetti State
   const { width, height } = useWindowSize();
@@ -916,7 +918,8 @@ const App: React.FC = () => {
     recordActivity();
   };
 
-  const handleStartStudySession = () => {
+  const handleStartStudySession = (initialTag?: string) => {
+    setSessionInitialTag(initialTag);
     setIsSessionConfigOpen(true);
   };
 
@@ -1053,6 +1056,35 @@ const App: React.FC = () => {
         };
       })
     );
+  };
+
+  const handleImportBookWords = (bookTitle: string, words: BookExtractedWord[]) => {
+    const cleanTitle = bookTitle.trim() || 'Untitled Book';
+    const bookTag = `Book: ${cleanTitle}`;
+    const now = Date.now();
+
+    const newBookCards: Flashcard[] = words.map((w, idx) => ({
+      id: crypto.randomUUID(),
+      word: w.word.trim(),
+      partOfSpeech: w.partOfSpeech.trim() || 'noun',
+      phonetic: w.phonetic?.trim() || undefined,
+      audio: w.audio,
+      mainDefinition: w.mainDefinition.trim(),
+      example: w.bookSentence?.trim() || undefined,
+      synonyms: w.synonyms && w.synonyms.length > 0 ? w.synonyms : undefined,
+      antonyms: w.antonyms && w.antonyms.length > 0 ? w.antonyms : undefined,
+      tags: [bookTag],
+      status: FlashcardStatus.New,
+      lastReviewed: 0,
+      createdAt: now + idx,
+      repetition: 0,
+      nextReviewDate: now,
+      updatedAt: now + idx,
+    }));
+
+    performMerge(newBookCards);
+    recordActivity();
+    trackEvent(TRACKING_ACTION.ADD_CARD, TRACKING_CATEGORY.FLASHCARDS, `book_${cleanTitle}`);
   };
 
   const handleDeleteCard = (id: string) => {
@@ -1229,6 +1261,7 @@ const App: React.FC = () => {
                 onReviewCard={handleReviewCard}
                 onCreateCard={handleCreateCustomCard}
                 onUpdateCard={handleUpdateCard}
+                onImportBookWords={handleImportBookWords}
                 onOpenImport={() => setIsDataModalOpen(true)}
               />
             }
@@ -1321,6 +1354,7 @@ const App: React.FC = () => {
         onStart={handleSessionStart}
         dueCount={getDueCards(cards).length}
         cards={cards}
+        initialTag={sessionInitialTag}
       />
     </div>
   );

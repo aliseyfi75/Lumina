@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Play, Zap, BrainCircuit, ListChecks, Tag } from 'lucide-react';
 import { Flashcard } from '../types';
@@ -12,6 +12,7 @@ interface SessionConfigModalProps {
     onStart: (config: { mode: SessionMode; count?: number; tag?: string }) => void;
     dueCount: number;
     cards?: Flashcard[];
+    initialTag?: string;
 }
 
 export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
@@ -20,10 +21,17 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
     onStart,
     dueCount,
     cards = [],
+    initialTag,
 }) => {
     const [mode, setMode] = useState<SessionMode>('full');
     const [count, setCount] = useState(10);
-    const [selectedTag, setSelectedTag] = useState<string>('');
+    const [selectedTag, setSelectedTag] = useState<string>(initialTag || '');
+
+    useEffect(() => {
+        if (isOpen) {
+            setSelectedTag(initialTag || '');
+        }
+    }, [isOpen, initialTag]);
 
     const dueCards = useMemo(() => getDueCards(cards), [cards]);
 

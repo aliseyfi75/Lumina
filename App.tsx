@@ -17,7 +17,7 @@ import { getLocalDateString, calculateCurrentStreak, getDueCards } from './utils
 import { Book, Layers, Database, Save, Cloud, BarChart2, Home, Sun, Moon, RefreshCw } from 'lucide-react';
 import Confetti from 'react-confetti';
 import { useWindowSize } from 'react-use';
-import { SessionConfigModal } from './components/SessionConfigModal';
+import { SessionConfigModal, SessionMode } from './components/SessionConfigModal';
 
 const LOCAL_STORAGE_KEY = 'lumina_cards_v1';
 const CLOUD_CONFIG_KEY = 'lumina_cloud_config';
@@ -897,7 +897,7 @@ const App: React.FC = () => {
     setIsSessionConfigOpen(true);
   };
 
-  const handleSessionStart = (config: { mode: 'full' | 'short'; count?: number }) => {
+  const handleSessionStart = (config: { mode: SessionMode; count?: number }) => {
     navigate('/study', { state: { sessionConfig: config } });
   };
 

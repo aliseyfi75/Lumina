@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Play, Zap, BrainCircuit } from 'lucide-react';
+import { X, Play, Zap, BrainCircuit, ListChecks } from 'lucide-react';
+
+export type SessionMode = 'full' | 'short' | 'quiz';
 
 interface SessionConfigModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onStart: (config: { mode: 'full' | 'short'; count?: number }) => void;
+    onStart: (config: { mode: SessionMode; count?: number }) => void;
     dueCount: number;
 }
 
@@ -15,7 +17,7 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
     onStart,
     dueCount,
 }) => {
-    const [mode, setMode] = useState<'full' | 'short'>('full');
+    const [mode, setMode] = useState<SessionMode>('full');
     const [count, setCount] = useState(10);
 
     if (!isOpen) return null;
@@ -23,7 +25,7 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
     const handleStart = () => {
         onStart({
             mode,
-            count: mode === 'short' ? Math.min(count, dueCount) : undefined,
+            count: mode === 'short' || mode === 'quiz' ? Math.min(count, dueCount) : undefined,
         });
         onClose();
     };
@@ -153,6 +155,66 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
                             </div>
                         </label>
 
+                        {/* Multiple-Choice Quiz Option */}
+                        <label
+                            className={`block relative p-4 rounded-2xl border-2 cursor-pointer transition-all ${mode === 'quiz'
+                                ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20'
+                                : 'border-slate-200 dark:border-slate-700 hover:border-indigo-300 dark:hover:border-indigo-700'
+                                }`}
+                        >
+                            <input
+                                type="radio"
+                                name="session_mode"
+                                value="quiz"
+                                checked={mode === 'quiz'}
+                                onChange={() => setMode('quiz')}
+                                className="sr-only"
+                            />
+                            <div className="flex items-start gap-4">
+                                <div className={`mt-0.5 p-2 rounded-xl shrink-0 ${mode === 'quiz' ? 'bg-indigo-500 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
+                                    }`}>
+                                    <ListChecks className="h-5 w-5" />
+                                </div>
+                                <div className="flex-1">
+                                    <h3 className={`font-semibold text-lg ${mode === 'quiz' ? 'text-indigo-900 dark:text-indigo-100' : 'text-slate-700 dark:text-slate-300'
+                                        }`}>
+                                        Multiple-Choice Quiz
+                                    </h3>
+                                    <p className={`text-sm mt-1 mb-3 ${mode === 'quiz' ? 'text-indigo-700 dark:text-indigo-300/70' : 'text-slate-500'
+                                        }`}>
+                                        Rapid-fire 4-option quiz using definitions from your deck. Great for active recall testing.
+                                    </p>
+
+                                    <AnimatePresence>
+                                        {mode === 'quiz' && (
+                                            <motion.div
+                                                initial={{ opacity: 0, height: 0 }}
+                                                animate={{ opacity: 1, height: 'auto' }}
+                                                exit={{ opacity: 0, height: 0 }}
+                                                className="overflow-hidden"
+                                            >
+                                                <div className="flex items-center gap-3 bg-white dark:bg-slate-800 p-2 rounded-xl border border-indigo-200 dark:border-indigo-800/50" onClick={e => e.stopPropagation()}>
+                                                    <span className="text-sm font-medium text-slate-600 dark:text-slate-400 ml-2">Questions:</span>
+                                                    <input
+                                                        type="range"
+                                                        min="5"
+                                                        max={Math.max(10, Math.ceil(dueCount / 5) * 5)}
+                                                        step="5"
+                                                        value={count}
+                                                        onChange={(e) => setCount(Number(e.target.value))}
+                                                        className="flex-1 accent-indigo-500"
+                                                    />
+                                                    <span className="text-sm font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-100 dark:bg-indigo-900/50 px-3 py-1 rounded-lg w-12 text-center">
+                                                        {Math.min(count, dueCount)}
+                                                    </span>
+                                                </div>
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
+                                </div>
+                            </div>
+                        </label>
+
                     </div>
                 </div>
 
@@ -168,11 +230,19 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
                         onClick={handleStart}
                         className={`px-6 py-2.5 text-white font-medium rounded-xl shadow-lg transition-all active:scale-95 flex items-center gap-2 ${mode === 'full'
                             ? 'bg-brand-600 hover:bg-brand-700 shadow-brand-500/30'
-                            : 'bg-amber-500 hover:bg-amber-600 shadow-amber-500/30'
+                            : mode === 'short'
+                                ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-500/30'
+                                : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-500/30'
                             }`}
                     >
-                        {mode === 'full' ? <Play className="h-4 w-4 fill-current" /> : <Zap className="h-4 w-4 fill-current" />}
-                        Start {mode === 'full' ? 'Full Session' : 'Short Session'}
+                        {mode === 'full' ? (
+                            <Play className="h-4 w-4 fill-current" />
+                        ) : mode === 'short' ? (
+                            <Zap className="h-4 w-4 fill-current" />
+                        ) : (
+                            <ListChecks className="h-4 w-4" />
+                        )}
+                        Start {mode === 'full' ? 'Full Session' : mode === 'short' ? 'Short Session' : 'Quiz Session'}
                     </button>
                 </div>
             </motion.div>

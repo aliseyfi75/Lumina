@@ -1,12 +1,21 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Flashcard, FlashcardStatus } from '../types';
-import { RotateCw, CheckCircle, Brain, ArrowLeft, Volume2, MoveUp, MoveDown, MoveLeft, MoveRight } from 'lucide-react';
+import { RotateCw, CheckCircle, Brain, ArrowLeft, Volume2, MoveUp, MoveDown, MoveLeft, MoveRight, XCircle, ArrowRight, ListChecks } from 'lucide-react';
 import Confetti from 'react-confetti';
 import { useWindowSize } from 'react-use';
 import { motion, useMotionValue, useTransform, PanInfo, AnimatePresence } from 'framer-motion';
 import { useLocation } from 'react-router-dom';
 import { playAudio } from '../utils/audio';
 import { getDueCards } from '../utils/studyUtils';
+import { SessionMode } from './SessionConfigModal';
+
+const FALLBACK_DISTRACTORS = [
+  'Lasting for a very short time; fleeting or transitory.',
+  'Showing great attention to detail; very careful and precise.',
+  'Present, appearing, or found everywhere at the same time.',
+  'Fluent or persuasive in speaking or writing.',
+  'Open to more than one interpretation; not having one obvious meaning.',
+];
 
 interface StudySessionProps {
   cards: Flashcard[];
@@ -20,23 +29,24 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [selectedQuizOption, setSelectedQuizOption] = useState<string | null>(null);
 
   const { width, height } = useWindowSize();
   const [showConfetti, setShowConfetti] = useState(false);
   const [actionToast, setActionToast] = useState<{ message: string; colorClass: string; bgColorClass: string } | null>(null);
 
   const location = useLocation();
+  const sessionConfig = location.state?.sessionConfig as { mode: SessionMode; count?: number } | undefined;
+  const isQuizMode = sessionConfig?.mode === 'quiz';
 
   useEffect(() => {
     if (isInitialized || cards.length === 0) return;
 
     const dueCards = getDueCards(cards);
 
-    const sessionConfig = location.state?.sessionConfig as { mode: 'full' | 'short'; count?: number } | undefined;
-
     let studySet: Flashcard[] = [];
 
-    if (sessionConfig?.mode === 'short' && sessionConfig.count) {
+    if ((sessionConfig?.mode === 'short' || sessionConfig?.mode === 'quiz') && sessionConfig.count) {
       const newCards = dueCards.filter(c => c.status === FlashcardStatus.New).sort((a, b) => (a.lastReviewed || 0) - (b.lastReviewed || 0));
       const otherCards = dueCards.filter(c => c.status !== FlashcardStatus.New).sort((a, b) => (a.lastReviewed || 0) - (b.lastReviewed || 0));
 
@@ -50,9 +60,45 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
     setQueue(studySet);
     setIsInitialized(true);
     // Snapshot the queue once cards have loaded so in-session status updates do not reshuffle the queue.
-  }, [cards, isInitialized, location.state]);
+  }, [cards, isInitialized, sessionConfig]);
 
   const currentCard = queue[currentIndex];
+
+  // Build 4 deterministic multiple-choice options for the current quiz card
+  const quizOptions = useMemo(() => {
+    if (!currentCard || !isQuizMode) return [];
+    const correct = currentCard.mainDefinition.trim();
+    const otherDefs = Array.from(
+      new Set(
+        cards
+          .filter(c => c.id !== currentCard.id && c.mainDefinition.trim() !== correct)
+          .map(c => c.mainDefinition.trim())
+          .filter(Boolean)
+      )
+    );
+    // Deterministic pseudo-random shuffle seeded by card id + currentIndex
+    const hashStr = (str: string) => {
+      let h = 2166136261 ^ currentIndex;
+      for (let i = 0; i < str.length; i++) {
+        h ^= str.charCodeAt(i);
+        h = Math.imul(h, 16777619);
+      }
+      return h >>> 0;
+    };
+
+    const sortedDeckDistractors = [...otherDefs].sort(
+      (a, b) => hashStr(currentCard.id + a) - hashStr(currentCard.id + b)
+    );
+    const fallbackNeeded = Math.max(0, 3 - sortedDeckDistractors.length);
+    const distractors = [
+      ...sortedDeckDistractors.slice(0, 3),
+      ...FALLBACK_DISTRACTORS.filter(d => d !== correct && !sortedDeckDistractors.includes(d)).slice(0, fallbackNeeded),
+    ];
+
+    return [correct, ...distractors].sort(
+      (a, b) => hashStr('opt:' + currentCard.id + a) - hashStr('opt:' + currentCard.id + b)
+    );
+  }, [currentCard, isQuizMode, cards, currentIndex]);
 
   const x = useMotionValue(0);
   const y = useMotionValue(0);
@@ -91,6 +137,7 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
 
     // Flip back first
     setIsFlipped(false);
+    setSelectedQuizOption(null);
 
     // Wait for flip to partially complete before changing content
     setTimeout(() => {
@@ -102,14 +149,35 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
         }
         return nextIndex;
       });
-    }, 300);
-  }, [currentCard, onReviewCard, queue.length, onSessionComplete, x, y]);
+    }, isQuizMode ? 100 : 300);
+  }, [currentCard, onReviewCard, queue.length, onSessionComplete, x, y, isQuizMode]);
+
+  const handleSelectQuizOption = useCallback((option: string) => {
+    if (!currentCard || selectedQuizOption !== null) return;
+    setSelectedQuizOption(option);
+    const isCorrect = option === currentCard.mainDefinition.trim();
+    onReviewCard(currentCard.id, isCorrect ? 3 : 1);
+  }, [currentCard, selectedQuizOption, onReviewCard]);
 
   // Keyboard support for desktop
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!currentCard) return;
       if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
+
+      if (isQuizMode) {
+        if (selectedQuizOption === null) {
+          const num = parseInt(e.key, 10);
+          if (num >= 1 && num <= quizOptions.length) {
+            e.preventDefault();
+            handleSelectQuizOption(quizOptions[num - 1]);
+          }
+        } else if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowRight') {
+          e.preventDefault();
+          handleNext(null);
+        }
+        return;
+      }
 
       switch (e.key) {
         case 'ArrowLeft':
@@ -132,7 +200,7 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleNext, currentCard, isFlipped]);
+  }, [handleNext, currentCard, isFlipped, isQuizMode, selectedQuizOption, quizOptions, handleSelectQuizOption]);
 
   const handleDragEnd = (_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
     if (!isFlipped) return;
@@ -230,6 +298,99 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
       </div>
 
       <div className="flex-1 relative perspective-1000 mb-8 sm:px-12 flex justify-center items-center">
+        {isQuizMode ? (
+          <div className="w-full max-w-lg bg-white dark:bg-slate-800 rounded-3xl shadow-xl border border-slate-100 dark:border-slate-700 p-6 sm:p-8 flex flex-col gap-6">
+            <div className="text-center space-y-2 border-b border-slate-100 dark:border-slate-700 pb-5">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-xs font-bold uppercase tracking-wider mb-1">
+                <ListChecks className="h-3.5 w-3.5" />
+                Multiple-Choice Quiz
+              </div>
+              <h2 className="text-4xl font-serif font-bold text-slate-900 dark:text-white">{currentCard.word}</h2>
+              <div className="flex items-center justify-center gap-2">
+                {currentCard.partOfSpeech && (
+                  <span className="text-xs italic text-slate-400 dark:text-slate-500">{currentCard.partOfSpeech}</span>
+                )}
+                {currentCard.phonetic && (
+                  <span className="text-sm text-slate-400 dark:text-slate-500 font-serif italic">{currentCard.phonetic}</span>
+                )}
+                <button
+                  onClick={() => playAudio(currentCard.word, currentCard.audio)}
+                  className="p-1.5 text-slate-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded-full transition-colors"
+                  title="Listen to pronunciation"
+                >
+                  <Volume2 className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              {quizOptions.map((option, idx) => {
+                const isCorrectOption = option === currentCard.mainDefinition.trim();
+                const isSelected = selectedQuizOption === option;
+                const hasAnswered = selectedQuizOption !== null;
+
+                let optionClasses =
+                  'border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/40 hover:border-indigo-400 dark:hover:border-indigo-500 hover:bg-indigo-50/40 dark:hover:bg-indigo-900/20 text-slate-700 dark:text-slate-200';
+                if (hasAnswered) {
+                  if (isCorrectOption) {
+                    optionClasses =
+                      'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-900 dark:text-emerald-100 ring-1 ring-emerald-500';
+                  } else if (isSelected) {
+                    optionClasses =
+                      'border-red-500 bg-red-50 dark:bg-red-900/30 text-red-900 dark:text-red-100 ring-1 ring-red-500';
+                  } else {
+                    optionClasses =
+                      'border-slate-200 dark:border-slate-700 bg-slate-50/40 dark:bg-slate-900/20 text-slate-400 dark:text-slate-500 opacity-60';
+                  }
+                }
+
+                return (
+                  <button
+                    key={idx}
+                    disabled={hasAnswered}
+                    onClick={() => handleSelectQuizOption(option)}
+                    className={`w-full text-left p-4 rounded-2xl border-2 transition-all flex items-start gap-3 ${optionClasses}`}
+                  >
+                    <span className="shrink-0 w-6 h-6 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 text-xs font-bold flex items-center justify-center text-slate-500 dark:text-slate-400 mt-0.5">
+                      {idx + 1}
+                    </span>
+                    <span className="flex-1 text-sm sm:text-base leading-snug font-medium">{option}</span>
+                    {hasAnswered && isCorrectOption && (
+                      <CheckCircle className="h-5 w-5 text-emerald-500 shrink-0 mt-0.5" />
+                    )}
+                    {hasAnswered && isSelected && !isCorrectOption && (
+                      <XCircle className="h-5 w-5 text-red-500 shrink-0 mt-0.5" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            {selectedQuizOption !== null && (
+              <div className="pt-2 flex items-center justify-between border-t border-slate-100 dark:border-slate-700">
+                <span
+                  className={`text-sm font-semibold ${
+                    selectedQuizOption === currentCard.mainDefinition.trim()
+                      ? 'text-emerald-600 dark:text-emerald-400'
+                      : 'text-red-600 dark:text-red-400'
+                  }`}
+                >
+                  {selectedQuizOption === currentCard.mainDefinition.trim()
+                    ? 'Correct! Marked as Learned.'
+                    : 'Not quite — marked for review again.'}
+                </span>
+                <button
+                  onClick={() => handleNext(null)}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl shadow-md shadow-indigo-500/20 transition-colors"
+                >
+                  Next Question
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+        <>
         {/* Swipe Indicators */}
         <motion.div style={{ opacity: swipeRightOpacity, pointerEvents: 'none' }} className="absolute left-0 top-1/2 -translate-y-1/2 z-0 flex flex-col items-center text-green-500">
           <MoveRight className="h-10 w-10" />
@@ -371,6 +532,8 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
             </div>
           </motion.div>
         </div>
+        </>
+        )}
       </div>
     </div>
   );

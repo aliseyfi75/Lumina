@@ -39,11 +39,10 @@
     })();
   </script>
   <style>
-    /* Smooth theme transitions */
+    /* Smooth root theme transitions without forcing transitions on every DOM/SVG node */
     html,
-    body,
-    * {
-      transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+    body {
+      transition: background-color 0.2s ease, color 0.2s ease;
     }
 
     /* Custom Scrollbar */

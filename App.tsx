@@ -85,6 +85,7 @@ const App: React.FC = () => {
   const [isSyncingOffline, setIsSyncingOffline] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [pendingCloudSync, setPendingCloudSync] = useState(false);
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
   const skipNextCloudAutoSaveRef = useRef(false);
   const hasInitializedCloudRef = useRef(false);
   const isMigratingCloudRef = useRef(false);
@@ -252,14 +253,22 @@ const App: React.FC = () => {
       let initialStudyHistory: Record<string, number> = {};
       let initialLongestStreak = 0;
       let initialDeletedCards: Record<string, number> = {};
+      let hasExistingUserStore = false;
 
       // Step A: Try IndexedDB first (primary store)
       const idbData = await loadAppDataFromIDB();
-      if (idbData && idbData.cards && idbData.cards.length > 0) {
+      if (
+        idbData &&
+        Array.isArray(idbData.cards) &&
+        (idbData.cards.length > 0 ||
+          Object.keys(idbData.deletedCards ?? {}).length > 0 ||
+          Object.keys(idbData.studyHistory ?? {}).length > 0)
+      ) {
         initialCards = idbData.cards;
         initialStudyHistory = idbData.studyHistory ?? {};
         initialLongestStreak = idbData.longestStreak ?? 0;
         initialDeletedCards = idbData.deletedCards ?? {};
+        hasExistingUserStore = true;
       } else {
         // Step A-fallback: migrate from localStorage (existing users)
         const savedCards = localStorage.getItem(LOCAL_STORAGE_KEY);
@@ -268,6 +277,7 @@ const App: React.FC = () => {
             const parsed = JSON.parse(savedCards);
             if (Array.isArray(parsed)) {
               initialCards = parsed;
+              hasExistingUserStore = true;
               // Migrate immediately so next load hits IDB
               try {
                 await saveAppDataToIDB({ cards: parsed, studyHistory: {}, longestStreak: 0, deletedCards: {} });
@@ -295,8 +305,8 @@ const App: React.FC = () => {
         setLongestStreak(initialLongestStreak);
       }
 
-      // Step B: Load Default JSON if still empty
-      if (initialCards.length === 0) {
+      // Step B: Load Default JSON only on a brand-new install (not when user intentionally deleted all cards)
+      if (initialCards.length === 0 && !hasExistingUserStore) {
         try {
           const response = await fetch('./database/data.json');
           if (response.ok) {
@@ -410,6 +420,7 @@ const App: React.FC = () => {
 
       const est = await getStorageEstimate();
       if (est) setStorageEstimate(est);
+      setIsDataLoaded(true);
     };
 
     initData();
@@ -418,7 +429,7 @@ const App: React.FC = () => {
 
   // 2. Persist to IndexedDB (primary store) and keep localStorage in sync for safety
   useEffect(() => {
-    if (!cards.length) return; // don't overwrite IDB with empty on first render
+    if (!isDataLoaded) return; // don't overwrite IDB before initial load finishes
     const data = { cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() };
     saveAppDataToIDB(data)
       .then(() => {
@@ -429,7 +440,7 @@ const App: React.FC = () => {
       .catch(console.error);
     // Keep localStorage as a secondary safety net (small overhead)
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(cards));
-  }, [cards, studyHistory, longestStreak]);
+  }, [cards, studyHistory, longestStreak, deletedCards, isDataLoaded]);
 
   // Track online / offline status
   useEffect(() => {
@@ -445,7 +456,7 @@ const App: React.FC = () => {
 
   // 3. Auto-Save to Local File
   useEffect(() => {
-    if (!fileHandle) return;
+    if (!isDataLoaded || !fileHandle) return;
     const timeoutId = setTimeout(async () => {
       setIsFileSaving(true);
       try {
@@ -457,11 +468,11 @@ const App: React.FC = () => {
       }
     }, 1000);
     return () => clearTimeout(timeoutId);
-  }, [cards, studyHistory, longestStreak, fileHandle]);
+  }, [cards, studyHistory, longestStreak, deletedCards, fileHandle, isDataLoaded]);
 
   // 4. Auto-Save to Cloud
   useEffect(() => {
-    if (!cloudConfig || !cards.length || isMigratingCloudRef.current) return;
+    if (!isDataLoaded || !cloudConfig || isMigratingCloudRef.current) return;
 
     if (skipNextCloudAutoSaveRef.current) {
       skipNextCloudAutoSaveRef.current = false;
@@ -492,7 +503,7 @@ const App: React.FC = () => {
     }, 2000);
     return () => clearTimeout(timeoutId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cards, studyHistory, longestStreak, cloudConfig]);
+  }, [cards, studyHistory, longestStreak, deletedCards, cloudConfig, isDataLoaded]);
 
   // 4b. Keep Pantry alive when user re-opens / focuses an already-open tab or PWA window
   useEffect(() => {
@@ -520,7 +531,7 @@ const App: React.FC = () => {
 
   // 5. Flush pending sync when coming back online (or cloud config is restored)
   useEffect(() => {
-    if (!isOnline || !cloudConfig || !pendingCloudSync || !cards.length) return;
+    if (!isDataLoaded || !isOnline || !cloudConfig || !pendingCloudSync) return;
     let cancelled = false;
     const flush = async () => {
       setIsSyncingOffline(true);

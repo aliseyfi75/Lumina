@@ -321,6 +321,11 @@ test('supports Tier 1 Gutenberg book vocabulary extraction with real book senten
   await expect(fallbackPrompt).toBeVisible();
   await expect(fallbackPrompt).toContainText('“Dune” wasn’t found in the public domain catalog');
 
+  // Typing a new book name in the search input before hitting "Find Book" must NOT prematurely change the warning message
+  await page.getByLabel('Search book title').fill('the art of loving');
+  await expect(fallbackPrompt).toContainText('“Dune” wasn’t found in the public domain catalog');
+  await expect(fallbackPrompt).not.toContainText('the art of loving');
+
   // Upload a .txt file for Dune (Tier 2)
   const fileInput = page.locator('input[type="file"][aria-label="Upload book file"]');
   await fileInput.setInputFiles({

@@ -37,6 +37,7 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
   onImportBookWords,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
+  const [submittedQuery, setSubmittedQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [searchResults, setSearchResults] = useState<GutenbergBook[]>([]);
@@ -60,6 +61,7 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
 
   const resetModal = () => {
     setSearchQuery('');
+    setSubmittedQuery('');
     setIsSearching(false);
     setHasSearched(false);
     setSearchResults([]);
@@ -85,6 +87,7 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
     const trimmed = searchQuery.trim();
     if (!trimmed) return;
 
+    setSubmittedQuery(trimmed);
     setIsSearching(true);
     setSearchError(null);
     setExtractionError(null);
@@ -678,8 +681,8 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                     <div className="space-y-1">
                       <h4 className="text-sm font-bold text-amber-900 dark:text-amber-200">
                         {similarResults.length > 0
-                          ? `No exact title match for “${searchQuery.trim()}” — pick a similar book above or upload your file`
-                          : `“${searchQuery.trim()}” wasn’t found in the public domain catalog`}
+                          ? `No exact title match for “${submittedQuery}” — pick a similar book above or upload your file`
+                          : `“${submittedQuery}” wasn’t found in the public domain catalog`}
                       </h4>
                       <p className="text-xs text-amber-800/90 dark:text-amber-300/80 leading-relaxed">
                         Upload your own <strong>.epub</strong> or <strong>.txt</strong> copy of the book below—Lumina will scan it right in your browser, extract its complex words along with the actual sentences from the book, and create your study dock.

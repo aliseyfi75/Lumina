@@ -41,6 +41,7 @@ export interface BookExtractedWord {
 const GUTENDEX_API_URL = 'https://gutendex.com/books';
 const OPEN_LIBRARY_SEARCH_URL = 'https://openlibrary.org/search.json';
 const GOOGLE_BOOKS_API_URL = 'https://www.googleapis.com/books/v1/volumes';
+const INTERNET_ARCHIVE_SEARCH_URL = 'https://archive.org/advancedsearch.php';
 const WIKISOURCE_API_URL = 'https://en.wikisource.org/w/api.php';
 const WIKIPEDIA_API_URL = 'https://en.wikipedia.org/w/api.php';
 const DATAMUSE_API_URL = 'https://api.datamuse.com/words';
@@ -330,6 +331,31 @@ The acrimonious testimony exposed the pernicious hypocrisy and entrenched antipa
 Guided by auspicious omens across the arid expanse of the desert, the intrepid shepherd pursued his destiny with indefatigable ardor.
 He learned that fear of suffering is more pernicious than suffering itself, and that the universe conspires to assist a resolute heart.
 In the tranquil oasis, an ineffable serenity enveloped his spirit as he contemplated the alchemy of transformation and universal harmony.
+`,
+  },
+  {
+    id: 90006,
+    title: 'The Art of Loving',
+    aliases: ['art of loving', 'erich fromm', 'fromm'],
+    authors: ['Erich Fromm'],
+    isModernBook: true,
+    excerpt: `
+Genuine love is not a passive sentiment or an ephemeral infatuation, but a deliberate discipline requiring humility, autonomous maturity, and unfeigned benevolence.
+To overcome existential alienation and solitary isolation, the individual must cultivate a productive orientation rooted in mutual solicitude, veracity, and discernment.
+Where narcissistic attachment and symbiotic dependence prevail, authentic intimacy degenerates into possessive domination or obsequious submission.
+Only through indefatigable practice, tranquil concentration, and fearless objectivity can a person transcend egoism and attain a harmonious union with humanity.
+`,
+  },
+  {
+    id: 90007,
+    title: "Man's Search for Meaning",
+    aliases: ['mans search for meaning', 'viktor frankl', 'logotherapy'],
+    authors: ['Viktor E. Frankl'],
+    isModernBook: true,
+    excerpt: `
+Even amidst the squalid deprivation and unremitting torment of the concentration camp, a person retains the irrevocable freedom to choose an autonomous attitude toward suffering.
+Those who discerned a transcendent purpose endured the most harrowing vicissitudes with indomitable resilience and tranquil dignity.
+Existential vacuum and pervasive apathy arise when humanity forfeits its intrinsic aspiration for meaning and succumbs to ephemeral conformity.
 `,
   },
   {
@@ -727,13 +753,18 @@ const queryGutendex = async (query: string): Promise<GutenbergBook[]> => {
   }
 };
 
-// Backup Provider 1: Open Library (supports both Public Domain and Modern Books)
+// Backup Provider 1: Open Library (supports both Public Domain and Modern Books; queries title= first for speed & precision)
 const queryOpenLibrary = async (query: string): Promise<GutenbergBook[]> => {
   try {
-    const url = `${OPEN_LIBRARY_SEARCH_URL}?q=${encodeURIComponent(query)}&limit=8&fields=key,title,author_name,cover_i,ia,id_project_gutenberg,first_publish_year,ebook_access,first_sentence`;
-    const response = await fetchWithTimeout(url, 4500);
-    if (!response.ok) return [];
-    const data = await response.json();
+    const fields = 'key,title,author_name,cover_i,ia,id_project_gutenberg,first_publish_year,ebook_access,first_sentence';
+    const titleUrl = `${OPEN_LIBRARY_SEARCH_URL}?title=${encodeURIComponent(query)}&limit=8&fields=${fields}`;
+    let response = await fetchWithTimeout(titleUrl, 5500);
+    let data = response.ok ? await response.json() : null;
+    if (!data || !Array.isArray(data.docs) || data.docs.length === 0) {
+      const qUrl = `${OPEN_LIBRARY_SEARCH_URL}?q=${encodeURIComponent(query)}&limit=8&fields=${fields}`;
+      response = await fetchWithTimeout(qUrl, 4500);
+      data = response.ok ? await response.json() : null;
+    }
     if (!data || !Array.isArray(data.docs)) return [];
 
     const books: GutenbergBook[] = [];
@@ -912,6 +943,111 @@ const queryWikisource = async (query: string): Promise<GutenbergBook[]> => {
   }
 };
 
+// Backup Provider 4: Internet Archive Texts Catalog (millions of books, native CORS, no API key)
+const queryInternetArchive = async (query: string): Promise<GutenbergBook[]> => {
+  try {
+    const iaQuery = `title:(${query}) AND mediatype:(texts)`;
+    const url = `${INTERNET_ARCHIVE_SEARCH_URL}?q=${encodeURIComponent(iaQuery)}&fl[]=identifier&fl[]=title&fl[]=creator&fl[]=description&rows=6&page=1&output=json`;
+    const response = await fetchWithTimeout(url, 4500);
+    if (!response.ok) return [];
+    const data = await response.json();
+    const docs = data?.response?.docs;
+    if (!Array.isArray(docs)) return [];
+
+    const books: GutenbergBook[] = [];
+    for (const doc of docs) {
+      if (!doc || typeof doc.title !== 'string' || typeof doc.identifier !== 'string') continue;
+      const cleanTitle = doc.title.replace(/\s*;.*$/, '').trim();
+      const iaId = String(doc.identifier);
+      const authors = Array.isArray(doc.creator)
+        ? doc.creator.slice(0, 2).map((c: any) => String(c))
+        : typeof doc.creator === 'string'
+          ? [doc.creator]
+          : ['Unknown Author'];
+      const description = Array.isArray(doc.description)
+        ? doc.description.join('\n\n')
+        : typeof doc.description === 'string'
+          ? doc.description
+          : undefined;
+
+      const classicMatch = CLASSIC_BOOKS_CATALOG.find(
+        c => normalizeSearchText(c.title.replace(/\s*;.*$/, '')) === normalizeSearchText(cleanTitle)
+      );
+      const effectiveId = classicMatch?.id || Math.abs(
+        cleanTitle.split('').reduce((acc: number, ch: string) => ((acc << 5) - acc + ch.charCodeAt(0)) | 0, 0)
+      );
+
+      books.push({
+        id: effectiveId,
+        title: cleanTitle,
+        authors,
+        coverUrl: `https://archive.org/services/img/${iaId}`,
+        textUrl: `${WIKIPEDIA_API_URL}?origin=*&action=query&prop=extracts&explaintext=1&titles=${encodeURIComponent(cleanTitle)}&redirects=1&format=json`,
+        source: 'Internet Archive',
+        iaId,
+        isModernBook: classicMatch ? classicMatch.isModernBook : true,
+        description,
+        fallbackExcerpt: classicMatch?.excerpt,
+      });
+
+      if (books.length >= 5) break;
+    }
+    return books;
+  } catch {
+    return [];
+  }
+};
+
+// Backup Provider 5: Wikipedia Notable Books Search (covers non-fiction, philosophy, psychology, and modern fiction)
+const queryWikipediaBooks = async (query: string): Promise<GutenbergBook[]> => {
+  try {
+    const url = `${WIKIPEDIA_API_URL}?origin=*&action=query&list=search&srsearch=${encodeURIComponent(`${query} book`)}&srlimit=4&format=json`;
+    const response = await fetchWithTimeout(url, 4000);
+    if (!response.ok) return [];
+    const data = await response.json();
+    const hits = data?.query?.search;
+    if (!Array.isArray(hits)) return [];
+
+    const books: GutenbergBook[] = [];
+    for (const hit of hits) {
+      const rawTitle = String(hit?.title || '').trim();
+      if (!rawTitle || rawTitle.startsWith('List of ') || rawTitle.startsWith('Category:')) continue;
+      const snippet = String(hit?.snippet || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      if (!/\b(?:book|novel|work|author|published|written|non-fiction|philosophy|memoir)\b/i.test(snippet + ' ' + rawTitle)) {
+        continue;
+      }
+
+      const cleanTitle = rawTitle.replace(/\s*\((?:book|novel|memoir|[^)]*book[^)]*)\)\s*$/i, '').trim();
+      const sim = computeBookSimilarity(query, cleanTitle);
+      if (sim < 0.65) continue;
+
+      const classicMatch = CLASSIC_BOOKS_CATALOG.find(
+        c => normalizeSearchText(c.title.replace(/\s*;.*$/, '')) === normalizeSearchText(cleanTitle)
+      );
+      const effectiveId = classicMatch?.id || Number(hit.pageid) || Math.abs(
+        cleanTitle.split('').reduce((acc: number, ch: string) => ((acc << 5) - acc + ch.charCodeAt(0)) | 0, 0)
+      );
+
+      books.push({
+        id: effectiveId,
+        title: cleanTitle,
+        authors: classicMatch?.authors || ['Wikipedia Literary Catalog'],
+        coverUrl: classicMatch?.coverUrl,
+        textUrl: `${WIKIPEDIA_API_URL}?origin=*&action=query&prop=extracts&explaintext=1&titles=${encodeURIComponent(rawTitle)}&redirects=1&format=json`,
+        source: 'Wikipedia Books',
+        isModernBook: true,
+        description: snippet || undefined,
+        fallbackExcerpt: classicMatch?.excerpt,
+      });
+
+      if (books.length >= 3) break;
+    }
+    return books;
+  } catch {
+    return [];
+  }
+};
+
 export const searchPublicDomainBooks = async (query: string): Promise<BookSearchResponse> => {
   const cleanQuery = query.trim();
   if (!cleanQuery) return { exactMatches: [], similarMatches: [] };
@@ -941,17 +1077,25 @@ export const searchPublicDomainBooks = async (query: string): Promise<BookSearch
     return { book, sim };
   }).sort((a, b) => b.sim - a.sim);
 
-  // 2. Query Gutendex, Open Library, Google Books, and Wikisource in parallel
-  const [gutendexBooks, openLibraryBooks, googleBooks, wikisourceBooks] = await Promise.all([
+  // 2. Query Gutendex, Open Library, Google Books, Internet Archive, Wikisource, and Wikipedia Books in parallel
+  const [gutendexBooks, openLibraryBooks, googleBooks, iaBooks, wikisourceBooks, wikiBooks] = await Promise.all([
     queryGutendex(cleanQuery),
     queryOpenLibrary(cleanQuery),
     queryGoogleBooks(cleanQuery),
+    queryInternetArchive(cleanQuery),
     queryWikisource(cleanQuery),
+    queryWikipediaBooks(cleanQuery),
   ]);
 
   let additionalBooks: GutenbergBook[] = [];
   // 3. If primary providers returned nothing (e.g. typo in query), try spell-corrected query
-  if (gutendexBooks.length === 0 && openLibraryBooks.length === 0 && googleBooks.length === 0) {
+  if (
+    gutendexBooks.length === 0 &&
+    openLibraryBooks.length === 0 &&
+    googleBooks.length === 0 &&
+    iaBooks.length === 0 &&
+    wikiBooks.length === 0
+  ) {
     const suggestedQuery = await fetchSpellingSuggestion(cleanQuery);
     if (suggestedQuery) {
       const [retryGutendex, retryOpenLib, retryGoogle] = await Promise.all([
@@ -996,13 +1140,15 @@ export const searchPublicDomainBooks = async (query: string): Promise<BookSearch
     }
   };
 
-  // Prioritize Gutendex direct results, then strong Classic/Modern matches, then Open Library, Google Books & Wikisource
+  // Prioritize Gutendex direct results, then strong Classic/Modern matches, then Open Library, Google Books, Internet Archive, Wikipedia & Wikisource
   for (const b of gutendexBooks) addCandidate(b, true);
   for (const { book, sim } of scoredClassics) {
     if (sim >= 0.55) addCandidate(book);
   }
   for (const b of openLibraryBooks) addCandidate(b);
   for (const b of googleBooks) addCandidate(b);
+  for (const b of iaBooks) addCandidate(b);
+  for (const b of wikiBooks) addCandidate(b);
   for (const b of additionalBooks) addCandidate(b);
   for (const b of wikisourceBooks) addCandidate(b);
 

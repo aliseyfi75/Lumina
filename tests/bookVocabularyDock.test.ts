@@ -155,6 +155,14 @@ test('supports Tier 1 Gutenberg book vocabulary extraction with real book senten
     });
   });
 
+  await page.route('https://archive.org/advancedsearch.php**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ response: { docs: [] } }),
+    });
+  });
+
   await page.route('https://api.datamuse.com/sug**', async (route) => {
     await route.fulfill({
       status: 200,
@@ -441,6 +449,14 @@ test('supports backup catalog providers when Gutendex fails and shows fuzzy Simi
     });
   });
 
+  await page.route('https://archive.org/advancedsearch.php**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ response: { docs: [] } }),
+    });
+  });
+
   await page.route('https://api.datamuse.com/sug**', async (route) => {
     await route.fulfill({
       status: 200,
@@ -611,4 +627,12 @@ test('supports backup catalog providers when Gutendex fails and shows fuzzy Simi
   await expect(page.getByText('Ignominious', { exact: true })).toBeVisible();
   await expect(page.getByText('Redemption', { exact: true })).toBeVisible();
   await expect(page.getByText('Trepidation', { exact: true })).toBeVisible();
+
+  // 4. Go back and search for "the art of loving" -> finds "The Art of Loving" by Erich Fromm
+  await page.getByRole('button', { name: /Back to book search/i }).click();
+  await page.getByLabel('Search book title').fill('the art of loving');
+  await page.getByRole('button', { name: /Find Book/i }).click();
+
+  await expect(exactSection.getByText('The Art of Loving')).toBeVisible();
+  await expect(exactSection.getByText('Erich Fromm')).toBeVisible();
 });

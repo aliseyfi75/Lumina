@@ -80,6 +80,8 @@ export interface CloudData {
   longestStreak?: number;
   /** id → Unix-ms when the card was deleted. Tombstones are pruned after 30 days. */
   deletedCards?: Record<string, number>;
+  /** Persisted Pantry connection config in IndexedDB so refresh never loses connection */
+  cloudConfig?: CloudConfig | null;
   chunkCount?: number;
   basketExists?: boolean;
   lastAccessedAt?: number;

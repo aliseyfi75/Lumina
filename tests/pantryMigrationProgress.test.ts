@@ -116,4 +116,15 @@ test('displays step-by-step progress bar when connecting and migrating Pantry ID
 
   await expect(page.getByText(/Connected & merged 1 local \+ 1 cloud cards/i)).toBeVisible({ timeout: 8000 });
   await expect(progressContainer).toBeHidden();
+
+  // Simulate localStorage eviction of lumina_cloud_config and reload the page — IndexedDB must restore the Pantry connection
+  await page.evaluate(() => {
+    localStorage.removeItem('lumina_cloud_config');
+  });
+
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'My Deck' })).toBeVisible();
+
+  await page.getByTitle('Manage Data').click();
+  await expect(page.getByText('11111111-2222-3333-4444-555555555555')).toBeVisible();
 });

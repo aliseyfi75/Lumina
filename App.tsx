@@ -102,8 +102,61 @@ const App: React.FC = () => {
   const [pendingHandle, setPendingHandle] = useState<FileSystemFileHandle | null>(null); // needs permission re-grant
   const [isFileSaving, setIsFileSaving] = useState(false);
 
-  // Cloud Sync State
-  const [cloudConfig, setCloudConfig] = useState<CloudConfig | null>(null);
+  // Cloud Sync State — initialize synchronously from localStorage so page refresh never shows as disconnected
+  const [cloudConfig, setCloudConfig] = useState<CloudConfig | null>(() => {
+    try {
+      const saved = localStorage.getItem(CLOUD_CONFIG_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed.pantryId === 'string' && parsed.pantryId.trim()) {
+          return { pantryId: parsed.pantryId.trim() };
+        }
+      }
+    } catch {
+      // ignore parse errors
+    }
+    return null;
+  });
+  const cloudConfigRef = useRef<CloudConfig | null>(cloudConfig);
+  useEffect(() => {
+    cloudConfigRef.current = cloudConfig;
+  }, [cloudConfig]);
+
+  const persistCloudConfigToLocalStorage = (config: CloudConfig | null) => {
+    try {
+      if (!config) {
+        localStorage.removeItem(CLOUD_CONFIG_KEY);
+      } else {
+        localStorage.setItem(CLOUD_CONFIG_KEY, JSON.stringify(config));
+      }
+    } catch {
+      // If localStorage quota was exhausted by large lumina_cards_v1 backup, free it (IDB holds full deck) and retry
+      try {
+        localStorage.removeItem(LOCAL_STORAGE_KEY);
+        if (config) {
+          localStorage.setItem(CLOUD_CONFIG_KEY, JSON.stringify(config));
+        }
+      } catch (retryErr) {
+        console.warn('Could not persist cloudConfig to localStorage:', retryErr);
+      }
+    }
+  };
+
+  const persistCardsToLocalStorageSafe = (cardsToSave: Flashcard[]) => {
+    try {
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(cardsToSave));
+    } catch {
+      // Deck exceeds 5 MB localStorage quota — IndexedDB is the primary store, keep CLOUD_CONFIG_KEY intact
+      try {
+        localStorage.removeItem(LOCAL_STORAGE_KEY);
+        if (cloudConfigRef.current) {
+          localStorage.setItem(CLOUD_CONFIG_KEY, JSON.stringify(cloudConfigRef.current));
+        }
+      } catch {
+        // ignore
+      }
+    }
+  };
   const [isCloudSaving, setIsCloudSaving] = useState(false);
   const [isSyncingOffline, setIsSyncingOffline] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -309,13 +362,17 @@ const App: React.FC = () => {
         Array.isArray(idbData.cards) &&
         (idbData.cards.length > 0 ||
           Object.keys(idbData.deletedCards ?? {}).length > 0 ||
-          Object.keys(idbData.studyHistory ?? {}).length > 0)
+          Object.keys(idbData.studyHistory ?? {}).length > 0 ||
+          !!idbData.cloudConfig?.pantryId)
       ) {
         initialCards = idbData.cards;
         initialStudyHistory = idbData.studyHistory ?? {};
         initialLongestStreak = idbData.longestStreak ?? 0;
         initialDeletedCards = idbData.deletedCards ?? {};
-        hasExistingUserStore = true;
+        hasExistingUserStore =
+          idbData.cards.length > 0 ||
+          Object.keys(idbData.deletedCards ?? {}).length > 0 ||
+          Object.keys(idbData.studyHistory ?? {}).length > 0;
       } else {
         // Step A-fallback: migrate from localStorage (existing users)
         const savedCards = localStorage.getItem(LOCAL_STORAGE_KEY);
@@ -386,64 +443,74 @@ const App: React.FC = () => {
       cardsRef.current = initialCards;
       setCards(initialCards);
 
-      // Step C: Check Cloud Config, Merge, and Send Keep-Alive Ping so Pantry never expires
+      // Step C: Check Cloud Config (from localStorage OR IndexedDB backup), Merge, and Send Keep-Alive Ping
+      let resolvedCloudConfig: CloudConfig | null = null;
       const savedCloudConfig = localStorage.getItem(CLOUD_CONFIG_KEY);
-      if (savedCloudConfig && !hasInitializedCloudRef.current) {
-        hasInitializedCloudRef.current = true;
+      if (savedCloudConfig) {
         try {
-          const config = JSON.parse(savedCloudConfig);
-          if (config.pantryId) {
-            const cloudData = await getDeck(config.pantryId);
-            const cloudHadDeletedCards = (cloudData.cards ?? []).some(c => {
-              const delAt = deletedCardsRef.current.get(c.id) ?? 0;
-              const cardTs = Math.max(c.updatedAt ?? 0, c.lastReviewed ?? 0, c.createdAt ?? 0);
-              return delAt > 0 && delAt >= cardTs;
+          const parsed = JSON.parse(savedCloudConfig);
+          if (parsed?.pantryId && String(parsed.pantryId).trim()) {
+            resolvedCloudConfig = { pantryId: String(parsed.pantryId).trim() };
+          }
+        } catch {
+          // ignore
+        }
+      }
+      if (!resolvedCloudConfig && idbData?.cloudConfig?.pantryId) {
+        resolvedCloudConfig = { pantryId: idbData.cloudConfig.pantryId.trim() };
+        persistCloudConfigToLocalStorage(resolvedCloudConfig);
+      }
+
+      if (resolvedCloudConfig && !hasInitializedCloudRef.current) {
+        hasInitializedCloudRef.current = true;
+        // Set cloudConfig immediately BEFORE awaiting getDeck so refreshing never shows as disconnected
+        cloudConfigRef.current = resolvedCloudConfig;
+        setCloudConfig(resolvedCloudConfig);
+        initializeTracking(resolvedCloudConfig.pantryId);
+
+        try {
+          const cloudData = await getDeck(resolvedCloudConfig.pantryId);
+          const cloudHadDeletedCards = (cloudData.cards ?? []).some(c => {
+            const delAt = deletedCardsRef.current.get(c.id) ?? 0;
+            const cardTs = Math.max(c.updatedAt ?? 0, c.lastReviewed ?? 0, c.createdAt ?? 0);
+            return delAt > 0 && delAt >= cardTs;
+          });
+
+          if (
+            (cloudData.cards && cloudData.cards.length > 0) ||
+            (cloudData.deletedCards && Object.keys(cloudData.deletedCards).length > 0)
+          ) {
+            performMerge(cloudData.cards ?? [], cloudData.deletedCards ?? {});
+          }
+
+          if (cloudData.studyHistory) {
+            setStudyHistory(prev => {
+              const merged = { ...prev };
+              for (const [date, count] of Object.entries(cloudData.studyHistory!)) {
+                merged[date] = Math.max(merged[date] || 0, count);
+              }
+              return merged;
             });
+          }
 
-            if (
-              (cloudData.cards && cloudData.cards.length > 0) ||
-              (cloudData.deletedCards && Object.keys(cloudData.deletedCards).length > 0)
-            ) {
-              performMerge(cloudData.cards ?? [], cloudData.deletedCards ?? {});
-            }
+          if (cloudData.longestStreak) {
+            setLongestStreak(prev => Math.max(prev, cloudData.longestStreak!));
+          }
 
-            if (cloudData.studyHistory) {
-              setStudyHistory(prev => {
-                const merged = { ...prev };
-                for (const [date, count] of Object.entries(cloudData.studyHistory!)) {
-                  merged[date] = Math.max(merged[date] || 0, count);
-                }
-                return merged;
-              });
-            }
+          // Only skip auto-save if Pantry did NOT still hold locally-deleted cards
+          skipNextCloudAutoSaveRef.current = !cloudHadDeletedCards;
 
-            if (cloudData.longestStreak) {
-              setLongestStreak(prev => Math.max(prev, cloudData.longestStreak!));
-            }
-
-            // Only skip auto-save if Pantry did NOT still hold locally-deleted cards
-            skipNextCloudAutoSaveRef.current = !cloudHadDeletedCards;
-            setCloudConfig(config);
-            initializeTracking(config.pantryId);
-
-            // Always send a keep-alive write to Pantry when the user opens the app
-            // so the Pantry ID and baskets refresh their 30-day TTL even if no card status changes.
-            if (navigator.onLine && !cloudHadDeletedCards) {
-              lastKeepAliveRef.current = Date.now();
-              void keepAlivePantry(config.pantryId, cloudData.chunkCount ?? 1);
-            }
-          } else {
-            initializeTracking();
+          // Always send a keep-alive write to Pantry when the user opens the app
+          // so the Pantry ID and baskets refresh their 30-day TTL even if no card status changes.
+          if (navigator.onLine && !cloudHadDeletedCards) {
+            lastKeepAliveRef.current = Date.now();
+            void keepAlivePantry(resolvedCloudConfig.pantryId, cloudData.chunkCount ?? 1);
           }
         } catch (e) {
           console.error('Failed to load cloud backup on init', e);
-          if (savedCloudConfig) {
-            skipNextCloudAutoSaveRef.current = true;
-            setCloudConfig(JSON.parse(savedCloudConfig));
-          }
-          initializeTracking();
+          skipNextCloudAutoSaveRef.current = true;
         }
-      } else if (!savedCloudConfig) {
+      } else if (!resolvedCloudConfig) {
         initializeTracking();
       }
 
@@ -488,7 +555,13 @@ const App: React.FC = () => {
   // 2. Persist to IndexedDB (primary store) and keep localStorage in sync for safety
   useEffect(() => {
     if (!isDataLoaded) return; // don't overwrite IDB before initial load finishes
-    const data = { cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() };
+    const data = {
+      cards,
+      studyHistory,
+      longestStreak,
+      deletedCards: prunedDeletedCards(),
+      cloudConfig: cloudConfigRef.current,
+    };
     saveAppDataToIDB(data)
       .then(() => {
         setLastSavedAt(Date.now());
@@ -496,9 +569,9 @@ const App: React.FC = () => {
         getStorageEstimate().then(est => { if (est) setStorageEstimate(est); });
       })
       .catch(console.error);
-    // Keep localStorage as a secondary safety net (small overhead)
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(cards));
-  }, [cards, studyHistory, longestStreak, deletedCards, isDataLoaded]);
+    // Keep localStorage as a secondary safety net without starving CLOUD_CONFIG_KEY of quota
+    persistCardsToLocalStorageSafe(cards);
+  }, [cards, studyHistory, longestStreak, deletedCards, cloudConfig, isDataLoaded]);
 
   // Track online / offline status
   useEffect(() => {
@@ -862,8 +935,16 @@ const App: React.FC = () => {
 
       skipNextCloudAutoSaveRef.current = true;
       const config = { pantryId: cleanNewId };
+      cloudConfigRef.current = config;
       setCloudConfig(config);
-      localStorage.setItem(CLOUD_CONFIG_KEY, JSON.stringify(config));
+      persistCloudConfigToLocalStorage(config);
+      saveAppDataToIDB({
+        cards: mergedCards,
+        studyHistory: mergedHistory,
+        longestStreak: mergedStreak,
+        deletedCards: mergedDeletedRecord,
+        cloudConfig: config,
+      }).catch(console.error);
       setTrackingUserId(cleanNewId);
       trackEvent(TRACKING_ACTION.CONNECT_CLOUD, TRACKING_CATEGORY.CLOUD);
 
@@ -895,11 +976,19 @@ const App: React.FC = () => {
   };
 
   const handleDisconnectCloud = () => {
+    cloudConfigRef.current = null;
     setCloudConfig(null);
     setPendingCloudSync(false);
     setIsCloudSaving(false);
     setIsSyncingOffline(false);
-    localStorage.removeItem(CLOUD_CONFIG_KEY);
+    persistCloudConfigToLocalStorage(null);
+    saveAppDataToIDB({
+      cards: cardsRef.current,
+      studyHistory,
+      longestStreak,
+      deletedCards: prunedDeletedCards(),
+      cloudConfig: null,
+    }).catch(console.error);
     trackEvent(TRACKING_ACTION.DISCONNECT_CLOUD, TRACKING_CATEGORY.CLOUD);
   };
 
@@ -1166,12 +1255,13 @@ const App: React.FC = () => {
 
   const syncDeletionImmediately = (nextCards: Flashcard[], nextDeletedRecord: Record<string, number>) => {
     // 1. Immediately persist to IndexedDB & localStorage
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(nextCards));
+    persistCardsToLocalStorageSafe(nextCards);
     saveAppDataToIDB({
       cards: nextCards,
       studyHistory,
       longestStreak,
       deletedCards: nextDeletedRecord,
+      cloudConfig: cloudConfigRef.current,
     })
       .then(() => setLastSavedAt(Date.now()))
       .catch(console.error);

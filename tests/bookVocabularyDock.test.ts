@@ -348,6 +348,26 @@ test('supports Tier 1 Gutenberg book vocabulary extraction with real book senten
   const tagSelect = page.getByLabel('Study tag filter');
   await expect(tagSelect).toBeVisible();
   await expect(tagSelect).toHaveValue('Book: Dune');
+
+  // Start the study session for Dune and verify the Book Sentence Hint before flipping the card
+  await page.getByRole('button', { name: /Start Full Session/i }).click();
+
+  const hintBtn = page.getByTestId('book-hint-button');
+  await expect(hintBtn).toBeVisible();
+  await expect(hintBtn).toContainText('Show Book Hint');
+
+  // Click "Show Book Hint" without flipping the card
+  await hintBtn.click();
+
+  const hintContent = page.getByTestId('book-hint-content');
+  await expect(hintContent).toBeVisible();
+  await expect(hintContent).toContainText('From Dune');
+  await expect(hintContent.locator('mark')).toBeVisible();
+
+  await page.waitForTimeout(300);
+  await page.screenshot({
+    path: '/Users/aliseyfi/.gemini/antigravity/brain/a96b9d77-0d1a-4784-ac20-758650393c58/scratch/feature_study_book_hint.png',
+  });
 });
 
 test('supports backup catalog providers when Gutendex fails and shows fuzzy Similar Books when searching with typos', async ({ page }) => {

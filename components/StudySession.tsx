@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Flashcard, FlashcardStatus } from '../types';
-import { RotateCw, CheckCircle, Brain, ArrowLeft, Volume2, MoveUp, MoveDown, MoveLeft, MoveRight, XCircle, ArrowRight, ListChecks, Undo2, RefreshCw } from 'lucide-react';
+import { RotateCw, CheckCircle, Brain, ArrowLeft, Volume2, MoveUp, MoveDown, MoveLeft, MoveRight, XCircle, ArrowRight, ListChecks, Undo2, RefreshCw, Lightbulb, BookOpen } from 'lucide-react';
 import Confetti from 'react-confetti';
 import { useWindowSize } from 'react-use';
 import { motion, useMotionValue, useTransform, PanInfo, AnimatePresence } from 'framer-motion';
@@ -35,6 +35,7 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
   const [queue, setQueue] = useState<Flashcard[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
+  const [showBookHint, setShowBookHint] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
   const [selectedQuizOption, setSelectedQuizOption] = useState<string | null>(null);
   const [reviewHistory, setReviewHistory] = useState<ReviewHistoryItem[]>([]);
@@ -74,6 +75,40 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
   }, [cards, isInitialized, sessionConfig]);
 
   const currentCard = queue[currentIndex];
+
+  // Determine if the current card comes from a Book dock and has a real sentence from the book
+  const bookSourceTitle = useMemo(() => {
+    if (!currentCard?.example?.trim()) return null;
+    const bookTag = currentCard.tags?.find(t => /^book\s*:/i.test(t.trim()));
+    if (!bookTag) return null;
+    return bookTag.replace(/^book\s*:\s*/i, '').trim() || 'Book';
+  }, [currentCard]);
+
+  const renderHighlightedBookSentence = useCallback((sentence: string, targetWord: string) => {
+    const cleanWord = targetWord.trim();
+    if (!cleanWord) return <>“{sentence}”</>;
+    const escaped = cleanWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(${escaped}[a-zA-Z]*)`, 'gi');
+    const parts = sentence.split(regex);
+    return (
+      <>
+        “
+        {parts.map((part, i) =>
+          part.toLowerCase().startsWith(cleanWord.toLowerCase()) ? (
+            <mark
+              key={i}
+              className="bg-amber-200/80 dark:bg-amber-500/30 text-amber-950 dark:text-amber-200 font-bold px-1 rounded not-italic"
+            >
+              {part}
+            </mark>
+          ) : (
+            <React.Fragment key={i}>{part}</React.Fragment>
+          )
+        )}
+        ”
+      </>
+    );
+  }, []);
 
   // Build 4 deterministic multiple-choice options for the current quiz card
   const quizOptions = useMemo(() => {
@@ -150,6 +185,7 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
 
     // Flip back first
     setIsFlipped(false);
+    setShowBookHint(false);
     setSelectedQuizOption(null);
 
     // Wait for flip to partially complete before changing content
@@ -183,6 +219,7 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
     x.set(0);
     y.set(0);
     setIsFlipped(false);
+    setShowBookHint(false);
     setSelectedQuizOption(null);
     setShowConfetti(false);
     setCurrentIndex(lastEntry.index);
@@ -200,6 +237,7 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
     setCurrentIndex(0);
     setReviewHistory([]);
     setIsFlipped(false);
+    setShowBookHint(false);
     setSelectedQuizOption(null);
     setShowConfetti(false);
   }, []);
@@ -218,6 +256,14 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
       }
 
       if (!currentCard) return;
+
+      if (!e.metaKey && !e.ctrlKey && !e.altKey && e.key.toLowerCase() === 'h' && bookSourceTitle) {
+        if (!isFlipped && (!isQuizMode || selectedQuizOption === null)) {
+          e.preventDefault();
+          setShowBookHint(prev => !prev);
+          return;
+        }
+      }
 
       if (isQuizMode) {
         if (selectedQuizOption === null) {
@@ -254,7 +300,7 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleNext, handleUndo, reviewHistory.length, currentCard, isFlipped, isQuizMode, selectedQuizOption, quizOptions, handleSelectQuizOption]);
+  }, [handleNext, handleUndo, reviewHistory.length, currentCard, isFlipped, isQuizMode, selectedQuizOption, quizOptions, handleSelectQuizOption, bookSourceTitle]);
 
   const handleDragEnd = (_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
     if (!isFlipped) return;
@@ -444,6 +490,44 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
                   <Volume2 className="h-4 w-4" />
                 </button>
               </div>
+
+              {bookSourceTitle && currentCard.example && (
+                <div className="pt-2 flex flex-col items-center">
+                  {!showBookHint ? (
+                    <button
+                      type="button"
+                      data-testid="book-hint-button"
+                      onClick={() => setShowBookHint(true)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 hover:bg-amber-100 dark:hover:bg-amber-900/50 transition-colors"
+                    >
+                      <Lightbulb className="h-3.5 w-3.5 text-amber-500" />
+                      Show Book Hint
+                    </button>
+                  ) : (
+                    <div
+                      data-testid="book-hint-content"
+                      className="w-full mt-1 p-3.5 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-800/60 text-left space-y-1.5"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">
+                          <BookOpen className="h-3 w-3" />
+                          From {bookSourceTitle}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setShowBookHint(false)}
+                          className="text-[11px] font-semibold text-amber-700/80 dark:text-amber-400/80 hover:underline"
+                        >
+                          Hide Hint
+                        </button>
+                      </div>
+                      <p className="text-xs sm:text-sm italic font-serif text-slate-700 dark:text-slate-200 leading-relaxed">
+                        {renderHighlightedBookSentence(currentCard.example, currentCard.word)}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="space-y-3">
@@ -578,6 +662,54 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
                     <Volume2 className="h-6 w-6" />
                   </button>
                 </div>
+
+                {bookSourceTitle && currentCard.example && (
+                  <div
+                    className="mt-6 w-full flex flex-col items-center"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {!showBookHint ? (
+                      <button
+                        type="button"
+                        data-testid="book-hint-button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setShowBookHint(true);
+                        }}
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-semibold bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 hover:bg-amber-100 dark:hover:bg-amber-900/50 transition-all shadow-sm"
+                      >
+                        <Lightbulb className="h-3.5 w-3.5 text-amber-500" />
+                        <span>Show Book Hint</span>
+                        <span className="text-[10px] opacity-60 font-mono">(H)</span>
+                      </button>
+                    ) : (
+                      <div
+                        data-testid="book-hint-content"
+                        className="w-full p-4 rounded-2xl bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 text-left space-y-2 animate-in fade-in zoom-in-95 duration-150"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">
+                            <BookOpen className="h-3 w-3 shrink-0" />
+                            <span className="truncate">From {bookSourceTitle}</span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setShowBookHint(false);
+                            }}
+                            className="text-[11px] font-semibold text-amber-700/80 dark:text-amber-400/80 hover:underline shrink-0"
+                          >
+                            Hide Hint
+                          </button>
+                        </div>
+                        <p className="text-sm italic font-serif text-slate-700 dark:text-slate-200 leading-relaxed max-h-28 overflow-y-auto custom-scrollbar">
+                          {renderHighlightedBookSentence(currentCard.example, currentCard.word)}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="absolute bottom-10 text-slate-300 dark:text-slate-600 flex items-center gap-2 opacity-50 group-hover:opacity-100 transition-opacity z-10">

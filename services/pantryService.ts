@@ -172,11 +172,17 @@ export interface PantryDetails {
 export interface CloudSyncProgress {
   percent: number;
   step: string;
+  estimatedRemainingSec?: number;
 }
 
 export interface ChunkProgressInfo {
   currentChunk: number;
   totalChunks: number;
+  completedSteps?: number;
+  totalSteps?: number;
+  percent?: number;
+  step?: string;
+  estimatedRemainingSec?: number;
 }
 
 const getBasketName = (b: { name?: string } | string): string =>
@@ -266,7 +272,25 @@ export const getDeck = async (
       }
     }
 
-    options?.onProgress?.({ currentChunk: 1, totalChunks: chunkCount });
+    const defaultGetStepMs = Math.max(1200, rateLimitDelayMs + 700);
+    const estimateDownloadRemainingSec = (completedChunks: number, totalChunksCount: number): number => {
+      const remaining = Math.max(0, totalChunksCount - completedChunks);
+      if (remaining === 0) return 0;
+      return Math.max(1, Math.ceil((remaining * defaultGetStepMs) / 1000));
+    };
+
+    options?.onProgress?.({
+      currentChunk: 1,
+      totalChunks: chunkCount,
+      completedSteps: chunkCount === 1 ? 0 : 1,
+      totalSteps: chunkCount,
+      percent: chunkCount === 1 ? 85 : Math.round((1 / chunkCount) * 100),
+      step:
+        chunkCount > 1
+          ? `Loading cloud chunk 1 of ${chunkCount}...`
+          : 'Loading flashcards from Cloud...',
+      estimatedRemainingSec: chunkCount === 1 ? 1 : estimateDownloadRemainingSec(1, chunkCount),
+    });
 
     // Fetch additional card chunks if the deck was split across multiple baskets
     for (let i = 1; i < chunkCount; i++) {
@@ -276,7 +300,15 @@ export const getDeck = async (
       ) {
         continue;
       }
-      options?.onProgress?.({ currentChunk: i + 1, totalChunks: chunkCount });
+      options?.onProgress?.({
+        currentChunk: i + 1,
+        totalChunks: chunkCount,
+        completedSteps: i,
+        totalSteps: chunkCount,
+        percent: Math.min(95, Math.round(((i + 0.4) / chunkCount) * 100)),
+        step: `Loading cloud chunk ${i + 1} of ${chunkCount}...`,
+        estimatedRemainingSec: estimateDownloadRemainingSec(i, chunkCount),
+      });
       const chunkRes = await fetchWithRetry(
         `${BASE_URL}/${cleanId}/basket/${BASKET_NAME}_${i}?t=${Date.now()}`,
         {
@@ -374,9 +406,24 @@ export const keepAlivePantry = async (pantryId: string, chunkCount?: number): Pr
 const cleanupStaleOverflowChunks = async (
   cleanId: string,
   previousChunkCount: number,
-  newChunkCount: number
+  newChunkCount: number,
+  onProgress?: (info: ChunkProgressInfo) => void,
+  totalStepsCount?: number,
+  computeRemainingSec?: (completedSteps: number, totalSteps: number) => number
 ) => {
-  for (let i = Math.max(1, newChunkCount); i < previousChunkCount; i++) {
+  const startChunk = Math.max(1, newChunkCount);
+  const totalSteps = totalStepsCount ?? previousChunkCount;
+  for (let i = startChunk; i < previousChunkCount; i++) {
+    const stepIndex = i + 1; // 1-based step index across all upload + cleanup steps
+    onProgress?.({
+      currentChunk: newChunkCount,
+      totalChunks: newChunkCount,
+      completedSteps: i,
+      totalSteps,
+      percent: Math.min(96, Math.round(((i + 0.4) / Math.max(1, totalSteps)) * 100)),
+      step: `Cleaning old cloud data (${stepIndex}/${totalSteps})...`,
+      estimatedRemainingSec: computeRemainingSec ? computeRemainingSec(i, totalSteps) : Math.max(1, (totalSteps - i) * 2),
+    });
     await fetchWithRetry(
       `${BASE_URL}/${cleanId}/basket/${BASKET_NAME}_${i}`,
       {
@@ -421,6 +468,22 @@ const pushDeckWithChunkLimit = async (
 ) => {
   const previousChunkCount = knownChunkCounts.get(cleanId) ?? cloudData.chunkCount ?? 1;
   const now = Date.now();
+  const syncStartTime = Date.now();
+
+  const computeRemainingSec = (completedSteps: number, totalSteps: number): number => {
+    const remainingSteps = Math.max(0, totalSteps - completedSteps);
+    if (remainingSteps === 0) return 0;
+    const defaultStepMs = Math.max(1200, rateLimitDelayMs + 750);
+    if (completedSteps > 0) {
+      const elapsedMs = Date.now() - syncStartTime;
+      const avgStepMs = Math.max(1000, Math.min(4000, elapsedMs / completedSteps));
+      return Math.max(1, Math.ceil((remainingSteps * avgStepMs) / 1000));
+    }
+    const firstStepMs = immediate ? 1200 : defaultStepMs;
+    const totalMs = firstStepMs + Math.max(0, remainingSteps - 1) * defaultStepMs;
+    return Math.max(1, Math.ceil(totalMs / 1000));
+  };
+
   const fullPayload = JSON.stringify({
     cards: sanitizedCards,
     studyHistory: cloudData.studyHistory,
@@ -440,7 +503,22 @@ const pushDeckWithChunkLimit = async (
 
   // Fast path: fits in a single basket under maxBasketBytes
   if (totalBytes <= maxBasketBytes) {
-    onProgress?.({ currentChunk: 1, totalChunks: 1 });
+    const staleChunksToDelete = Math.max(0, previousChunkCount - 1);
+    const totalSteps = 1 + staleChunksToDelete;
+    onProgress?.({
+      currentChunk: 1,
+      totalChunks: 1,
+      completedSteps: 0,
+      totalSteps,
+      percent: totalSteps === 1 ? 25 : Math.max(10, Math.round((0.4 / totalSteps) * 100)),
+      step:
+        totalSteps > 1
+          ? `Uploading flashcards (1/${totalSteps})...`
+          : sanitizedCards.length > 0
+            ? `Uploading ${sanitizedCards.length} flashcards...`
+            : 'Updating cloud storage...',
+      estimatedRemainingSec: computeRemainingSec(0, totalSteps),
+    });
     const response = await fetchWithRetry(
       `${BASE_URL}/${cleanId}/basket/${BASKET_NAME}`,
       {
@@ -462,7 +540,14 @@ const pushDeckWithChunkLimit = async (
     }
     knownChunkCounts.set(cleanId, 1);
     if (previousChunkCount > 1) {
-      await cleanupStaleOverflowChunks(cleanId, previousChunkCount, 1);
+      await cleanupStaleOverflowChunks(
+        cleanId,
+        previousChunkCount,
+        1,
+        onProgress,
+        totalSteps,
+        computeRemainingSec
+      );
     }
     return;
   }
@@ -488,9 +573,19 @@ const pushDeckWithChunkLimit = async (
   const restChunks =
     remainingCards.length > 0 ? splitCardsIntoChunks(remainingCards, maxBasketBytes - 512) : [];
   const allChunks = [chunk0, ...restChunks];
+  const staleChunksToDelete = Math.max(0, previousChunkCount - allChunks.length);
+  const totalSteps = allChunks.length + staleChunksToDelete;
 
   // 1. Save main basket (chunk 0 + metadata + chunkCount)
-  onProgress?.({ currentChunk: 1, totalChunks: allChunks.length });
+  onProgress?.({
+    currentChunk: 1,
+    totalChunks: allChunks.length,
+    completedSteps: 0,
+    totalSteps,
+    percent: Math.max(8, Math.round((0.4 / totalSteps) * 100)),
+    step: `Uploading chunk 1 of ${allChunks.length}...`,
+    estimatedRemainingSec: computeRemainingSec(0, totalSteps),
+  });
   const mainBody = JSON.stringify({
     cards: allChunks[0],
     studyHistory: cloudData.studyHistory,
@@ -520,7 +615,15 @@ const pushDeckWithChunkLimit = async (
 
   // 2. Save overflow chunks sequentially with rate-limit spacing
   for (let i = 1; i < allChunks.length; i++) {
-    onProgress?.({ currentChunk: i + 1, totalChunks: allChunks.length });
+    onProgress?.({
+      currentChunk: i + 1,
+      totalChunks: allChunks.length,
+      completedSteps: i,
+      totalSteps,
+      percent: Math.min(95, Math.round(((i + 0.4) / totalSteps) * 100)),
+      step: `Uploading chunk ${i + 1} of ${allChunks.length}...`,
+      estimatedRemainingSec: computeRemainingSec(i, totalSteps),
+    });
     const chunkRes = await fetchWithRetry(`${BASE_URL}/${cleanId}/basket/${BASKET_NAME}_${i}`, {
       ...FETCH_OPTIONS,
       method: 'POST',
@@ -536,7 +639,14 @@ const pushDeckWithChunkLimit = async (
 
   knownChunkCounts.set(cleanId, allChunks.length);
   if (previousChunkCount > allChunks.length) {
-    await cleanupStaleOverflowChunks(cleanId, previousChunkCount, allChunks.length);
+    await cleanupStaleOverflowChunks(
+      cleanId,
+      previousChunkCount,
+      allChunks.length,
+      onProgress,
+      totalSteps,
+      computeRemainingSec
+    );
   }
 };
 

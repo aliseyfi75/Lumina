@@ -5,6 +5,7 @@ import {
   updateDeck,
   getKnownChunkCount,
   setPantryRateLimitDelayForTests,
+  type ChunkProgressInfo,
 } from '../services/pantryService';
 import { FlashcardStatus, type Flashcard } from '../types';
 
@@ -87,26 +88,45 @@ test('updateDeck deletes stale overflow chunks when a multi-chunk deck shrinks t
   try {
     // 1. Push a large deck that splits across multiple chunks (> 30KB)
     const largeDeck = Array.from({ length: 90 }, (_, i) => makeCard(i, 450));
-    await updateDeck(TEST_PANTRY_ID, {
-      cards: largeDeck,
-      studyHistory: {},
-      longestStreak: 1,
-      deletedCards: {},
-    });
+    const progressEvents: ChunkProgressInfo[] = [];
+    await updateDeck(
+      TEST_PANTRY_ID,
+      {
+        cards: largeDeck,
+        studyHistory: {},
+        longestStreak: 1,
+        deletedCards: {},
+      },
+      {
+        onProgress: info => progressEvents.push(info),
+      }
+    );
 
     const chunkCountAfterLarge = getKnownChunkCount(TEST_PANTRY_ID);
     expect(chunkCountAfterLarge).toBeGreaterThanOrEqual(2);
+    expect(progressEvents.length).toBeGreaterThanOrEqual(chunkCountAfterLarge);
+    expect(progressEvents[0].step).toContain(`Uploading chunk 1 of ${chunkCountAfterLarge}`);
+    expect(progressEvents[0].percent).toBeGreaterThan(0);
+    expect(progressEvents[0].estimatedRemainingSec).toBeGreaterThan(0);
 
     // 2. Now shrink the deck to 2 small cards (fits in 1 chunk)
     calls.length = 0;
-    await updateDeck(TEST_PANTRY_ID, {
-      cards: [makeCard(1, 10), makeCard(2, 10)],
-      studyHistory: {},
-      longestStreak: 1,
-      deletedCards: {},
-    });
+    const shrinkProgressEvents: ChunkProgressInfo[] = [];
+    await updateDeck(
+      TEST_PANTRY_ID,
+      {
+        cards: [makeCard(1, 10), makeCard(2, 10)],
+        studyHistory: {},
+        longestStreak: 1,
+        deletedCards: {},
+      },
+      {
+        onProgress: info => shrinkProgressEvents.push(info),
+      }
+    );
 
     expect(getKnownChunkCount(TEST_PANTRY_ID)).toBe(1);
+    expect(shrinkProgressEvents.some(e => e.step?.includes('Cleaning old cloud data'))).toBe(true);
 
     const deleteUrls = calls.filter(c => c.method === 'DELETE').map(c => c.url);
     expect(deleteUrls.length).toBe(chunkCountAfterLarge - 1);

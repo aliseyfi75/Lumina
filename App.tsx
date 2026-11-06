@@ -10,7 +10,7 @@ import { DataManagerModal } from './components/DataManagerModal';
 import { AnkiImportModal } from './components/AnkiImportModal';
 import { PwaInstallBanner } from './components/PwaInstallBanner';
 import { generateJSON, parseFileContent, downloadJSON, saveToLocalFile } from './services/fileService';
-import { getDetails, getDeck, updateDeck, keepAlivePantry, getKnownChunkCount, CloudSyncProgress } from './services/pantryService';
+import { getDetails, getDeck, updateDeck, keepAlivePantry, getKnownChunkCount, CloudSyncProgress, ChunkProgressInfo } from './services/pantryService';
 import { saveFileHandleToIDB, loadFileHandleFromIDB, clearFileHandleFromIDB, saveAppDataToIDB, loadAppDataFromIDB, requestPersistentStorage, checkPersistentStorage, getStorageEstimate } from './services/idbService';
 import { initializeTracking, trackEvent, setTrackingUserId, trackPageView, PAGE_TITLES, TRACKING_CATEGORY, TRACKING_ACTION } from './services/trackingService';
 import { getLocalDateString, calculateCurrentStreak, getDueCards } from './utils/studyUtils';
@@ -159,6 +159,14 @@ const App: React.FC = () => {
   };
   const [isCloudSaving, setIsCloudSaving] = useState(false);
   const [isSyncingOffline, setIsSyncingOffline] = useState(false);
+  const [cloudSyncProgress, setCloudSyncProgress] = useState<{
+    percent: number;
+    step: string;
+    estimatedRemainingSec: number;
+    completedSteps: number;
+    totalSteps: number;
+    stepStartedAt: number;
+  } | null>(null);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [pendingCloudSync, setPendingCloudSync] = useState(false);
   const [isDataLoaded, setIsDataLoaded] = useState(false);
@@ -601,6 +609,84 @@ const App: React.FC = () => {
     return () => clearTimeout(timeoutId);
   }, [cards, studyHistory, longestStreak, deletedCards, fileHandle, isDataLoaded]);
 
+  const beginCloudSyncProgress = useCallback(
+    (cardsToSyncCount: number, mode: 'push' | 'pull' = 'push') => {
+      const knownChunks = cloudConfigRef.current
+        ? getKnownChunkCount(cloudConfigRef.current.pantryId)
+        : 1;
+      const estimatedChunks = Math.max(knownChunks, Math.ceil(cardsToSyncCount / 65), 1);
+      setCloudSyncProgress({
+        percent: 12,
+        step:
+          mode === 'pull'
+            ? 'Loading flashcards from Cloud...'
+            : estimatedChunks > 1
+              ? `Uploading chunk 1 of ${estimatedChunks}...`
+              : cardsToSyncCount > 0
+                ? `Uploading ${cardsToSyncCount} flashcards...`
+                : 'Updating cloud storage...',
+        estimatedRemainingSec: Math.max(2, estimatedChunks * 2),
+        completedSteps: 0,
+        totalSteps: estimatedChunks,
+        stepStartedAt: Date.now(),
+      });
+    },
+    []
+  );
+
+  const handleBackgroundCloudProgress = useCallback((info: ChunkProgressInfo) => {
+    const totalSteps = Math.max(1, info.totalSteps ?? info.totalChunks ?? 1);
+    const completedSteps = info.completedSteps ?? Math.max(0, (info.currentChunk ?? 1) - 1);
+    const basePercent =
+      info.percent ??
+      (totalSteps === 1 ? 25 : Math.max(8, Math.round(((completedSteps + 0.4) / totalSteps) * 100)));
+    const defaultStep =
+      totalSteps > 1
+        ? `Uploading chunk ${info.currentChunk} of ${info.totalChunks}...`
+        : 'Uploading flashcards to Cloud...';
+    setCloudSyncProgress({
+      percent: Math.min(96, Math.max(5, basePercent)),
+      step: info.step || defaultStep,
+      estimatedRemainingSec: info.estimatedRemainingSec ?? Math.max(1, (totalSteps - completedSteps) * 2),
+      completedSteps,
+      totalSteps,
+      stepStartedAt: Date.now(),
+    });
+  }, []);
+
+  // Smoothly interpolate percentage and count down remaining time while a cloud sync request is in flight
+  useEffect(() => {
+    if (!isCloudSaving && !isSyncingOffline) return;
+    const intervalId = setInterval(() => {
+      setCloudSyncProgress(prev => {
+        if (!prev) return prev;
+        const elapsedInStepSec = (Date.now() - prev.stepStartedAt) / 1000;
+        const stepCeiling = Math.min(
+          95,
+          Math.round(((prev.completedSteps + 0.92) / Math.max(1, prev.totalSteps)) * 100)
+        );
+        const nextPercent =
+          prev.percent < stepCeiling
+            ? Math.min(stepCeiling, prev.percent + Math.max(1, Math.round((stepCeiling - prev.percent) * 0.22)))
+            : prev.percent;
+
+        const remainingAfterStep = Math.max(0, prev.totalSteps - (prev.completedSteps + 1)) * 2;
+        const currentStepRemaining = Math.max(1, Math.ceil(2.2 - elapsedInStepSec));
+        const nextRemainingSec = Math.max(1, remainingAfterStep + currentStepRemaining);
+
+        if (nextPercent === prev.percent && nextRemainingSec >= prev.estimatedRemainingSec) {
+          return prev;
+        }
+        return {
+          ...prev,
+          percent: nextPercent,
+          estimatedRemainingSec: Math.min(prev.estimatedRemainingSec, nextRemainingSec),
+        };
+      });
+    }, 350);
+    return () => clearInterval(intervalId);
+  }, [isCloudSaving, isSyncingOffline]);
+
   // 4. Auto-Save to Cloud
   useEffect(() => {
     if (!isDataLoaded || !cloudConfig || isMigratingCloudRef.current) return;
@@ -618,9 +704,14 @@ const App: React.FC = () => {
 
     const timeoutId = setTimeout(async () => {
       if (isMigratingCloudRef.current) return;
+      beginCloudSyncProgress(cards.length, 'push');
       setIsCloudSaving(true);
       try {
-        await updateDeck(cloudConfig.pantryId, { cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() });
+        await updateDeck(
+          cloudConfig.pantryId,
+          { cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() },
+          { onProgress: handleBackgroundCloudProgress }
+        );
         lastKeepAliveRef.current = Date.now();
         setPendingCloudSync(false);
       } catch (error) {
@@ -630,6 +721,7 @@ const App: React.FC = () => {
         }
       } finally {
         setIsCloudSaving(false);
+        setCloudSyncProgress(null);
       }
     }, 2000);
     return () => clearTimeout(timeoutId);
@@ -665,15 +757,21 @@ const App: React.FC = () => {
     if (!isDataLoaded || !isOnline || !cloudConfig || !pendingCloudSync) return;
     let cancelled = false;
     const flush = async () => {
+      beginCloudSyncProgress(cards.length, 'push');
       setIsSyncingOffline(true);
       try {
-        await updateDeck(cloudConfig.pantryId, { cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() });
+        await updateDeck(
+          cloudConfig.pantryId,
+          { cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() },
+          { onProgress: handleBackgroundCloudProgress }
+        );
       } catch (e) {
         console.error('Pending sync flush failed:', e);
       } finally {
         if (!cancelled) {
           setPendingCloudSync(false);
           setIsSyncingOffline(false);
+          setCloudSyncProgress(null);
         }
       }
     };
@@ -898,7 +996,11 @@ const App: React.FC = () => {
       }
 
       // 6. Push complete merged dataset to the target Pantry ID immediately
-      onProgress?.({ percent: 72, step: `Uploading ${mergedCards.length} flashcards to Pantry...` });
+      onProgress?.({
+        percent: 72,
+        step: `Uploading ${mergedCards.length} flashcards to Pantry...`,
+        estimatedRemainingSec: Math.max(2, Math.ceil(mergedCards.length / 65) * 2),
+      });
       await updateDeck(
         cleanNewId,
         {
@@ -908,7 +1010,7 @@ const App: React.FC = () => {
           deletedCards: mergedDeletedRecord,
         },
         {
-          onProgress: ({ currentChunk, totalChunks }) => {
+          onProgress: ({ currentChunk, totalChunks, estimatedRemainingSec }) => {
             const pct = Math.min(95, 72 + Math.round(((currentChunk - 0.3) / Math.max(1, totalChunks)) * 23));
             onProgress?.({
               percent: pct,
@@ -916,6 +1018,7 @@ const App: React.FC = () => {
                 totalChunks > 1
                   ? `Uploading deck chunk ${currentChunk} of ${totalChunks} to Pantry...`
                   : `Uploading ${mergedCards.length} flashcards to Pantry...`,
+              estimatedRemainingSec: estimatedRemainingSec ?? Math.max(1, (totalChunks - currentChunk + 1) * 2),
             });
           },
         }
@@ -1003,35 +1106,72 @@ const App: React.FC = () => {
     }
   };
 
-  const handleCloudPull = async () => {
+  const handleCloudPull = async (onProgress?: (progress: CloudSyncProgress) => void) => {
     if (!cloudConfig) return;
-    const cloudData = await getDeck(cloudConfig.pantryId, undefined, { strict: true });
-    if (
-      (cloudData.cards && cloudData.cards.length > 0) ||
-      (cloudData.deletedCards && Object.keys(cloudData.deletedCards).length > 0)
-    ) {
-      performMerge(cloudData.cards ?? [], cloudData.deletedCards ?? {});
-    }
-    if (cloudData.studyHistory) {
-      setStudyHistory(prev => mergeHistoryRecords(prev, cloudData.studyHistory));
-    }
-    if (cloudData.longestStreak) setLongestStreak(prev => Math.max(prev, cloudData.longestStreak!));
-    trackEvent(TRACKING_ACTION.CLOUD_PULL, TRACKING_CATEGORY.CLOUD);
-    // Immediately flush to local file so both are in sync
-    if (fileHandle) {
-      try {
-        await saveToLocalFile(fileHandle, { cards: cardsRef.current, studyHistory, longestStreak, deletedCards: prunedDeletedCards() });
-      } catch (e) {
-        console.warn('Could not flush cloud pull to local file', e);
+    beginCloudSyncProgress(cards.length, 'pull');
+    setIsCloudSaving(true);
+    try {
+      const cloudData = await getDeck(cloudConfig.pantryId, undefined, {
+        strict: true,
+        onProgress: (info) => {
+          handleBackgroundCloudProgress(info);
+          onProgress?.({
+            percent: info.percent ?? Math.min(95, Math.round(((info.currentChunk ?? 1) / Math.max(1, info.totalChunks ?? 1)) * 100)),
+            step: info.step || 'Loading flashcards from Cloud...',
+            estimatedRemainingSec: info.estimatedRemainingSec,
+          });
+        },
+      });
+      if (
+        (cloudData.cards && cloudData.cards.length > 0) ||
+        (cloudData.deletedCards && Object.keys(cloudData.deletedCards).length > 0)
+      ) {
+        performMerge(cloudData.cards ?? [], cloudData.deletedCards ?? {});
       }
+      if (cloudData.studyHistory) {
+        setStudyHistory(prev => mergeHistoryRecords(prev, cloudData.studyHistory));
+      }
+      if (cloudData.longestStreak) setLongestStreak(prev => Math.max(prev, cloudData.longestStreak!));
+      trackEvent(TRACKING_ACTION.CLOUD_PULL, TRACKING_CATEGORY.CLOUD);
+      // Immediately flush to local file so both are in sync
+      if (fileHandle) {
+        try {
+          await saveToLocalFile(fileHandle, { cards: cardsRef.current, studyHistory, longestStreak, deletedCards: prunedDeletedCards() });
+        } catch (e) {
+          console.warn('Could not flush cloud pull to local file', e);
+        }
+      }
+    } finally {
+      setIsCloudSaving(false);
+      setCloudSyncProgress(null);
     }
   };
 
-  const handleCloudPush = async () => {
+  const handleCloudPush = async (onProgress?: (progress: CloudSyncProgress) => void) => {
     if (!cloudConfig) return;
-    await updateDeck(cloudConfig.pantryId, { cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() });
-    setPendingCloudSync(false);
-    trackEvent(TRACKING_ACTION.CLOUD_PUSH, TRACKING_CATEGORY.CLOUD);
+    beginCloudSyncProgress(cards.length, 'push');
+    setIsCloudSaving(true);
+    try {
+      await updateDeck(
+        cloudConfig.pantryId,
+        { cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() },
+        {
+          onProgress: (info) => {
+            handleBackgroundCloudProgress(info);
+            onProgress?.({
+              percent: info.percent ?? 25,
+              step: info.step || 'Uploading flashcards to Cloud...',
+              estimatedRemainingSec: info.estimatedRemainingSec,
+            });
+          },
+        }
+      );
+      setPendingCloudSync(false);
+      trackEvent(TRACKING_ACTION.CLOUD_PUSH, TRACKING_CATEGORY.CLOUD);
+    } finally {
+      setIsCloudSaving(false);
+      setCloudSyncProgress(null);
+    }
   };
 
   // --- App Logic ---
@@ -1298,6 +1438,7 @@ const App: React.FC = () => {
 
       // Skip the 2-second debounced auto-save for this state transition since we are pushing immediately
       skipNextCloudAutoSaveRef.current = true;
+      beginCloudSyncProgress(nextCards.length, 'push');
       setIsCloudSaving(true);
       updateDeck(
         activePantryId,
@@ -1307,7 +1448,7 @@ const App: React.FC = () => {
           longestStreak,
           deletedCards: nextDeletedRecord,
         },
-        { immediate: true }
+        { immediate: true, onProgress: handleBackgroundCloudProgress }
       )
         .then(() => {
           lastKeepAliveRef.current = Date.now();
@@ -1319,6 +1460,7 @@ const App: React.FC = () => {
         })
         .finally(() => {
           setIsCloudSaving(false);
+          setCloudSyncProgress(null);
         });
     }
   };
@@ -1595,22 +1737,63 @@ const App: React.FC = () => {
       {/* Auto-Save Indicators */}
       {(isFileSaving || isCloudSaving || isSyncingOffline || (!isOnline && cloudConfig)) && (
         <div className="fixed bottom-4 right-4 flex flex-col gap-2 items-end z-50">
-          {(isFileSaving || isCloudSaving) && !isSyncingOffline && (
+          {isFileSaving && !isCloudSaving && !isSyncingOffline && (
             <div className="bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 text-xs px-3 py-1.5 rounded-full shadow-lg animate-pulse flex items-center gap-2">
-              {isCloudSaving ? <Cloud className="h-3 w-3" /> : <Save className="h-3 w-3" />}
-              {isCloudSaving ? 'Syncing to Cloud...' : 'Saving to File...'}
+              <Save className="h-3 w-3" />
+              Saving to File...
+            </div>
+          )}
+          {(isCloudSaving || isSyncingOffline) && (
+            <div
+              data-testid="cloud-sync-toast"
+              className="bg-slate-900/95 dark:bg-slate-100/95 backdrop-blur-md text-white dark:text-slate-900 text-xs px-4 py-2.5 rounded-2xl shadow-xl border border-slate-700/60 dark:border-slate-300/80 min-w-[260px] max-w-[330px] space-y-1.5 transition-all"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 font-semibold">
+                  <Cloud className="h-3.5 w-3.5 text-sky-400 dark:text-sky-600 shrink-0 animate-pulse" />
+                  <span>{isSyncingOffline ? 'Syncing offline changes...' : 'Syncing to Cloud...'}</span>
+                </div>
+                <span
+                  data-testid="cloud-sync-percent"
+                  className="font-mono font-bold text-sky-400 dark:text-sky-600 shrink-0"
+                >
+                  {cloudSyncProgress?.percent ?? 15}%
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between gap-2 text-[11px] text-slate-300 dark:text-slate-600">
+                <span data-testid="cloud-sync-step" className="truncate">
+                  {cloudSyncProgress?.step || 'Uploading flashcards to Cloud...'}
+                </span>
+                <span
+                  data-testid="cloud-sync-eta"
+                  className="shrink-0 font-mono text-[10px] text-slate-400 dark:text-slate-500"
+                >
+                  {cloudSyncProgress && cloudSyncProgress.estimatedRemainingSec > 0
+                    ? `~${cloudSyncProgress.estimatedRemainingSec}s remaining`
+                    : 'Almost done...'}
+                </span>
+              </div>
+
+              <div
+                role="progressbar"
+                aria-label="Cloud sync progress"
+                aria-valuenow={cloudSyncProgress?.percent ?? 15}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                className="w-full h-1.5 bg-slate-700 dark:bg-slate-300 rounded-full overflow-hidden"
+              >
+                <div
+                  className="h-full bg-sky-400 dark:bg-sky-600 rounded-full transition-all duration-300 ease-out"
+                  style={{ width: `${Math.max(6, Math.min(100, cloudSyncProgress?.percent ?? 15))}%` }}
+                />
+              </div>
             </div>
           )}
           {!isOnline && cloudConfig && !isCloudSaving && !isSyncingOffline && (
             <div className="bg-amber-500 text-white text-xs px-3 py-1.5 rounded-full shadow-lg flex items-center gap-2">
               <RefreshCw className="h-3 w-3" />
               Offline — changes will sync when connected
-            </div>
-          )}
-          {isOnline && isSyncingOffline && (
-            <div className="bg-brand-600 text-white text-xs px-3 py-1.5 rounded-full shadow-lg animate-pulse flex items-center gap-2">
-              <RefreshCw className="h-3 w-3 animate-spin" />
-              Syncing offline changes...
             </div>
           )}
         </div>

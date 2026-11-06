@@ -10,6 +10,7 @@ test('displays categories on the Home screen with Books in priority, showing pro
     if (method === 'POST') {
       const body = JSON.parse(route.request().postData() || '{}');
       pantryPosts.push(body);
+      await new Promise(resolve => setTimeout(resolve, 650));
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -201,6 +202,18 @@ test('displays categories on the Home screen with Books in priority, showing pro
   await expect(confirmModal).toBeHidden();
   await expect(categoryCards).toHaveCount(3);
   await expect(categoriesSection).not.toContainText('Moby-Dick');
+
+  // Verify the floating Cloud Sync toast displays progress message, percentage, and remaining time
+  const cloudSyncToast = page.getByTestId('cloud-sync-toast');
+  await expect(cloudSyncToast).toBeVisible();
+  await expect(cloudSyncToast).toContainText('Syncing to Cloud...');
+  await expect(cloudSyncToast.getByTestId('cloud-sync-percent')).toContainText('%');
+  await expect(cloudSyncToast.getByTestId('cloud-sync-step')).toContainText(/Uploading 5 flashcards/i);
+  await expect(cloudSyncToast.getByTestId('cloud-sync-eta')).toContainText(/remaining/i);
+
+  await page.screenshot({
+    path: '/Users/aliseyfi/.gemini/antigravity/brain/a96b9d77-0d1a-4784-ac20-758650393c58/scratch/feature_cloud_sync_progress.png',
+  });
 
   // Verify Pantry received an immediate POST with Moby-Dick flashcards removed and tombstoned
   await expect.poll(() => pantryPosts.length, { timeout: 2000 }).toBeGreaterThanOrEqual(1);

@@ -35,8 +35,8 @@ interface DataManagerModalProps {
     onProgress?: (progress: CloudSyncProgress) => void
   ) => Promise<{ cardCount: number; localCount: number; cloudCount: number; historyDays: number }>;
   onDisconnectCloud: () => void;
-  onCloudPull: () => Promise<void>;
-  onCloudPush: () => Promise<void>;
+  onCloudPull: (onProgress?: (progress: CloudSyncProgress) => void) => Promise<void>;
+  onCloudPush: (onProgress?: (progress: CloudSyncProgress) => void) => Promise<void>;
 }
 
 export const DataManagerModal: React.FC<DataManagerModalProps> = ({
@@ -249,12 +249,17 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
 
   const handleCloudAction = async (action: 'pull' | 'push') => {
     setIsProcessing(true);
+    setCloudProgress({
+      percent: 12,
+      step: action === 'pull' ? 'Loading flashcards from Cloud...' : `Uploading ${cardCount} flashcards to Cloud...`,
+      estimatedRemainingSec: Math.max(2, Math.ceil(cardCount / 65) * 2),
+    });
     try {
       if (action === 'pull') {
-        await onCloudPull();
+        await onCloudPull(setCloudProgress);
         showMessage('success', 'Flashcards loaded from Cloud!');
       } else {
-        await onCloudPush();
+        await onCloudPush(setCloudProgress);
         showMessage('success', 'Flashcards saved to Cloud!');
       }
     } catch (error: any) {
@@ -265,6 +270,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
       }
     } finally {
       setIsProcessing(false);
+      setCloudProgress(null);
     }
   };
 
@@ -547,8 +553,15 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                         <RefreshCw className="h-3.5 w-3.5 animate-spin text-sky-600 dark:text-sky-400 shrink-0" />
                         <span>{cloudProgress.step}</span>
                       </span>
-                      <span className="font-mono font-bold text-sky-700 dark:text-sky-300">
-                        {cloudProgress.percent}%
+                      <span className="flex items-center gap-2 shrink-0">
+                        {typeof cloudProgress.estimatedRemainingSec === 'number' && cloudProgress.estimatedRemainingSec > 0 && (
+                          <span className="font-mono text-[10px] text-sky-600/80 dark:text-sky-400/80">
+                            ~{cloudProgress.estimatedRemainingSec}s remaining
+                          </span>
+                        )}
+                        <span className="font-mono font-bold text-sky-700 dark:text-sky-300">
+                          {cloudProgress.percent}%
+                        </span>
                       </span>
                     </div>
                     <div
@@ -603,6 +616,43 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                   </button>
                 </div>
 
+                {cloudProgress && !isMigratingCloud && (
+                  <div
+                    data-testid="pantry-progress-bar"
+                    className="p-3 rounded-xl bg-sky-50 dark:bg-sky-900/20 border border-sky-200 dark:border-sky-800/60 space-y-2"
+                  >
+                    <div className="flex items-center justify-between text-xs font-medium text-sky-900 dark:text-sky-200">
+                      <span className="flex items-center gap-1.5">
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin text-sky-600 dark:text-sky-400 shrink-0" />
+                        <span>{cloudProgress.step}</span>
+                      </span>
+                      <span className="flex items-center gap-2 shrink-0">
+                        {typeof cloudProgress.estimatedRemainingSec === 'number' && cloudProgress.estimatedRemainingSec > 0 && (
+                          <span className="font-mono text-[10px] text-sky-600/80 dark:text-sky-400/80">
+                            ~{cloudProgress.estimatedRemainingSec}s remaining
+                          </span>
+                        )}
+                        <span className="font-mono font-bold text-sky-700 dark:text-sky-300">
+                          {cloudProgress.percent}%
+                        </span>
+                      </span>
+                    </div>
+                    <div
+                      role="progressbar"
+                      aria-label="Pantry sync progress"
+                      aria-valuenow={cloudProgress.percent}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      className="w-full h-2 bg-sky-200/70 dark:bg-slate-700 rounded-full overflow-hidden"
+                    >
+                      <div
+                        className="h-full bg-sky-600 dark:bg-sky-400 rounded-full transition-all duration-300 ease-out"
+                        style={{ width: `${Math.max(5, Math.min(100, cloudProgress.percent))}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
                 {isMigratingCloud && (
                   <form onSubmit={handleCloudMigrateSubmit} className="p-3.5 rounded-xl bg-white dark:bg-slate-800 border border-sky-200 dark:border-sky-700 space-y-3 animate-in fade-in duration-200">
                     <div className="flex items-center justify-between">
@@ -637,8 +687,15 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                             <RefreshCw className="h-3.5 w-3.5 animate-spin text-sky-600 dark:text-sky-400 shrink-0" />
                             <span>{cloudProgress.step}</span>
                           </span>
-                          <span className="font-mono font-bold text-sky-700 dark:text-sky-300">
-                            {cloudProgress.percent}%
+                          <span className="flex items-center gap-2 shrink-0">
+                            {typeof cloudProgress.estimatedRemainingSec === 'number' && cloudProgress.estimatedRemainingSec > 0 && (
+                              <span className="font-mono text-[10px] text-sky-600/80 dark:text-sky-400/80">
+                                ~{cloudProgress.estimatedRemainingSec}s remaining
+                              </span>
+                            )}
+                            <span className="font-mono font-bold text-sky-700 dark:text-sky-300">
+                              {cloudProgress.percent}%
+                            </span>
                           </span>
                         </div>
                         <div

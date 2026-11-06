@@ -265,6 +265,8 @@ const App: React.FC = () => {
             : fallback.antonyms && fallback.antonyms.length > 0
               ? fallback.antonyms
               : undefined,
+        complexityLevel: winner.complexityLevel || fallback.complexityLevel,
+        complexityScore: winner.complexityScore ?? fallback.complexityScore,
         createdAt: Math.min(
           existing.createdAt || Date.now(),
           inc.createdAt || Date.now()
@@ -1379,6 +1381,8 @@ const App: React.FC = () => {
       example: w.bookSentence?.trim() || undefined,
       synonyms: w.synonyms && w.synonyms.length > 0 ? w.synonyms : undefined,
       antonyms: w.antonyms && w.antonyms.length > 0 ? w.antonyms : undefined,
+      complexityLevel: w.complexityLevel,
+      complexityScore: w.complexityScore,
       tags: [bookTag],
       status: FlashcardStatus.New,
       lastReviewed: 0,

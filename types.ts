@@ -29,6 +29,8 @@ export interface WordEntry {
   meanings: Meaning[];
 }
 
+export type WordComplexityLevel = 'beginner' | 'intermediate' | 'advanced';
+
 export interface Flashcard {
   id: string;
   word: string;
@@ -44,6 +46,10 @@ export interface Flashcard {
   status: FlashcardStatus;
   lastReviewed: number;
   createdAt: number;
+
+  // Book / Word Complexity Metadata
+  complexityLevel?: WordComplexityLevel;
+  complexityScore?: number;
 
   // SM-2 Algorithm Properties
   interval?: number;

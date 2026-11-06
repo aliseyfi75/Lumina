@@ -6,7 +6,7 @@ import { useWindowSize } from 'react-use';
 import { motion, useMotionValue, useTransform, PanInfo, AnimatePresence } from 'framer-motion';
 import { useLocation } from 'react-router-dom';
 import { playAudio } from '../utils/audio';
-import { getDueCards } from '../utils/studyUtils';
+import { getDueCards, sortStudySessionCards, isBookFlashcard, getCardComplexityLevel } from '../utils/studyUtils';
 import { SessionMode } from './SessionConfigModal';
 
 const FALLBACK_DISTRACTORS = [
@@ -56,18 +56,17 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
       ? allDueCards.filter(c => c.tags?.some(t => t.trim() === sessionConfig.tag))
       : allDueCards;
 
-    let studySet: Flashcard[] = [];
+    const isBookSession = Boolean(
+      (sessionConfig?.tag && /^(?:book\s*:|books\s*\/|__folder:Books__)/i.test(sessionConfig.tag.trim())) ||
+      dueCards.some(c => isBookFlashcard(c) || c.complexityLevel !== undefined)
+    );
 
-    if ((sessionConfig?.mode === 'short' || sessionConfig?.mode === 'quiz') && sessionConfig.count) {
-      const newCards = dueCards.filter(c => c.status === FlashcardStatus.New).sort((a, b) => (a.lastReviewed || 0) - (b.lastReviewed || 0));
-      const otherCards = dueCards.filter(c => c.status !== FlashcardStatus.New).sort((a, b) => (a.lastReviewed || 0) - (b.lastReviewed || 0));
+    const sortedCards = sortStudySessionCards(dueCards, { isBookSession });
 
-      studySet = [...newCards, ...otherCards].slice(0, sessionConfig.count);
-    } else {
-      const newCards = dueCards.filter(c => c.status === FlashcardStatus.New).sort((a, b) => (a.lastReviewed || 0) - (b.lastReviewed || 0));
-      const otherCards = dueCards.filter(c => c.status !== FlashcardStatus.New).sort((a, b) => (a.lastReviewed || 0) - (b.lastReviewed || 0));
-      studySet = [...newCards, ...otherCards];
-    }
+    const studySet =
+      (sessionConfig?.mode === 'short' || sessionConfig?.mode === 'quiz') && sessionConfig.count
+        ? sortedCards.slice(0, sessionConfig.count)
+        : sortedCards;
 
     setQueue(studySet);
     setIsInitialized(true);
@@ -82,6 +81,12 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
     const bookTag = currentCard.tags?.find(t => /^book\s*:/i.test(t.trim()));
     if (!bookTag) return null;
     return bookTag.replace(/^book\s*:\s*/i, '').trim() || 'Book';
+  }, [currentCard]);
+
+  const currentCardComplexity = useMemo(() => {
+    if (!currentCard) return null;
+    if (!isBookFlashcard(currentCard) && !currentCard.complexityLevel) return null;
+    return getCardComplexityLevel(currentCard);
   }, [currentCard]);
 
   const renderHighlightedBookSentence = useCallback((sentence: string, targetWord: string) => {
@@ -470,9 +475,25 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
         {isQuizMode ? (
           <div className="w-full max-w-lg bg-white dark:bg-slate-800 rounded-3xl shadow-xl border border-slate-100 dark:border-slate-700 p-6 sm:p-8 flex flex-col gap-6">
             <div className="text-center space-y-2 border-b border-slate-100 dark:border-slate-700 pb-5">
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-xs font-bold uppercase tracking-wider mb-1">
-                <ListChecks className="h-3.5 w-3.5" />
-                Multiple-Choice Quiz
+              <div className="flex flex-wrap items-center justify-center gap-2 mb-1">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-xs font-bold uppercase tracking-wider">
+                  <ListChecks className="h-3.5 w-3.5" />
+                  Multiple-Choice Quiz
+                </div>
+                {currentCardComplexity && (
+                  <span
+                    data-testid="study-card-complexity-badge"
+                    className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
+                      currentCardComplexity === 'advanced'
+                        ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800/60'
+                        : currentCardComplexity === 'intermediate'
+                          ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/60'
+                          : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/60'
+                    }`}
+                  >
+                    {currentCardComplexity}
+                  </span>
+                )}
               </div>
               <h2 className="text-4xl font-serif font-bold text-slate-900 dark:text-white">{currentCard.word}</h2>
               <div className="flex items-center justify-center gap-2">
@@ -648,6 +669,20 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
               <motion.div style={{ opacity: swipeUpOpacity }} className="absolute inset-0 rounded-3xl pointer-events-none bg-blue-500/10 dark:bg-blue-500/20" />
 
               <div className="relative z-10 flex flex-col items-center w-full">
+                {currentCardComplexity && (
+                  <span
+                    data-testid="study-card-complexity-badge"
+                    className={`mb-3 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
+                      currentCardComplexity === 'advanced'
+                        ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800/60'
+                        : currentCardComplexity === 'intermediate'
+                          ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/60'
+                          : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/60'
+                    }`}
+                  >
+                    {currentCardComplexity}
+                  </span>
+                )}
                 <h2 className="text-5xl font-serif font-bold text-slate-900 dark:text-white mb-6">{currentCard.word}</h2>
                 <div className="flex items-center gap-3 justify-center">
                   {currentCard.phonetic && <p className="text-2xl text-slate-400 dark:text-slate-500 font-serif italic">{currentCard.phonetic}</p>}

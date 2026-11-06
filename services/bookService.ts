@@ -36,6 +36,7 @@ export interface BookExtractedWord {
   antonyms?: string[];
   frequency?: number;
   complexityLevel?: ComplexityLevel;
+  complexityScore?: number;
 }
 
 const GUTENDEX_API_URL = 'https://gutendex.com/books';
@@ -1482,19 +1483,20 @@ const isSimpleCommonInflection = (word: string): boolean => {
   return stems.some(stem => stem.length >= 4 && COMMON_WORDS.has(stem));
 };
 
-const computeLocalComplexityScore = (word: string): number => {
-  let score = Math.min(word.length, 14);
+export const computeLocalComplexityScore = (word: string): number => {
+  const lower = word.trim().toLowerCase();
+  let score = Math.min(lower.length, 14);
   for (const affix of COMPLEX_AFFIXES) {
-    if (word.includes(affix.trim())) {
+    if (lower.includes(affix.trim())) {
       score += 8;
       break;
     }
   }
   // Reward uncommon consonant/vowel patterns typical of Latin/Greek roots
-  if (/(?:ph|ch|qu|sc|gn|ps|rh|mn|ct|pt|xt)/.test(word)) {
+  if (/(?:ph|ch|qu|sc|gn|ps|rh|mn|ct|pt|xt)/.test(lower)) {
     score += 3;
   }
-  if (/(?:ious|eous|acity|itude|escence|escent|ulent|animous|ology|cracy|phobia|isis|osis)$/.test(word)) {
+  if (/(?:ious|eous|acity|itude|escence|escent|ulent|animous|ology|cracy|phobia|isis|osis)$/.test(lower)) {
     score += 5;
   }
   return score;
@@ -1726,6 +1728,7 @@ export const extractComplexWordsFromText = async (
           candidate.localScore
         );
 
+        const rankScore = Number((candidate.localScore - freqInfo.frequency * 1.1).toFixed(2));
         const extracted: BookExtractedWord & { rankScore: number } = {
           word: candidate.word.charAt(0).toUpperCase() + candidate.word.slice(1),
           phonetic,
@@ -1737,7 +1740,8 @@ export const extractComplexWordsFromText = async (
           antonyms: firstMeaning?.antonyms?.slice(0, 6),
           frequency: freqInfo.frequency,
           complexityLevel,
-          rankScore: candidate.localScore - freqInfo.frequency * 1.1,
+          complexityScore: rankScore,
+          rankScore,
         };
 
         return extracted;

@@ -150,4 +150,39 @@ test('displays categories on the Home screen with Books in priority, showing pro
   const tagSelect = page.getByLabel('Study tag filter');
   await expect(tagSelect).toBeVisible();
   await expect(tagSelect).toHaveValue('Book: Frankenstein');
+  await page.getByRole('button', { name: 'Cancel' }).click();
+
+  // Test removing a book (Moby-Dick) from the Home page with confirmation popup
+  await categoriesSection.getByRole('button', { name: 'Remove Moby-Dick' }).click();
+  const confirmModal = page.getByTestId('confirm-delete-book-modal');
+  await expect(confirmModal).toBeVisible();
+  await expect(confirmModal).toContainText('Remove “Moby-Dick”?');
+  await expect(confirmModal).toContainText('2 words');
+
+  await page.waitForTimeout(200);
+  await page.screenshot({
+    path: '/Users/aliseyfi/.gemini/antigravity/brain/a96b9d77-0d1a-4784-ac20-758650393c58/scratch/feature_remove_book_confirm.png',
+  });
+
+  await confirmModal.getByTestId('confirm-delete-book-btn').click();
+  await expect(confirmModal).toBeHidden();
+  await expect(categoryCards).toHaveCount(3);
+  await expect(categoriesSection).not.toContainText('Moby-Dick');
+
+  // Navigate to Flashcards page and test removing a book (Frankenstein) from Book Vocabulary Dock
+  await page.goto('/#/flashcards');
+  const dock = page.getByTestId('book-vocabulary-dock');
+  await expect(dock).toBeVisible();
+  await expect(dock).toContainText('Frankenstein');
+
+  await dock.getByRole('button', { name: 'Remove Frankenstein' }).click();
+  const flashcardsConfirmModal = page.getByTestId('confirm-delete-book-modal');
+  await expect(flashcardsConfirmModal).toBeVisible();
+  await expect(flashcardsConfirmModal).toContainText('Remove “Frankenstein”?');
+  await expect(flashcardsConfirmModal).toContainText('3 words');
+
+  await flashcardsConfirmModal.getByTestId('confirm-delete-book-btn').click();
+  await expect(flashcardsConfirmModal).toBeHidden();
+  await expect(dock).toBeHidden();
+  await expect(page.getByText('Lugubrious')).toBeHidden();
 });

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Flashcard, FlashcardStatus } from '../types';
-import { Play, BookOpen, CheckCircle, Brain, Trash2, RotateCw, Upload, Volume2, ChevronDown, Search, X, ArrowUpDown, Filter, Plus, Pencil, Tag, Sparkles } from 'lucide-react';
+import { Play, BookOpen, CheckCircle, Brain, Trash2, RotateCw, Upload, Volume2, ChevronDown, Search, X, ArrowUpDown, Filter, Plus, Pencil, Tag, Sparkles, AlertTriangle } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { playAudio } from '../utils/audio';
 import { getDueCards } from '../utils/studyUtils';
@@ -25,6 +25,7 @@ interface FlashcardsProps {
   cards: Flashcard[];
   onStartStudy: (initialTag?: string) => void;
   onDeleteCard: (id: string) => void;
+  onDeleteBook?: (bookTag: string) => void;
   onReviewCard: (id: string, quality: number) => void;
   onCreateCard?: (data: CustomCardFormData) => void;
   onUpdateCard?: (id: string, updates: CustomCardFormData) => void;
@@ -431,6 +432,7 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
   cards,
   onStartStudy,
   onDeleteCard,
+  onDeleteBook,
   onReviewCard,
   onCreateCard,
   onUpdateCard,
@@ -446,6 +448,7 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [editingCard, setEditingCard] = useState<Flashcard | null>(null);
   const [isBookPrepOpen, setIsBookPrepOpen] = useState(false);
+  const [bookToDelete, setBookToDelete] = useState<{ tag: string; title: string; count: number } | null>(null);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
   const existingWordsSet = useMemo(
@@ -800,9 +803,30 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
                             {book.total} complex {book.total === 1 ? 'word' : 'words'} • {book.mastered} mastered
                           </p>
                         </div>
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-brand-100 dark:bg-brand-900/50 text-brand-700 dark:text-brand-300 shrink-0">
-                          {book.readiness}% Ready
-                        </span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-brand-100 dark:bg-brand-900/50 text-brand-700 dark:text-brand-300">
+                            {book.readiness}% Ready
+                          </span>
+                          {onDeleteBook && (
+                            <button
+                              type="button"
+                              data-testid="remove-book-button"
+                              aria-label={`Remove ${book.title}`}
+                              title={`Remove ${book.title} and its words`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setBookToDelete({
+                                  tag: book.tag,
+                                  title: book.title,
+                                  count: book.total,
+                                });
+                              }}
+                              className="p-1 rounded-lg text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
                       </div>
 
                       <div className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
@@ -1059,6 +1083,59 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
         existingWords={existingWordsSet}
         onImportBookWords={handleBookWordsImported}
       />
+
+      {bookToDelete && (
+        <div
+          data-testid="confirm-delete-book-modal"
+          className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+          onClick={() => setBookToDelete(null)}
+        >
+          <div
+            className="relative z-10 w-full max-w-md bg-white dark:bg-slate-800 rounded-3xl shadow-2xl border border-slate-100 dark:border-slate-700 p-6 space-y-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3.5">
+              <div className="p-3 rounded-2xl bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 shrink-0">
+                <AlertTriangle className="h-6 w-6" />
+              </div>
+              <div className="space-y-1.5">
+                <h3 className="text-lg font-serif font-bold text-slate-900 dark:text-white">
+                  Remove “{bookToDelete.title}”?
+                </h3>
+                <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+                  Are you sure you want to remove <strong>{bookToDelete.title}</strong> and permanently delete all{' '}
+                  <strong>{bookToDelete.count}</strong> {bookToDelete.count === 1 ? 'word' : 'words'} from your deck? This action cannot be undone.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100 dark:border-slate-700">
+              <button
+                type="button"
+                onClick={() => setBookToDelete(null)}
+                className="px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                data-testid="confirm-delete-book-btn"
+                onClick={() => {
+                  if (selectedTag === bookToDelete.tag) {
+                    setSelectedTag('all');
+                  }
+                  onDeleteBook?.(bookToDelete.tag);
+                  setBookToDelete(null);
+                }}
+                className="px-4 py-2.5 rounded-xl text-sm font-semibold bg-red-600 hover:bg-red-700 text-white shadow-sm transition-colors inline-flex items-center gap-1.5"
+              >
+                <Trash2 className="h-4 w-4" />
+                Remove Book & Words
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -10,7 +10,7 @@ import { motion } from 'framer-motion';
 import {
     Search, Play, BookOpen, CheckCircle, Brain, Loader2,
     Flame, Layers, Sparkles, Clock, TrendingUp, Volume2,
-    ArrowRight, Star, Calendar, X, RotateCw, Tag, Plus
+    ArrowRight, Star, Calendar, X, RotateCw, Tag, Plus, Trash2, AlertTriangle
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -21,6 +21,7 @@ interface DashboardProps {
     onQuickSearch: (word: string) => void;
     onStartStudy?: (initialTag?: string) => void;
     onImportBookWords?: (bookTitle: string, words: BookExtractedWord[]) => void;
+    onDeleteBook?: (bookTag: string) => void;
 }
 
 interface CategoryProgressItem {
@@ -214,12 +215,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
     onQuickSearch,
     onStartStudy,
     onImportBookWords,
+    onDeleteBook,
 }) => {
     const [query, setQuery] = useState('');
     const [suggestions, setSuggestions] = useState<string[]>([]);
     const [showSuggestions, setShowSuggestions] = useState(false);
     const [isSearching, setIsSearching] = useState(false);
     const [isBookPrepOpen, setIsBookPrepOpen] = useState(false);
+    const [bookToDelete, setBookToDelete] = useState<{ tag: string; title: string; count: number } | null>(null);
     const wrapperRef = useRef<HTMLDivElement>(null);
     const lastSearched = useRef<string>('');
 
@@ -658,6 +661,25 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                                         >
                                                             {cat.statusLabel}
                                                         </span>
+                                                        {isBook && cat.rawTag && onDeleteBook && (
+                                                            <button
+                                                                type="button"
+                                                                data-testid="remove-book-button"
+                                                                aria-label={`Remove ${cat.name}`}
+                                                                title={`Remove ${cat.name} and its words`}
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setBookToDelete({
+                                                                        tag: cat.rawTag!,
+                                                                        title: cat.name,
+                                                                        count: cat.total,
+                                                                    });
+                                                                }}
+                                                                className="p-1 rounded-lg text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"
+                                                            >
+                                                                <Trash2 className="h-3.5 w-3.5" />
+                                                            </button>
+                                                        )}
                                                     </div>
                                                 </div>
 
@@ -946,6 +968,56 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     existingWords={existingWordsSet}
                     onImportBookWords={onImportBookWords}
                 />
+            )}
+
+            {bookToDelete && (
+                <div
+                    data-testid="confirm-delete-book-modal"
+                    className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+                    onClick={() => setBookToDelete(null)}
+                >
+                    <div
+                        className="relative z-10 w-full max-w-md bg-white dark:bg-slate-800 rounded-3xl shadow-2xl border border-slate-100 dark:border-slate-700 p-6 space-y-5"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="flex items-start gap-3.5">
+                            <div className="p-3 rounded-2xl bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 shrink-0">
+                                <AlertTriangle className="h-6 w-6" />
+                            </div>
+                            <div className="space-y-1.5">
+                                <h3 className="text-lg font-serif font-bold text-slate-900 dark:text-white">
+                                    Remove “{bookToDelete.title}”?
+                                </h3>
+                                <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+                                    Are you sure you want to remove <strong>{bookToDelete.title}</strong> and permanently delete all{' '}
+                                    <strong>{bookToDelete.count}</strong> {bookToDelete.count === 1 ? 'word' : 'words'} from your deck? This action cannot be undone.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100 dark:border-slate-700">
+                            <button
+                                type="button"
+                                onClick={() => setBookToDelete(null)}
+                                className="px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                data-testid="confirm-delete-book-btn"
+                                onClick={() => {
+                                    onDeleteBook?.(bookToDelete.tag);
+                                    setBookToDelete(null);
+                                }}
+                                className="px-4 py-2.5 rounded-xl text-sm font-semibold bg-red-600 hover:bg-red-700 text-white shadow-sm transition-colors inline-flex items-center gap-1.5"
+                            >
+                                <Trash2 className="h-4 w-4" />
+                                Remove Book & Words
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
         </>
     );

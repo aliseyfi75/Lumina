@@ -1142,6 +1142,33 @@ const App: React.FC = () => {
     trackEvent(TRACKING_ACTION.DELETE_CARD, TRACKING_CATEGORY.FLASHCARDS);
   };
 
+  const handleDeleteBook = (bookTag: string) => {
+    const cleanTag = bookTag.trim();
+    if (!cleanTag) return;
+    const now = Date.now();
+    const removedIds: string[] = [];
+
+    setCards(prev =>
+      prev.filter(c => {
+        const belongsToBook = c.tags?.some(t => t.trim() === cleanTag);
+        if (belongsToBook) {
+          removedIds.push(c.id);
+          return false;
+        }
+        return true;
+      })
+    );
+
+    if (removedIds.length > 0) {
+      setDeletedCards(prev => {
+        const next = new Map(prev);
+        removedIds.forEach(id => next.set(id, now));
+        return next;
+      });
+    }
+    trackEvent(TRACKING_ACTION.DELETE_CARD, TRACKING_CATEGORY.FLASHCARDS, `book_${cleanTag}`);
+  };
+
   // Milestone Confetti Logic
   useEffect(() => {
     const masteredCount = cards.filter(c => c.status === FlashcardStatus.Mastered).length;
@@ -1289,6 +1316,7 @@ const App: React.FC = () => {
                 onQuickSearch={handleQuickSearch}
                 onStartStudy={handleStartStudySession}
                 onImportBookWords={handleImportBookWords}
+                onDeleteBook={handleDeleteBook}
               />
             }
           />
@@ -1309,6 +1337,7 @@ const App: React.FC = () => {
                 cards={cards}
                 onStartStudy={handleStartStudySession}
                 onDeleteCard={handleDeleteCard}
+                onDeleteBook={handleDeleteBook}
                 onReviewCard={handleReviewCard}
                 onCreateCard={handleCreateCustomCard}
                 onUpdateCard={handleUpdateCard}
@@ -1357,6 +1386,7 @@ const App: React.FC = () => {
                 onQuickSearch={handleQuickSearch}
                 onStartStudy={handleStartStudySession}
                 onImportBookWords={handleImportBookWords}
+                onDeleteBook={handleDeleteBook}
               />
             }
           />

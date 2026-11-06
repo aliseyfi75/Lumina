@@ -38,11 +38,11 @@ let requestQueue: Promise<unknown> = Promise.resolve();
 
 // Strictly serialize all Pantry requests and enforce rateLimitDelayMs
 // between the COMPLETION of one request and the START of the next.
-const enqueuePantryRequest = <T>(fn: () => Promise<T>): Promise<T> => {
+const enqueuePantryRequest = <T>(fn: () => Promise<T>, immediate = false): Promise<T> => {
   const run = async (): Promise<T> => {
     const now = Date.now();
     const elapsed = now - lastRequestCompletedAt;
-    if (lastRequestCompletedAt > 0 && elapsed < rateLimitDelayMs) {
+    if (!immediate && lastRequestCompletedAt > 0 && elapsed < rateLimitDelayMs) {
       await sleep(rateLimitDelayMs - elapsed);
     }
     try {
@@ -87,11 +87,15 @@ const fetchWithRetry = async (
   url: string,
   options: RequestInit,
   retries = 3,
-  baseDelayMs = 2200
+  baseDelayMs = 2200,
+  immediate = false
 ): Promise<Response> => {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const response = await enqueuePantryRequest(() => fetchWithTimeout(url, options));
+      const response = await enqueuePantryRequest(
+        () => fetchWithTimeout(url, options),
+        immediate && attempt === 0
+      );
       // Retry on rate-limit (429) or transient gateway/server errors (500, 502, 503, 504)
       if ((response.status === 429 || response.status >= 500) && attempt < retries) {
         const waitTime = baseDelayMs * Math.pow(2, attempt);
@@ -412,7 +416,8 @@ const pushDeckWithChunkLimit = async (
   sanitizedCards: Flashcard[],
   cloudData: CloudData,
   maxBasketBytes: number,
-  onProgress?: (info: ChunkProgressInfo) => void
+  onProgress?: (info: ChunkProgressInfo) => void,
+  immediate = false
 ) => {
   const previousChunkCount = knownChunkCounts.get(cleanId) ?? cloudData.chunkCount ?? 1;
   const now = Date.now();
@@ -436,14 +441,20 @@ const pushDeckWithChunkLimit = async (
   // Fast path: fits in a single basket under maxBasketBytes
   if (totalBytes <= maxBasketBytes) {
     onProgress?.({ currentChunk: 1, totalChunks: 1 });
-    const response = await fetchWithRetry(`${BASE_URL}/${cleanId}/basket/${BASKET_NAME}`, {
-      ...FETCH_OPTIONS,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
+    const response = await fetchWithRetry(
+      `${BASE_URL}/${cleanId}/basket/${BASKET_NAME}`,
+      {
+        ...FETCH_OPTIONS,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: fullPayload,
       },
-      body: fullPayload,
-    });
+      3,
+      2200,
+      immediate
+    );
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => response.statusText);
@@ -489,12 +500,18 @@ const pushDeckWithChunkLimit = async (
     lastAccessedAt: now,
   });
 
-  const mainRes = await fetchWithRetry(`${BASE_URL}/${cleanId}/basket/${BASKET_NAME}`, {
-    ...FETCH_OPTIONS,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: mainBody,
-  });
+  const mainRes = await fetchWithRetry(
+    `${BASE_URL}/${cleanId}/basket/${BASKET_NAME}`,
+    {
+      ...FETCH_OPTIONS,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: mainBody,
+    },
+    3,
+    2200,
+    immediate
+  );
 
   if (!mainRes.ok) {
     const errorText = await mainRes.text().catch(() => mainRes.statusText);
@@ -526,13 +543,20 @@ const pushDeckWithChunkLimit = async (
 export const updateDeck = async (
   pantryId: string,
   cloudData: CloudData,
-  options?: { onProgress?: (info: ChunkProgressInfo) => void }
+  options?: { onProgress?: (info: ChunkProgressInfo) => void; immediate?: boolean }
 ) => {
   const cleanId = normalizePantryId(pantryId);
   const sanitizedCards = sanitizeCardsForCloud(cloudData.cards || []);
 
   try {
-    await pushDeckWithChunkLimit(cleanId, sanitizedCards, cloudData, MAX_BASKET_BYTES, options?.onProgress);
+    await pushDeckWithChunkLimit(
+      cleanId,
+      sanitizedCards,
+      cloudData,
+      MAX_BASKET_BYTES,
+      options?.onProgress,
+      options?.immediate
+    );
   } catch (err: any) {
     // If a 30 KB basket POST still hit a gateway/payload limit, automatically retry with smaller 14 KB chunks
     if (

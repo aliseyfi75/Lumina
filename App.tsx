@@ -44,6 +44,7 @@ const App: React.FC = () => {
   const location = useLocation();
 
   const [cards, setCards] = useState<Flashcard[]>([]);
+  const cardsRef = useRef<Flashcard[]>([]);
   // Tombstone map: id → Unix-ms when deleted. Entries are pruned after 30 days.
   const [deletedCards, setDeletedCards] = useState<Map<string, number>>(new Map());
   // Ref mirrors the map so performMerge can always read current tombstones
@@ -84,7 +85,11 @@ const App: React.FC = () => {
     });
   };
 
-  // Keep ref in sync so performMerge always sees the latest tombstone map
+  // Keep refs in sync so performMerge and deletion handlers always see the latest state
+  useEffect(() => {
+    cardsRef.current = cards;
+  }, [cards]);
+
   useEffect(() => {
     deletedCardsRef.current = deletedCards;
   }, [deletedCards]);
@@ -269,17 +274,22 @@ const App: React.FC = () => {
     incoming: Flashcard[],
     incomingDeletedCards: Record<string, number> = {}
   ) => {
-    // Union the incoming tombstones (pruning expired ones first)
-    setDeletedCards(prev => {
-      const cutoff = Date.now() - TOMBSTONE_TTL;
-      const merged = new Map(prev);
-      Object.entries(incomingDeletedCards).forEach(([id, deletedAt]) => {
-        if (deletedAt >= cutoff) merged.set(id, deletedAt);
-      });
-      return merged;
+    // Union the incoming tombstones synchronously on the ref first so mergeCardArrays sees them immediately
+    const cutoff = Date.now() - TOMBSTONE_TTL;
+    const mergedTombstones = new Map(deletedCardsRef.current);
+    Object.entries(incomingDeletedCards).forEach(([id, deletedAt]) => {
+      if (deletedAt >= cutoff) {
+        mergedTombstones.set(id, Math.max(mergedTombstones.get(id) ?? 0, deletedAt));
+      }
     });
+    deletedCardsRef.current = mergedTombstones;
+    setDeletedCards(mergedTombstones);
 
-    setCards(prev => mergeCardArrays(prev, incoming, incomingDeletedCards));
+    setCards(prev => {
+      const next = mergeCardArrays(prev, incoming, incomingDeletedCards);
+      cardsRef.current = next;
+      return next;
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // intentionally empty — reads tombstones via ref, not closure
 
@@ -327,11 +337,12 @@ const App: React.FC = () => {
         }
       }
 
-      // Restore tombstones into state early so performMerge honours them
+      // Restore tombstones into state and ref early so performMerge honours them
       if (Object.keys(initialDeletedCards).length > 0) {
         const cutoff = Date.now() - TOMBSTONE_TTL;
         const map = new Map<string, number>();
         Object.entries(initialDeletedCards).forEach(([id, ts]) => { if (ts >= cutoff) map.set(id, ts); });
+        deletedCardsRef.current = map;
         setDeletedCards(map);
       }
 
@@ -372,6 +383,7 @@ const App: React.FC = () => {
         return c;
       });
 
+      cardsRef.current = initialCards;
       setCards(initialCards);
 
       // Step C: Check Cloud Config, Merge, and Send Keep-Alive Ping so Pantry never expires
@@ -382,9 +394,17 @@ const App: React.FC = () => {
           const config = JSON.parse(savedCloudConfig);
           if (config.pantryId) {
             const cloudData = await getDeck(config.pantryId);
+            const cloudHadDeletedCards = (cloudData.cards ?? []).some(c => {
+              const delAt = deletedCardsRef.current.get(c.id) ?? 0;
+              const cardTs = Math.max(c.updatedAt ?? 0, c.lastReviewed ?? 0, c.createdAt ?? 0);
+              return delAt > 0 && delAt >= cardTs;
+            });
 
-            if (cloudData.cards && cloudData.cards.length > 0) {
-              performMerge(cloudData.cards, cloudData.deletedCards ?? {});
+            if (
+              (cloudData.cards && cloudData.cards.length > 0) ||
+              (cloudData.deletedCards && Object.keys(cloudData.deletedCards).length > 0)
+            ) {
+              performMerge(cloudData.cards ?? [], cloudData.deletedCards ?? {});
             }
 
             if (cloudData.studyHistory) {
@@ -401,13 +421,14 @@ const App: React.FC = () => {
               setLongestStreak(prev => Math.max(prev, cloudData.longestStreak!));
             }
 
-            skipNextCloudAutoSaveRef.current = true;
+            // Only skip auto-save if Pantry did NOT still hold locally-deleted cards
+            skipNextCloudAutoSaveRef.current = !cloudHadDeletedCards;
             setCloudConfig(config);
             initializeTracking(config.pantryId);
 
             // Always send a keep-alive write to Pantry when the user opens the app
             // so the Pantry ID and baskets refresh their 30-day TTL even if no card status changes.
-            if (navigator.onLine) {
+            if (navigator.onLine && !cloudHadDeletedCards) {
               lastKeepAliveRef.current = Date.now();
               void keepAlivePantry(config.pantryId, cloudData.chunkCount ?? 1);
             }
@@ -896,8 +917,11 @@ const App: React.FC = () => {
   const handleCloudPull = async () => {
     if (!cloudConfig) return;
     const cloudData = await getDeck(cloudConfig.pantryId, undefined, { strict: true });
-    if (cloudData.cards && cloudData.cards.length > 0) {
-      performMerge(cloudData.cards, cloudData.deletedCards ?? {});
+    if (
+      (cloudData.cards && cloudData.cards.length > 0) ||
+      (cloudData.deletedCards && Object.keys(cloudData.deletedCards).length > 0)
+    ) {
+      performMerge(cloudData.cards ?? [], cloudData.deletedCards ?? {});
     }
     if (cloudData.studyHistory) {
       setStudyHistory(prev => mergeHistoryRecords(prev, cloudData.studyHistory));
@@ -907,7 +931,7 @@ const App: React.FC = () => {
     // Immediately flush to local file so both are in sync
     if (fileHandle) {
       try {
-        await saveToLocalFile(fileHandle, { cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() });
+        await saveToLocalFile(fileHandle, { cards: cardsRef.current, studyHistory, longestStreak, deletedCards: prunedDeletedCards() });
       } catch (e) {
         console.warn('Could not flush cloud pull to local file', e);
       }
@@ -1140,9 +1164,87 @@ const App: React.FC = () => {
     trackEvent(TRACKING_ACTION.ADD_CARD, TRACKING_CATEGORY.FLASHCARDS, `book_${cleanTitle}`);
   };
 
+  const syncDeletionImmediately = (nextCards: Flashcard[], nextDeletedRecord: Record<string, number>) => {
+    // 1. Immediately persist to IndexedDB & localStorage
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(nextCards));
+    saveAppDataToIDB({
+      cards: nextCards,
+      studyHistory,
+      longestStreak,
+      deletedCards: nextDeletedRecord,
+    })
+      .then(() => setLastSavedAt(Date.now()))
+      .catch(console.error);
+
+    // 2. Immediately sync to connected local file if any
+    if (fileHandle) {
+      setIsFileSaving(true);
+      saveToLocalFile(fileHandle, {
+        cards: nextCards,
+        studyHistory,
+        longestStreak,
+        deletedCards: nextDeletedRecord,
+      })
+        .catch(err => console.error('Immediate file save after deletion failed:', err))
+        .finally(() => setIsFileSaving(false));
+    }
+
+    // 3. Immediately sync with Pantry cloud so deleted flashcards are removed from Pantry right away
+    let activePantryId = cloudConfig?.pantryId;
+    if (!activePantryId) {
+      try {
+        const saved = localStorage.getItem(CLOUD_CONFIG_KEY);
+        if (saved) activePantryId = JSON.parse(saved)?.pantryId;
+      } catch {
+        // ignore
+      }
+    }
+
+    if (activePantryId && !isMigratingCloudRef.current) {
+      if (!navigator.onLine) {
+        setPendingCloudSync(true);
+        return;
+      }
+
+      // Skip the 2-second debounced auto-save for this state transition since we are pushing immediately
+      skipNextCloudAutoSaveRef.current = true;
+      setIsCloudSaving(true);
+      updateDeck(
+        activePantryId,
+        {
+          cards: nextCards,
+          studyHistory,
+          longestStreak,
+          deletedCards: nextDeletedRecord,
+        },
+        { immediate: true }
+      )
+        .then(() => {
+          lastKeepAliveRef.current = Date.now();
+          setPendingCloudSync(false);
+        })
+        .catch(err => {
+          console.error('Immediate cloud sync after deletion failed:', err);
+          setPendingCloudSync(true);
+        })
+        .finally(() => {
+          setIsCloudSaving(false);
+        });
+    }
+  };
+
   const handleDeleteCard = (id: string) => {
-    setCards(prev => prev.filter(c => c.id !== id));
-    setDeletedCards(prev => new Map(prev).set(id, Date.now()));
+    const now = Date.now();
+    const nextCards = cardsRef.current.filter(c => c.id !== id);
+    const nextDeletedMap = new Map(deletedCardsRef.current);
+    nextDeletedMap.set(id, now);
+
+    cardsRef.current = nextCards;
+    deletedCardsRef.current = nextDeletedMap;
+    setCards(nextCards);
+    setDeletedCards(nextDeletedMap);
+
+    syncDeletionImmediately(nextCards, prunedDeletedCards());
     trackEvent(TRACKING_ACTION.DELETE_CARD, TRACKING_CATEGORY.FLASHCARDS);
   };
 
@@ -1152,24 +1254,26 @@ const App: React.FC = () => {
     const now = Date.now();
     const removedIds: string[] = [];
 
-    setCards(prev =>
-      prev.filter(c => {
-        const belongsToBook = c.tags?.some(t => t.trim() === cleanTag);
-        if (belongsToBook) {
-          removedIds.push(c.id);
-          return false;
-        }
-        return true;
-      })
-    );
+    const nextCards = cardsRef.current.filter(c => {
+      const belongsToBook = c.tags?.some(t => t.trim() === cleanTag);
+      if (belongsToBook) {
+        removedIds.push(c.id);
+        return false;
+      }
+      return true;
+    });
 
-    if (removedIds.length > 0) {
-      setDeletedCards(prev => {
-        const next = new Map(prev);
-        removedIds.forEach(id => next.set(id, now));
-        return next;
-      });
+    const nextDeletedMap = new Map(deletedCardsRef.current);
+    for (const id of removedIds) {
+      nextDeletedMap.set(id, now);
     }
+
+    cardsRef.current = nextCards;
+    deletedCardsRef.current = nextDeletedMap;
+    setCards(nextCards);
+    setDeletedCards(nextDeletedMap);
+
+    syncDeletionImmediately(nextCards, prunedDeletedCards());
     trackEvent(TRACKING_ACTION.DELETE_CARD, TRACKING_CATEGORY.FLASHCARDS, `book_${cleanTag}`);
   };
 

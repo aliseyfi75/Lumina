@@ -3,6 +3,35 @@ import { test, expect } from 'playwright/test';
 test('displays categories on the Home screen with Books in priority, showing progress and status for each', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 950 });
 
+  const pantryPosts: Array<{ cards: Array<{ id: string }>; deletedCards: Record<string, number> }> = [];
+
+  await page.route('https://getpantry.cloud/apiv1/pantry/**', async (route) => {
+    const method = route.request().method();
+    if (method === 'POST') {
+      const body = JSON.parse(route.request().postData() || '{}');
+      pantryPosts.push(body);
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true }),
+      });
+      return;
+    }
+    if (method === 'GET') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ cards: [], chunkCount: 1 }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ chunkCount: 1 }),
+    });
+  });
+
   await page.addInitScript(() => {
     const now = Date.now();
     const cards = [
@@ -103,6 +132,10 @@ test('displays categories on the Home screen with Books in priority, showing pro
       },
     ];
     localStorage.setItem('lumina_cards_v1', JSON.stringify(cards));
+    localStorage.setItem(
+      'lumina_cloud_config',
+      JSON.stringify({ pantryId: '11111111-2222-3333-4444-555555555555' })
+    );
   });
 
   await page.goto('/#/');
@@ -169,7 +202,15 @@ test('displays categories on the Home screen with Books in priority, showing pro
   await expect(categoryCards).toHaveCount(3);
   await expect(categoriesSection).not.toContainText('Moby-Dick');
 
+  // Verify Pantry received an immediate POST with Moby-Dick flashcards removed and tombstoned
+  await expect.poll(() => pantryPosts.length, { timeout: 2000 }).toBeGreaterThanOrEqual(1);
+  const latestPostAfterMoby = pantryPosts[pantryPosts.length - 1];
+  expect(latestPostAfterMoby.cards.some(c => c.id === 'book-moby-1' || c.id === 'book-moby-2')).toBe(false);
+  expect(latestPostAfterMoby.deletedCards['book-moby-1']).toBeGreaterThan(0);
+  expect(latestPostAfterMoby.deletedCards['book-moby-2']).toBeGreaterThan(0);
+
   // Navigate to Flashcards page and test removing a book (Frankenstein) from Book Vocabulary Dock
+  const postsBeforeFrank = pantryPosts.length;
   await page.goto('/#/flashcards');
   const dock = page.getByTestId('book-vocabulary-dock');
   await expect(dock).toBeVisible();
@@ -185,4 +226,16 @@ test('displays categories on the Home screen with Books in priority, showing pro
   await expect(flashcardsConfirmModal).toBeHidden();
   await expect(dock).toBeHidden();
   await expect(page.getByText('Lugubrious')).toBeHidden();
+
+  // Verify Pantry received an immediate POST with Frankenstein flashcards removed and tombstoned
+  await expect.poll(() => pantryPosts.length, { timeout: 2000 }).toBeGreaterThan(postsBeforeFrank);
+  const latestPostAfterFrank = pantryPosts[pantryPosts.length - 1];
+  expect(
+    latestPostAfterFrank.cards.some(
+      c => c.id === 'book-frank-1' || c.id === 'book-frank-2' || c.id === 'book-frank-3'
+    )
+  ).toBe(false);
+  expect(latestPostAfterFrank.deletedCards['book-frank-1']).toBeGreaterThan(0);
+  expect(latestPostAfterFrank.deletedCards['book-frank-2']).toBeGreaterThan(0);
+  expect(latestPostAfterFrank.deletedCards['book-frank-3']).toBeGreaterThan(0);
 });

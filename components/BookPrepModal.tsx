@@ -47,9 +47,9 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
   // Extraction state
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractionStage, setExtractionStage] = useState('');
+  const [extractionProgress, setExtractionProgress] = useState<{ completed: number; total: number } | null>(null);
   const [activeBookTitle, setActiveBookTitle] = useState('');
   const [complexityFilter, setComplexityFilter] = useState<ComplexityFilter>('all');
-  const [maxWords, setMaxWords] = useState<number>(30);
   const [extractedWords, setExtractedWords] = useState<BookExtractedWord[]>([]);
   const [selectedWordSet, setSelectedWordSet] = useState<Set<string>>(new Set());
   const [extractionError, setExtractionError] = useState<string | null>(null);
@@ -67,9 +67,9 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
     setSearchError(null);
     setIsExtracting(false);
     setExtractionStage('');
+    setExtractionProgress(null);
     setActiveBookTitle('');
     setComplexityFilter('all');
-    setMaxWords(30);
     setExtractedWords([]);
     setSelectedWordSet(new Set());
     setExtractionError(null);
@@ -110,12 +110,17 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
 
   const runExtraction = async (title: string, text: string) => {
     setActiveBookTitle(title);
-    setExtractionStage('Analyzing book text and extracting complex words...');
+    setExtractionStage('Analyzing book text and extracting all complex words...');
+    setExtractionProgress(null);
     const words = await extractComplexWordsFromText(text, {
-      maxWords,
       complexityLevel: complexityFilter,
       existingWords,
-      onProgress: (stage) => setExtractionStage(stage),
+      onProgress: (stage, completed, total) => {
+        setExtractionStage(stage);
+        if (typeof completed === 'number' && typeof total === 'number' && total > 0) {
+          setExtractionProgress({ completed, total });
+        }
+      },
     });
 
     if (words.length === 0) {
@@ -245,13 +250,34 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
               <div className="p-4 rounded-2xl bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-400">
                 <Loader2 className="h-8 w-8 animate-spin" />
               </div>
-              <div className="space-y-1">
+              <div className="space-y-2 max-w-md w-full px-4">
                 <h3 className="text-lg font-serif font-bold text-slate-900 dark:text-white">
                   Building Vocabulary Dock for “{activeBookTitle || 'Book'}”
                 </h3>
                 <p className="text-sm text-slate-500 dark:text-slate-400">
-                  {extractionStage || 'Extracting complex words and real sentences from the book...'}
+                  {extractionStage || 'Extracting all complex words and real sentences from the book...'}
                 </p>
+                {extractionProgress && extractionProgress.total > 0 && (
+                  <div className="pt-2 space-y-1">
+                    <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                      <div
+                        className="h-full bg-brand-600 transition-all duration-200 rounded-full"
+                        style={{
+                          width: `${Math.min(
+                            100,
+                            Math.round((extractionProgress.completed / extractionProgress.total) * 100)
+                          )}%`,
+                        }}
+                      />
+                    </div>
+                    <p className="text-[11px] font-semibold text-slate-400 dark:text-slate-500">
+                      {Math.min(
+                        100,
+                        Math.round((extractionProgress.completed / extractionProgress.total) * 100)
+                      )}% complete
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -457,7 +483,7 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                   </button>
                 </div>
 
-                {/* Complexity Level & Target Word Count Controls */}
+                {/* Complexity Level Controls */}
                 <div className="flex flex-wrap items-center justify-between gap-3 pt-1" data-testid="complexity-selector">
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mr-1">
@@ -485,26 +511,9 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                     ))}
                   </div>
 
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                      Max Words:
-                    </span>
-                    {[15, 30, 45].map((limit) => (
-                      <button
-                        key={limit}
-                        type="button"
-                        data-testid={`max-words-${limit}`}
-                        onClick={() => setMaxWords(limit)}
-                        className={`px-2 py-1 rounded-lg text-xs font-semibold transition-all border ${
-                          maxWords === limit
-                            ? 'bg-slate-800 dark:bg-white text-white dark:text-slate-900 border-slate-800 dark:border-white'
-                            : 'bg-slate-50 dark:bg-slate-900/50 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
-                        }`}
-                      >
-                        {limit}
-                      </button>
-                    ))}
-                  </div>
+                  <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500">
+                    Extracts all complex words found
+                  </span>
                 </div>
               </form>
 

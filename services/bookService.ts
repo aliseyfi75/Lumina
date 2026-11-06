@@ -1076,13 +1076,13 @@ export const stripGutenbergBoilerplate = (rawText: string): string => {
 const fetchTextFromWikisource = async (title: string): Promise<string | null> => {
   try {
     const cleanPrimary = title.replace(/\s*;.*$/, '').trim();
-    const searchUrl = `${WIKISOURCE_API_URL}?origin=*&action=query&list=search&srsearch=${encodeURIComponent(`${cleanPrimary} Chapter`)}&srlimit=6&format=json`;
+    const searchUrl = `${WIKISOURCE_API_URL}?origin=*&action=query&list=search&srsearch=${encodeURIComponent(`${cleanPrimary} Chapter`)}&srlimit=10&format=json`;
     const searchRes = await fetchWithTimeout(searchUrl, 4000);
     if (!searchRes.ok) return null;
     const searchData = await searchRes.json();
     let hits = searchData?.query?.search;
     if (!Array.isArray(hits) || hits.length === 0) {
-      const fallbackUrl = `${WIKISOURCE_API_URL}?origin=*&action=query&list=search&srsearch=${encodeURIComponent(title)}&srlimit=5&format=json`;
+      const fallbackUrl = `${WIKISOURCE_API_URL}?origin=*&action=query&list=search&srsearch=${encodeURIComponent(title)}&srlimit=8&format=json`;
       const fbRes = await fetchWithTimeout(fallbackUrl, 3500);
       if (fbRes.ok) {
         const fbData = await fbRes.json();
@@ -1092,7 +1092,7 @@ const fetchTextFromWikisource = async (title: string): Promise<string | null> =>
     if (!Array.isArray(hits) || hits.length === 0) return null;
 
     // Fetch extracts for the top matching pages/chapters
-    const pageTitles = hits.slice(0, 5).map((h: any) => String(h.title)).filter(Boolean);
+    const pageTitles = hits.slice(0, 10).map((h: any) => String(h.title)).filter(Boolean);
     if (pageTitles.length === 0) return null;
 
     const extractUrl = `${WIKISOURCE_API_URL}?origin=*&action=query&prop=extracts&explaintext=1&titles=${encodeURIComponent(pageTitles.join('|'))}&format=json`;
@@ -1198,7 +1198,7 @@ export const fetchGutenbergBookText = async (book: GutenbergBook): Promise<strin
     .join('\n\n')
     .trim();
 
-  if (combinedRichText.length > 250) {
+  if (combinedRichText.length > 8000) {
     return combinedRichText;
   }
 
@@ -1226,14 +1226,14 @@ export const fetchGutenbergBookText = async (book: GutenbergBook): Promise<strin
       );
     }
 
-    for (const proxyUrl of proxyUrls.slice(0, 4)) {
+    for (const proxyUrl of proxyUrls.slice(0, 3)) {
       try {
-        const res = await fetchWithTimeout(proxyUrl, 4500);
+        const res = await fetchWithTimeout(proxyUrl, 3500);
         if (!res.ok) continue;
         const raw = await res.text();
         const cleaned = stripGutenbergBoilerplate(raw);
         if (cleaned.length > 200 && !cleaned.startsWith('{"error"')) {
-          return cleaned;
+          return [combinedRichText, cleaned].filter(Boolean).join('\n\n');
         }
       } catch {
         // Try next mirror/proxy
@@ -1241,7 +1241,7 @@ export const fetchGutenbergBookText = async (book: GutenbergBook): Promise<strin
     }
   }
 
-  // 4. Use built-in authentic literary corpus excerpt if available
+  // 4. Use combined native-CORS + built-in authentic literary corpus excerpt if available
   if (combinedRichText.length > 80) {
     return combinedRichText;
   }
@@ -1424,17 +1424,17 @@ export const extractComplexWordsFromText = async (
     maxWords?: number;
     complexityLevel?: ComplexityFilter;
     existingWords?: Set<string>;
-    onProgress?: (stage: string) => void;
+    onProgress?: (stage: string, completed?: number, total?: number) => void;
   }
 ): Promise<BookExtractedWord[]> => {
-  const maxWords = options?.maxWords ?? 30;
+  const maxWords = options?.maxWords;
   const complexityFilter: ComplexityFilter = options?.complexityLevel ?? 'all';
   const existingWords = options?.existingWords ?? new Set<string>();
 
-  options?.onProgress?.('Scanning sentences and tokenizing book text...');
+  options?.onProgress?.('Scanning sentences and tokenizing full book text...');
 
-  // Sample up to ~350 KB from the book body so even massive novels process in < 100ms
-  const sampledText = text.length > 350_000 ? text.slice(0, 350_000) : text;
+  // Sample up to ~500 KB from the book body so even massive novels process quickly
+  const sampledText = text.length > 500_000 ? text.slice(0, 500_000) : text;
 
   // Normalize single line-wraps within paragraphs into spaces
   const normalizedParagraphs = sampledText
@@ -1517,98 +1517,108 @@ export const extractComplexWordsFromText = async (
     .filter(c => c.lowercaseCount >= 1 && c.capitalizedMidSentenceCount === 0)
     .sort((a, b) => b.localScore - a.localScore);
 
-  const poolLimit = Math.max(maxWords * 2, 48);
-  let validCandidates: CandidateInfo[];
-  if (sortedByScore.length <= poolLimit) {
-    validCandidates = sortedByScore;
-  } else if (complexityFilter === 'beginner') {
-    // Sample from the accessible half of candidates
-    const midStart = Math.floor(sortedByScore.length * 0.35);
-    validCandidates = sortedByScore.slice(midStart, midStart + poolLimit);
-  } else if (complexityFilter === 'intermediate') {
-    const midStart = Math.floor(sortedByScore.length * 0.15);
-    validCandidates = sortedByScore.slice(midStart, midStart + poolLimit);
-  } else {
-    // Include top advanced + intermediate + beginner candidates
-    const topSlice = sortedByScore.slice(0, Math.floor(poolLimit * 0.6));
-    const midSlice = sortedByScore.slice(
-      Math.floor(sortedByScore.length * 0.4),
-      Math.floor(sortedByScore.length * 0.4) + Math.ceil(poolLimit * 0.4)
-    );
-    const seen = new Set<string>();
-    validCandidates = [];
-    for (const item of [...topSlice, ...midSlice]) {
-      if (!seen.has(item.word)) {
-        seen.add(item.word);
-        validCandidates.push(item);
-      }
-    }
-  }
+  const validCandidates: CandidateInfo[] = maxWords
+    ? sortedByScore.slice(0, Math.max(maxWords * 2, 48))
+    : sortedByScore;
 
   if (validCandidates.length === 0) {
     return [];
   }
 
-  options?.onProgress?.('Checking word rarity, complexity level, and looking up definitions...');
-
-  // Enrich with Datamuse frequency & dictionary definitions in parallel
-  const enriched = await Promise.all(
-    validCandidates.map(async (candidate) => {
-      const [freqInfo, dictEntry] = await Promise.all([
-        queryDatamuseFrequency(candidate.word),
-        lookupWord(candidate.word),
-      ]);
-
-      // Exclude ultra-common everyday words (> 22 occurrences per million)
-      if (freqInfo.frequency > 22) {
-        return null;
-      }
-
-      const firstMeaning = dictEntry?.meanings?.[0];
-      const firstDef = firstMeaning?.definitions?.[0]?.definition || freqInfo.fallbackDef;
-      if (!firstDef) {
-        return null;
-      }
-
-      const partOfSpeech = firstMeaning?.partOfSpeech || freqInfo.fallbackPos || 'noun';
-      const phonetic = dictEntry?.phonetic || freqInfo.phonetic;
-      const complexityLevel = classifyComplexityLevel(
-        candidate.word,
-        freqInfo.frequency,
-        candidate.localScore
-      );
-
-      const extracted: BookExtractedWord & { rankScore: number } = {
-        word: candidate.word.charAt(0).toUpperCase() + candidate.word.slice(1),
-        phonetic,
-        audio: dictEntry?.audio,
-        partOfSpeech,
-        mainDefinition: firstDef,
-        bookSentence: candidate.sentence.replace(/^["“']+|["”']+$/g, '').trim(),
-        synonyms: firstMeaning?.synonyms?.slice(0, 6),
-        antonyms: firstMeaning?.antonyms?.slice(0, 6),
-        frequency: freqInfo.frequency,
-        complexityLevel,
-        rankScore: candidate.localScore - freqInfo.frequency * 1.1,
-      };
-
-      return extracted;
-    })
+  const totalCandidates = validCandidates.length;
+  options?.onProgress?.(
+    `Checking rarity & definitions for ${totalCandidates} candidate words...`,
+    0,
+    totalCandidates
   );
+
+  // Enrich in concurrent batches of 24 to support unlimited words without browser/API throttling
+  const BATCH_SIZE = 24;
+  const enriched: Array<(BookExtractedWord & { rankScore: number }) | null> = [];
+
+  for (let i = 0; i < totalCandidates; i += BATCH_SIZE) {
+    const batch = validCandidates.slice(i, i + BATCH_SIZE);
+    const batchResults = await Promise.all(
+      batch.map(async (candidate, batchIdx) => {
+        const globalIdx = i + batchIdx;
+        const freqInfo = await queryDatamuseFrequency(candidate.word);
+
+        // Exclude ultra-common everyday words (> 22 occurrences per million)
+        if (freqInfo.frequency > 22) {
+          return null;
+        }
+
+        // Query full dictionary API for top words or when Datamuse doesn't include a definition
+        const shouldQueryFullDict = globalIdx < 24 || !freqInfo.fallbackDef;
+        const dictEntry = shouldQueryFullDict ? await lookupWord(candidate.word) : null;
+
+        const firstMeaning = dictEntry?.meanings?.[0];
+        let firstDef = firstMeaning?.definitions?.[0]?.definition || freqInfo.fallbackDef;
+        let partOfSpeech = firstMeaning?.partOfSpeech || freqInfo.fallbackPos || 'noun';
+        let phonetic = dictEntry?.phonetic || freqInfo.phonetic;
+
+        // If inflected word (e.g. plural/past/adverb) lacked a direct definition, check its base stem
+        if (!firstDef) {
+          const stem = candidate.word.replace(/(?:es|s|ed|ing|ly)$/, '');
+          if (stem.length >= 5 && stem !== candidate.word) {
+            const stemInfo = await queryDatamuseFrequency(stem);
+            if (stemInfo.fallbackDef) {
+              firstDef = stemInfo.fallbackDef;
+              partOfSpeech = stemInfo.fallbackPos || partOfSpeech;
+              phonetic = phonetic || stemInfo.phonetic;
+            }
+          }
+        }
+
+        if (!firstDef) {
+          return null;
+        }
+
+        const complexityLevel = classifyComplexityLevel(
+          candidate.word,
+          freqInfo.frequency,
+          candidate.localScore
+        );
+
+        const extracted: BookExtractedWord & { rankScore: number } = {
+          word: candidate.word.charAt(0).toUpperCase() + candidate.word.slice(1),
+          phonetic,
+          audio: dictEntry?.audio,
+          partOfSpeech,
+          mainDefinition: firstDef,
+          bookSentence: candidate.sentence.replace(/^["“']+|["”']+$/g, '').trim(),
+          synonyms: firstMeaning?.synonyms?.slice(0, 6),
+          antonyms: firstMeaning?.antonyms?.slice(0, 6),
+          frequency: freqInfo.frequency,
+          complexityLevel,
+          rankScore: candidate.localScore - freqInfo.frequency * 1.1,
+        };
+
+        return extracted;
+      })
+    );
+
+    enriched.push(...batchResults);
+    const completed = Math.min(i + BATCH_SIZE, totalCandidates);
+    options?.onProgress?.(
+      `Enriching vocabulary (${completed} / ${totalCandidates} candidate words)...`,
+      completed,
+      totalCandidates
+    );
+  }
 
   const validEnriched = enriched
     .filter((item): item is BookExtractedWord & { rankScore: number } => item !== null)
     .sort((a, b) => b.rankScore - a.rankScore);
 
+  const applyLimit = (items: Array<BookExtractedWord & { rankScore: number }>) =>
+    (maxWords ? items.slice(0, maxWords) : items).map(({ rankScore, ...word }) => word);
+
   if (complexityFilter !== 'all') {
     const matchingLevel = validEnriched.filter(w => w.complexityLevel === complexityFilter);
     const otherLevels = validEnriched.filter(w => w.complexityLevel !== complexityFilter);
-    return [...matchingLevel, ...otherLevels]
-      .slice(0, maxWords)
-      .map(({ rankScore, ...word }) => word);
+    return applyLimit([...matchingLevel, ...otherLevels]);
   }
 
-  return validEnriched
-    .slice(0, maxWords)
-    .map(({ rankScore, ...word }) => word);
+  return applyLimit(validEnriched);
 };

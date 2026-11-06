@@ -50,6 +50,7 @@ export interface Flashcard {
   // Book / Word Complexity Metadata
   complexityLevel?: WordComplexityLevel;
   complexityScore?: number;
+  bookChapter?: string;
 
   // SM-2 Algorithm Properties
   interval?: number;

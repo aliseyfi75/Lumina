@@ -256,12 +256,17 @@ const CLASSIC_BOOKS_CATALOG: ClassicBookEntry[] = [
     authors: ['Herman Melville'],
     wikisourceTitle: 'Moby-Dick (1851)_US_edition',
     excerpt: `
+Chapter 1
 Whenever I find myself growing grim about the mouth; whenever it is a damp, drizzly November in my soul; whenever my hypos get such an upper hand of me that a hypochondriacal gloom settles upon my spirit, then I account it high time to get to sea as soon as I can.
 Should you choose to circumambulate the city of a dreamy Sabbath afternoon, you will see thousands of mortal men fixed in ocean reveries along the wharves.
 An inscrutable malice sinewing it, the white whale swam through the tumultuous and portentous billows of the Pacific.
+
+Chapter 2
 With an indefatigable and monomaniac persistence, the captain pursued his audacious and irrevocable vengeance across the unfathomable deep.
 A palpable and lugubrious silence settled over the crew as they contemplated the voracious leviathan and the vicissitudes of their perilous voyage.
 Before that omnipotent and inexorable monster, even the most intrepid and resolute mariners felt a sudden trepidation and ineffable awe.
+
+Chapter 3
 The solitary harpooner stood with tranquil dignity upon the prow, watching the spectral harbinger glide beneath the desolate and melancholy waves.
 From the prosperous harbor of Nantucket to the venerable cliffs of the cape, no mariner could quell the malevolent phantom that haunted his remorse.
 `,
@@ -274,9 +279,12 @@ From the prosperous harbor of Nantucket to the venerable cliffs of the cape, no 
     isModernBook: true,
     coverUrl: 'https://covers.openlibrary.org/b/id/8231856-M.jpg',
     excerpt: `
+Chapter 1
 Looking back on the tranquil afternoons of Kabul, an ineffable remorse and unremitting guilt continued to haunt his solitary conscience across decades of exile.
 The loyal companion endured ostracism and ignominious cruelty with unwavering devotion, never uttering a single reproach against his childhood friend.
 Through the tumultuous upheaval and pernicious tyranny that engulfed his homeland, he embarked on a perilous journey toward atonement and redemption.
+
+Chapter 2
 A palpable trepidation gripped his heart as he confronted the malevolent adversary amidst the desolate ruins of the once prosperous sanctuary.
 His father maintained an austere and formidable demeanor, masking a profound benevolence beneath an inscrutable and stoic countenance.
 The ephemeral joy of the winter tournament gave way to an irrevocable betrayal that shattered their innocent camaraderie and fractured their destiny.
@@ -290,8 +298,11 @@ With intrepid resolve and resilient compassion, he sought to vindicate the sacre
     authors: ['Khaled Hosseini'],
     isModernBook: true,
     excerpt: `
+Chapter 1
 Beneath the oppressive and draconian edicts of the regime, the two women forged an indomitable bond of solidarity and unfeigned compassion.
 Despite the squalid deprivation and incessant adversity that surrounded their household, a luminous resilience sustained their tranquil spirits.
+
+Chapter 2
 She endured the ignominious reproach of her estranged family with stoic dignity, refusing to relinquish her audacious hope for liberation.
 In the final act of sacrificial devotion, her intrepid courage triumphed over the virulent malice of their relentless tormentor.
 `,
@@ -303,8 +314,11 @@ In the final act of sacrificial devotion, her intrepid courage triumphed over th
     authors: ['George Orwell'],
     isModernBook: true,
     excerpt: `
+Chapter 1
 Under the ubiquitous and unremitting vigilancia of the totalitarian regime, every citizen was compelled to exhibit orthodox conformity and obsequious zeal.
 The insidious doctrine of doublethink sought to obliterate empirical veracity and subjugate the autonomous intellect through perpetual propaganda.
+
+Chapter 2
 In his clandestine sanctuary, he recorded his heretical and seditious reflections with palpable trepidation, knowing that thoughtcrime entailed irrevocable perdition.
 The inscrutable oligarchy wielded absolute hegemony, reducing language itself to an austere and perfunctory instrument of servitude.
 `,
@@ -316,8 +330,11 @@ The inscrutable oligarchy wielded absolute hegemony, reducing language itself to
     authors: ['Harper Lee'],
     isModernBook: true,
     excerpt: `
+Chapter 1
 With sagacious discernment and unfeigned integrity, the venerable advocate stood in the courtroom to vindicate an innocent man against virulent prejudice.
 Through the inquisitive eyes of childhood, the recluse of the neighborhood transformed from a malevolent phantom into a benevolent guardian.
+
+Chapter 2
 She listened with taciturn solemnity as her father explained why true courage requires undaunted perseverance even when defeat seems inevitable.
 The acrimonious testimony exposed the pernicious hypocrisy and entrenched antipathy that festered beneath the placid surface of the town.
 `,
@@ -341,8 +358,11 @@ In the tranquil oasis, an ineffable serenity enveloped his spirit as he contempl
     authors: ['Erich Fromm'],
     isModernBook: true,
     excerpt: `
+Chapter 1
 Genuine love is not a passive sentiment or an ephemeral infatuation, but a deliberate discipline requiring humility, autonomous maturity, and unfeigned benevolence.
 To overcome existential alienation and solitary isolation, the individual must cultivate a productive orientation rooted in mutual solicitude, veracity, and discernment.
+
+Chapter 2
 Where narcissistic attachment and symbiotic dependence prevail, authentic intimacy degenerates into possessive domination or obsequious submission.
 Only through indefatigable practice, tranquil concentration, and fearless objectivity can a person transcend egoism and attain a harmonious union with humanity.
 `,
@@ -366,9 +386,12 @@ Existential vacuum and pervasive apathy arise when humanity forfeits its intrins
     authors: ['Mary Wollstonecraft Shelley'],
     wikisourceTitle: 'Frankenstein,_or_the_Modern_Prometheus_(1818)',
     excerpt: `
+Chapter 1
 A lugubrious shadow fell across the glaciers as the storm approached the mountain peak.
 My soul was filled with an ineffable sense of wonder and terror at the spectacle before me.
 Such pernicious ambition had led my inquiries into the hidden secrets of nature and life.
+
+Chapter 2
 With indefatigable zeal and unremitting ardor, I pursued my solitary and audacious undertaking.
 An ignominious and irrevocable fate seemed to hang over my wretched countenance as remorse consumed my tranquil spirit.
 `,
@@ -380,8 +403,11 @@ An ignominious and irrevocable fate seemed to hang over my wretched countenance 
     authors: ['Jane Austen'],
     wikisourceTitle: 'Pride_and_Prejudice',
     excerpt: `
+Chapter 1
 His supercilious manner and taciturn disposition rendered him odious to the entire assembly at the ball.
 She listened with fastidious attention and perspicacious discernment to his candid explanation of the affair.
+
+Chapter 2
 With unfeigned alacrity and propitious warmth, her sister endeavored to mitigate the vexation of the family.
 Such obsequious flattery and ostentatious display of wealth could neverEarn the veneration of a sagacious mind.
 `,
@@ -393,8 +419,11 @@ Such obsequious flattery and ostentatious display of wealth could neverEarn the 
     authors: ['Bram Stoker'],
     wikisourceTitle: 'Dracula',
     excerpt: `
+Chapter 1
 A portentous and lugubrious howling echoed through the precipice as the nocturnal carriage ascended the pass.
 The count maintained an inscrutable and placid countenance despite the virulent antipathy that gleamed in his eyes.
+
+Chapter 2
 An ineffable and palpable dread crept over my listless spirit as I beheld the unhallowed vestige of the ancient chapel.
 With intrepid vigilance and undaunted resolve, my companions prepared to quell the pernicious and voracious adversary.
 `,
@@ -406,8 +435,11 @@ With intrepid vigilance and undaunted resolve, my companions prepared to quell t
     authors: ['F. Scott Fitzgerald'],
     wikisourceTitle: 'The_Great_Gatsby',
     excerpt: `
+Chapter 1
 His ephemeral and ineffable smile conveyed a benevolent assurance that understood every vicissitude of human longing.
 Through the supercilious chatter and ostentatious revelry of the summer garden, he remained aloof in solitary reverie.
+
+Chapter 2
 Aturbulent andpernicious carelessness marked their profligate lives, leaving an irrevocable vestige of disillusionment behind.
 With fastidious scruple and unremitting hope, he gazed toward the luminous green light across the tranquil bay.
 `,
@@ -419,8 +451,11 @@ With fastidious scruple and unremitting hope, he gazed toward the luminous green
     authors: ['Charlotte Brontë'],
     wikisourceTitle: 'Jane_Eyre',
     excerpt: `
+Chapter 1
 His austere and inscrutable visage betrayed a tumultuous remorse that no solace could easily quell.
 With intrepid veracity and unfeigned dignity, she rejected the ignominious and pernicious proposal.
+
+Chapter 2
 A lugubrious and portentous wind swept across the desolate moor, deepening her solitary reverie and vexation.
 `,
   },
@@ -1431,6 +1466,7 @@ export const extractTextFromBookFile = async (
     });
 
     const paragraphs: string[] = [];
+    let epubChapterCounter = 0;
     for (const path of chapterFiles) {
       const entry = zip.file(path);
       if (!entry) continue;
@@ -1448,11 +1484,17 @@ export const extractTextFromBookFile = async (
         const doc = new DOMParser().parseFromString(rawContent, 'text/html');
         const bodyText = doc.body?.textContent?.replace(/\s+/g, ' ').trim();
         if (bodyText && bodyText.length > 40) {
-          paragraphs.push(bodyText);
+          epubChapterCounter += 1;
+          const hasLeadingChapterHeading = /^\s*(?:chapter|chap\.?|letter|part|book|prologue|epilogue)\b/i.test(bodyText);
+          paragraphs.push(hasLeadingChapterHeading ? bodyText : `Chapter ${epubChapterCounter}\n${bodyText}`);
         }
       } else {
         const stripped = rawContent.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-        if (stripped.length > 40) paragraphs.push(stripped);
+        if (stripped.length > 40) {
+          epubChapterCounter += 1;
+          const hasLeadingChapterHeading = /^\s*(?:chapter|chap\.?|letter|part|book|prologue|epilogue)\b/i.test(stripped);
+          paragraphs.push(hasLeadingChapterHeading ? stripped : `Chapter ${epubChapterCounter}\n${stripped}`);
+        }
       }
     }
 
@@ -1471,6 +1513,208 @@ export const extractTextFromBookFile = async (
     throw new Error('The uploaded file appears to be empty.');
   }
   return { title: defaultTitle, text: cleanText };
+};
+
+const WORD_NUMBER_MAP: Record<string, number> = {
+  one: 1, two: 2, three: 3, four: 4, five: 5,
+  six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15,
+  sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20,
+  twentyone: 21, 'twenty-one': 21, twentytwo: 22, 'twenty-two': 22,
+  twentythree: 23, 'twenty-three': 23, twentyfour: 24, 'twenty-four': 24,
+  twentyfive: 25, 'twenty-five': 25, thirty: 30, forty: 40, fifty: 50,
+};
+
+const parseRomanNumeral = (roman: string): number | null => {
+  const clean = roman.trim().toUpperCase();
+  if (!/^[IVXLCDM]+$/.test(clean)) return null;
+  const values: Record<string, number> = { I: 1, V: 5, X: 10, L: 50, C: 100, D: 500, M: 1000 };
+  let total = 0;
+  for (let i = 0; i < clean.length; i++) {
+    const curr = values[clean[i]] || 0;
+    const next = values[clean[i + 1]] || 0;
+    if (curr < next) {
+      total -= curr;
+    } else {
+      total += curr;
+    }
+  }
+  return total > 0 && total <= 300 ? total : null;
+};
+
+const normalizeChapterTokenToNumber = (token: string): number | null => {
+  const clean = token.trim().replace(/[.:—-]+$/, '');
+  if (/^\d{1,3}$/.test(clean)) {
+    const n = parseInt(clean, 10);
+    return n > 0 ? n : null;
+  }
+  const lower = clean.toLowerCase();
+  if (WORD_NUMBER_MAP[lower] !== undefined) {
+    return WORD_NUMBER_MAP[lower];
+  }
+  return parseRomanNumeral(clean);
+};
+
+const matchChapterHeadingLine = (line: string): string | null => {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.length > 90) return null;
+
+  if (/^(?:prologue|epilogue)[.:]?$/i.test(trimmed)) {
+    const clean = trimmed.replace(/[.:]+$/, '');
+    return clean.charAt(0).toUpperCase() + clean.slice(1).toLowerCase();
+  }
+
+  const m = trimmed.match(
+    /^(chapter|chap\.?|letter|stave|canto|act)\s+([0-9]{1,3}|[ivxlcdm]{1,7}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty(?:[- ](?:one|two|three|four|five))?)(?:\b|\s*[:.\-—].*)$/i
+  );
+  if (!m) return null;
+
+  const rawKind = m[1].toLowerCase();
+  const num = normalizeChapterTokenToNumber(m[2]);
+  if (!num) return null;
+
+  const prefix = rawKind.startsWith('letter')
+    ? 'Letter'
+    : rawKind.startsWith('stave')
+      ? 'Stave'
+      : rawKind.startsWith('act')
+        ? 'Act'
+        : rawKind.startsWith('canto')
+          ? 'Canto'
+          : 'Chapter';
+  return `${prefix} ${num}`;
+};
+
+export const formatTwentyPageBucket = (pageNumber: number): string => {
+  const safePage = Math.max(1, Math.floor(pageNumber));
+  const bucketIdx = Math.floor((safePage - 1) / 20);
+  const startPage = bucketIdx * 20 + 1;
+  const endPage = (bucketIdx + 1) * 20;
+  return `Pages ${startPage}-${endPage}`;
+};
+
+/**
+ * Segments a book's text into chapter sections when chapter headings exist,
+ * or into 20-page folders ("Pages 1-20", "Pages 21-40", ...) when the book has no chapters.
+ */
+export const segmentBookIntoChaptersOrPageRanges = (
+  text: string,
+  wordsPerPage = 250
+): Array<{ label: string; text: string }> => {
+  const normalized = text.replace(/\r\n/g, '\n');
+  const lines = normalized.split('\n');
+
+  const rawChapterSections: Array<{ label: string; lines: string[] }> = [];
+  let preChapterLines: string[] = [];
+  let currentChapter: { label: string; lines: string[] } | null = null;
+
+  for (const line of lines) {
+    const heading = matchChapterHeadingLine(line);
+    if (heading) {
+      if (currentChapter) {
+        const body = currentChapter.lines.join('\n').trim();
+        if (body.length >= 25) {
+          rawChapterSections.push({ label: currentChapter.label, lines: [...currentChapter.lines] });
+        }
+      }
+      currentChapter = { label: heading, lines: [] };
+    } else if (currentChapter) {
+      currentChapter.lines.push(line);
+    } else {
+      preChapterLines.push(line);
+    }
+  }
+
+  if (currentChapter) {
+    const body = currentChapter.lines.join('\n').trim();
+    if (body.length >= 25) {
+      rawChapterSections.push({ label: currentChapter.label, lines: [...currentChapter.lines] });
+    }
+  }
+
+  // Merge duplicate chapter labels (e.g. if a book repeats a heading after TOC)
+  if (rawChapterSections.length > 0) {
+    const mergedMap = new Map<string, string[]>();
+    const preBody = preChapterLines.join('\n').trim();
+    const firstLabel = rawChapterSections[0].label;
+    if (preBody.length >= 40) {
+      mergedMap.set(firstLabel, [preBody]);
+    }
+
+    for (const sec of rawChapterSections) {
+      const existing = mergedMap.get(sec.label) || [];
+      existing.push(sec.lines.join('\n').trim());
+      mergedMap.set(sec.label, existing);
+    }
+
+    return Array.from(mergedMap.entries()).map(([label, chunks]) => ({
+      label,
+      text: chunks.join('\n\n'),
+    }));
+  }
+
+  // No chapter headings found: group into 20-page folders ("Pages 1-20", "Pages 21-40", ...)
+  const WORDS_PER_20_PAGES = Math.max(50, wordsPerPage * 20);
+  const pageBuckets = new Map<string, string[]>();
+  let currentExplicitPage: number | null = null;
+  let runningWordCount = 0;
+
+  // Check if form-feed characters (\f) or standalone "Page <N>" markers exist
+  const formFeedPages = normalized.split('\f');
+  if (formFeedPages.length > 1) {
+    formFeedPages.forEach((pageContent, idx) => {
+      const trimmedPage = pageContent.trim();
+      if (!trimmedPage) return;
+      const label = formatTwentyPageBucket(idx + 1);
+      const list = pageBuckets.get(label) || [];
+      list.push(trimmedPage);
+      pageBuckets.set(label, list);
+    });
+    if (pageBuckets.size > 0) {
+      return Array.from(pageBuckets.entries()).map(([label, chunks]) => ({
+        label,
+        text: chunks.join('\n\n'),
+      }));
+    }
+  }
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    const pageMarker = trimmed.match(/^(?:\[|\b|-+\s*)?page\s+(\d{1,4})(?:\]|\s*-+)?$/i);
+    if (pageMarker && pageMarker[1]) {
+      currentExplicitPage = parseInt(pageMarker[1], 10);
+      continue;
+    }
+
+    const lineWords = trimmed.split(/\s+/).filter(Boolean).length;
+    const effectivePage =
+      currentExplicitPage !== null
+        ? currentExplicitPage
+        : Math.floor(runningWordCount / Math.max(1, wordsPerPage)) + 1;
+    runningWordCount += lineWords;
+
+    const bucketLabel =
+      currentExplicitPage !== null
+        ? formatTwentyPageBucket(effectivePage)
+        : formatTwentyPageBucket(
+            Math.floor((Math.max(1, runningWordCount - lineWords) / WORDS_PER_20_PAGES) * 20) + 1
+          );
+
+    const list = pageBuckets.get(bucketLabel) || [];
+    list.push(trimmed);
+    pageBuckets.set(bucketLabel, list);
+  }
+
+  if (pageBuckets.size === 0) {
+    return [{ label: 'Pages 1-20', text: normalized }];
+  }
+
+  return Array.from(pageBuckets.entries()).map(([label, chunks]) => ({
+    label,
+    text: chunks.join('\n'),
+  }));
 };
 
 const isSimpleCommonInflection = (word: string): boolean => {
@@ -1584,16 +1828,7 @@ export const extractComplexWordsFromText = async (
   // Sample up to ~500 KB from the book body so even massive novels process quickly
   const sampledText = text.length > 500_000 ? text.slice(0, 500_000) : text;
 
-  // Normalize single line-wraps within paragraphs into spaces
-  const normalizedParagraphs = sampledText
-    .replace(/\r\n/g, '\n')
-    .replace(/([a-z,;:])\n([a-z])/gi, '$1 $2');
-
-  // Split into clean sentences (supporting long literary sentences as well)
-  const rawSentences = normalizedParagraphs
-    .split(/(?<=[.!?])\s+|\n{2,}/)
-    .map(s => s.replace(/\s+/g, ' ').trim())
-    .filter(s => s.length >= 25 && /[a-zA-Z]/.test(s));
+  const segments = segmentBookIntoChaptersOrPageRanges(sampledText);
 
   const formatSentenceSnippet = (sentence: string, targetWord: string): string => {
     if (sentence.length <= 220) return sentence;
@@ -1616,6 +1851,7 @@ export const extractComplexWordsFromText = async (
   interface CandidateInfo {
     word: string;
     sentence: string;
+    chapter: string;
     lowercaseCount: number;
     capitalizedMidSentenceCount: number;
     localScore: number;
@@ -1623,38 +1859,52 @@ export const extractComplexWordsFromText = async (
 
   const candidates = new Map<string, CandidateInfo>();
 
-  for (const sentence of rawSentences) {
-    const tokenRegex = /\b[a-zA-Z]{6,16}\b/g;
-    let match: RegExpExecArray | null;
-    while ((match = tokenRegex.exec(sentence)) !== null) {
-      const rawToken = match[0];
-      const lower = rawToken.toLowerCase();
-      const index = match.index;
+  for (const segment of segments) {
+    // Normalize single line-wraps within paragraphs into spaces
+    const normalizedParagraphs = segment.text
+      .replace(/\r\n/g, '\n')
+      .replace(/([a-z,;:])\n([a-z])/gi, '$1 $2');
 
-      if (existingWords.has(lower)) continue;
-      if (isSimpleCommonInflection(lower)) continue;
+    // Split into clean sentences (supporting long literary sentences as well)
+    const rawSentences = normalizedParagraphs
+      .split(/(?<=[.!?])\s+|\n{2,}/)
+      .map(s => s.replace(/\s+/g, ' ').trim())
+      .filter(s => s.length >= 25 && /[a-zA-Z]/.test(s));
 
-      const isLowercase = rawToken === lower;
-      const isMidSentenceCap = index > 2 && /^[A-Z]/.test(rawToken);
+    for (const sentence of rawSentences) {
+      const tokenRegex = /\b[a-zA-Z]{6,16}\b/g;
+      let match: RegExpExecArray | null;
+      while ((match = tokenRegex.exec(sentence)) !== null) {
+        const rawToken = match[0];
+        const lower = rawToken.toLowerCase();
+        const index = match.index;
 
-      const snippet = formatSentenceSnippet(sentence, lower);
-      const existing = candidates.get(lower);
-      if (!existing) {
-        candidates.set(lower, {
-          word: lower,
-          sentence: snippet,
-          lowercaseCount: isLowercase ? 1 : 0,
-          capitalizedMidSentenceCount: isMidSentenceCap ? 1 : 0,
-          localScore: computeLocalComplexityScore(lower),
-        });
-      } else {
-        if (isLowercase) existing.lowercaseCount += 1;
-        if (isMidSentenceCap) existing.capitalizedMidSentenceCount += 1;
-        // Prefer a sentence between 45 and 175 chars that ends cleanly with punctuation
-        const currentGood = existing.sentence.length >= 45 && existing.sentence.length <= 175;
-        const nextGood = snippet.length >= 45 && snippet.length <= 175;
-        if (!currentGood && nextGood) {
-          existing.sentence = snippet;
+        if (existingWords.has(lower)) continue;
+        if (isSimpleCommonInflection(lower)) continue;
+
+        const isLowercase = rawToken === lower;
+        const isMidSentenceCap = index > 2 && /^[A-Z]/.test(rawToken);
+
+        const snippet = formatSentenceSnippet(sentence, lower);
+        const existing = candidates.get(lower);
+        if (!existing) {
+          candidates.set(lower, {
+            word: lower,
+            sentence: snippet,
+            chapter: segment.label,
+            lowercaseCount: isLowercase ? 1 : 0,
+            capitalizedMidSentenceCount: isMidSentenceCap ? 1 : 0,
+            localScore: computeLocalComplexityScore(lower),
+          });
+        } else {
+          if (isLowercase) existing.lowercaseCount += 1;
+          if (isMidSentenceCap) existing.capitalizedMidSentenceCount += 1;
+          // Prefer a sentence between 45 and 175 chars that ends cleanly with punctuation
+          const currentGood = existing.sentence.length >= 45 && existing.sentence.length <= 175;
+          const nextGood = snippet.length >= 45 && snippet.length <= 175;
+          if (!currentGood && nextGood) {
+            existing.sentence = snippet;
+          }
         }
       }
     }
@@ -1741,6 +1991,7 @@ export const extractComplexWordsFromText = async (
           frequency: freqInfo.frequency,
           complexityLevel,
           complexityScore: rankScore,
+          chapter: candidate.chapter,
           rankScore,
         };
 

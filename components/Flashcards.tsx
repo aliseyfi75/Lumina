@@ -6,7 +6,7 @@ import { playAudio } from '../utils/audio';
 import { getDueCards } from '../utils/studyUtils';
 import { BookPrepModal } from './BookPrepModal';
 import { BookExtractedWord } from '../services/bookService';
-import { parseTagHierarchy, BOOKS_FOLDER_FILTER } from '../utils/tagUtils';
+import { parseTagHierarchy, BOOKS_FOLDER_FILTER, compareChapterNames, getCardBookInfo, formatBookTag, formatBookChapterTag } from '../utils/tagUtils';
 import { TagSelectorInput } from './TagSelectorInput';
 
 const PAGE_SIZE = 24;
@@ -25,7 +25,7 @@ export interface CustomCardFormData {
 
 interface FlashcardsProps {
   cards: Flashcard[];
-  onStartStudy: (initialTag?: string) => void;
+  onStartStudy: (initialTag?: string, initialChapters?: string[]) => void;
   onDeleteCard: (id: string) => void;
   onDeleteBook?: (bookTag: string) => void;
   onReviewCard: (id: string, quality: number) => void;
@@ -42,6 +42,25 @@ const FlashcardItem: React.FC<{
   onEdit: (card: Flashcard) => void;
 }> = ({ card, onDelete, onReview, onEdit }) => {
   const [isFlipped, setIsFlipped] = useState(false);
+
+  const displayTags = useMemo(() => {
+    const rawTags = card.tags || [];
+    // If a card has both "Book: Title" and "Book: Title / Chapter 1", keep the more specific chapter tag
+    const booksWithChapter = new Set<string>();
+    for (const t of rawTags) {
+      const p = parseTagHierarchy(t);
+      if (p.isBook && p.bookTitle && p.chapter) {
+        booksWithChapter.add(p.bookTitle.toLowerCase());
+      }
+    }
+    return rawTags.filter(t => {
+      const p = parseTagHierarchy(t);
+      if (p.isBook && p.bookTitle && !p.chapter && booksWithChapter.has(p.bookTitle.toLowerCase())) {
+        return false;
+      }
+      return true;
+    });
+  }, [card.tags]);
 
   return (
     <div
@@ -103,9 +122,9 @@ const FlashcardItem: React.FC<{
             </button>
           </div>
 
-          {card.tags && card.tags.length > 0 && (
+          {displayTags.length > 0 && (
             <div className="flex flex-wrap items-center justify-center gap-1.5 mt-3 max-w-full px-2">
-              {card.tags.slice(0, 3).map((tag) => {
+              {displayTags.slice(0, 3).map((tag) => {
                 const parsed = parseTagHierarchy(tag);
                 return (
                   <span
@@ -121,7 +140,13 @@ const FlashcardItem: React.FC<{
                       <>
                         <BookOpen className="h-2.5 w-2.5 shrink-0" />
                         <span className="opacity-70">Books /</span>
-                        <span>{parsed.name}</span>
+                        <span>{parsed.bookTitle || parsed.name}</span>
+                        {parsed.chapter && (
+                          <>
+                            <span className="opacity-70">/</span>
+                            <span>{parsed.chapter}</span>
+                          </>
+                        )}
                       </>
                     ) : parsed.folder ? (
                       <>
@@ -135,8 +160,8 @@ const FlashcardItem: React.FC<{
                   </span>
                 );
               })}
-              {card.tags.length > 3 && (
-                <span className="text-[10px] font-medium text-slate-400">+{card.tags.length - 3}</span>
+              {displayTags.length > 3 && (
+                <span className="text-[10px] font-medium text-slate-400">+{displayTags.length - 3}</span>
               )}
             </div>
           )}
@@ -481,37 +506,73 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
       {
         tag: string;
         title: string;
-        cards: Flashcard[];
+        cardMap: Map<string, Flashcard>;
+        chapterCardsMap: Map<string, Map<string, Flashcard>>;
       }
     >();
 
     for (const card of cards) {
-      for (const rawTag of card.tags || []) {
-        const trimmed = rawTag.trim();
-        const match = trimmed.match(/^book:\s*(.+)$/i);
-        if (match && match[1]) {
-          const title = match[1].trim();
-          const existing = groups.get(trimmed);
-          if (!existing) {
-            groups.set(trimmed, { tag: trimmed, title, cards: [card] });
-          } else {
-            existing.cards.push(card);
-          }
+      const bookInfo = getCardBookInfo(card);
+      if (!bookInfo) continue;
+
+      const { bookTitle, chapter, bookTag } = bookInfo;
+      let group = groups.get(bookTag);
+      if (!group) {
+        group = {
+          tag: bookTag,
+          title: bookTitle,
+          cardMap: new Map<string, Flashcard>(),
+          chapterCardsMap: new Map<string, Map<string, Flashcard>>(),
+        };
+        groups.set(bookTag, group);
+      }
+      group.cardMap.set(card.id, card);
+
+      if (chapter) {
+        let chapMap = group.chapterCardsMap.get(chapter);
+        if (!chapMap) {
+          chapMap = new Map<string, Flashcard>();
+          group.chapterCardsMap.set(chapter, chapMap);
         }
+        chapMap.set(card.id, card);
       }
     }
 
     return Array.from(groups.values())
       .map(group => {
-        const total = group.cards.length;
-        const mastered = group.cards.filter(c => c.status === FlashcardStatus.Mastered).length;
-        const learning = group.cards.filter(c => c.status === FlashcardStatus.Learning).length;
-        const newWords = group.cards.filter(c => c.status === FlashcardStatus.New).length;
-        const dueCount = getDueCards(group.cards).length;
+        const bookCards = Array.from(group.cardMap.values());
+        const total = bookCards.length;
+        const mastered = bookCards.filter(c => c.status === FlashcardStatus.Mastered).length;
+        const learning = bookCards.filter(c => c.status === FlashcardStatus.Learning).length;
+        const newWords = bookCards.filter(c => c.status === FlashcardStatus.New).length;
+        const dueCount = getDueCards(bookCards).length;
         const readiness = total > 0 ? Math.round(((mastered + learning * 0.5) / total) * 100) : 0;
 
+        const chapters = Array.from(group.chapterCardsMap.entries())
+          .map(([chapterName, cMap]) => {
+            const cCards = Array.from(cMap.values());
+            const cTotal = cCards.length;
+            const cMastered = cCards.filter(c => c.status === FlashcardStatus.Mastered).length;
+            const cLearning = cCards.filter(c => c.status === FlashcardStatus.Learning).length;
+            const cDue = getDueCards(cCards).length;
+            const cReadiness = cTotal > 0 ? Math.round(((cMastered + cLearning * 0.5) / cTotal) * 100) : 0;
+            return {
+              chapter: chapterName,
+              chapterTag: formatBookChapterTag(group.title, chapterName),
+              total: cTotal,
+              mastered: cMastered,
+              dueCount: cDue,
+              readiness: cReadiness,
+              isMastered: cTotal > 0 && cMastered === cTotal,
+            };
+          })
+          .sort((a, b) => compareChapterNames(a.chapter, b.chapter));
+
         return {
-          ...group,
+          tag: group.tag,
+          title: group.title,
+          cards: bookCards,
+          chapters,
           total,
           mastered,
           learning,
@@ -585,19 +646,51 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
         folderName: string;
         isBooksFolder: boolean;
         cardIds: Set<string>;
-        items: { rawTag: string; name: string; count: number }[];
+        items: {
+          rawTag: string;
+          name: string;
+          count: number;
+          chapters?: { rawTag: string; chapter: string; count: number }[];
+        }[];
       }
     >();
     const flatTags: { rawTag: string; name: string; count: number }[] = [];
 
+    // Populate Books folder from bookGroups so book pills are deduplicated per book title
+    // and carry their nested chapter / 20-page folders.
+    if (bookGroups.length > 0) {
+      const bookCardIds = new Set<string>();
+      for (const bg of bookGroups) {
+        for (const c of bg.cards) bookCardIds.add(c.id);
+      }
+      folders.set('Books', {
+        folderName: 'Books',
+        isBooksFolder: true,
+        cardIds: bookCardIds,
+        items: bookGroups.map(bg => ({
+          rawTag: bg.tag,
+          name: bg.title,
+          count: bg.total,
+          chapters: bg.chapters.map(ch => ({
+            rawTag: ch.chapterTag,
+            chapter: ch.chapter,
+            count: ch.total,
+          })),
+        })),
+      });
+    }
+
     for (const [rawTag, count] of availableTags) {
       const parsed = parseTagHierarchy(rawTag);
+      if (parsed.isBook || parsed.folder === 'Books') {
+        continue;
+      }
       if (parsed.folder) {
         let folderEntry = folders.get(parsed.folder);
         if (!folderEntry) {
           folderEntry = {
             folderName: parsed.folder,
-            isBooksFolder: parsed.isBook || parsed.folder === 'Books',
+            isBooksFolder: false,
             cardIds: new Set<string>(),
             items: [],
           };
@@ -620,7 +713,7 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
     for (const c of cards) {
       for (const raw of c.tags || []) {
         const parsed = parseTagHierarchy(raw);
-        if (parsed.folder) {
+        if (parsed.folder && parsed.folder !== 'Books') {
           folders.get(parsed.folder)?.cardIds.add(c.id);
         }
       }
@@ -641,7 +734,7 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
       folders: folderList,
       flatTags: flatTags.sort((a, b) => a.name.localeCompare(b.name)),
     };
-  }, [availableTags, cards]);
+  }, [availableTags, cards, bookGroups]);
 
   // Ensure parent folder is expanded whenever one of its sub-tags is selected
   useEffect(() => {
@@ -693,6 +786,10 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
 
   const filteredCards = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
+    const parsedSelected = selectedTag !== 'all' && !selectedTag.startsWith('__folder:')
+      ? parseTagHierarchy(selectedTag)
+      : null;
+
     return cards
       .filter(c => {
         if (selectedStatus && c.status !== selectedStatus) return false;
@@ -702,6 +799,16 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
             const folderName = selectedTag.slice('__folder:'.length, -2);
             const inFolder = c.tags?.some(t => parseTagHierarchy(t).folder === folderName);
             if (!inFolder) return false;
+          } else if (parsedSelected?.isBook && parsedSelected.bookTitle) {
+            const cardBook = getCardBookInfo(c);
+            if (!cardBook || cardBook.bookTitle.toLowerCase() !== parsedSelected.bookTitle.toLowerCase()) {
+              return false;
+            }
+            if (parsedSelected.chapter) {
+              if ((cardBook.chapter || '').toLowerCase() !== parsedSelected.chapter.toLowerCase()) {
+                return false;
+              }
+            }
           } else if (!c.tags?.some(t => t.trim() === selectedTag)) {
             return false;
           }
@@ -972,6 +1079,71 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
                           style={{ width: `${Math.max(book.readiness, book.total > 0 ? 6 : 0)}%` }}
                         />
                       </div>
+
+                      {book.chapters.length > 0 && (
+                        <div
+                          data-testid="book-chapters-list"
+                          className="pt-1.5 space-y-1.5 border-t border-slate-200/70 dark:border-slate-700/70"
+                        >
+                          <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                            <span>Chapters / Sections ({book.chapters.length})</span>
+                            <span>Mastery</span>
+                          </div>
+                          <div className="space-y-1 max-h-40 overflow-y-auto pr-0.5 custom-scrollbar">
+                            {book.chapters.map((ch) => {
+                              const isChapActive = selectedTag === ch.chapterTag;
+                              return (
+                                <div
+                                  key={ch.chapterTag}
+                                  data-testid="book-chapter-folder"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedTag(isChapActive ? book.tag : ch.chapterTag);
+                                  }}
+                                  className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg text-xs border transition-colors ${
+                                    isChapActive
+                                      ? 'bg-brand-100/80 dark:bg-brand-900/50 border-brand-400 text-brand-900 dark:text-brand-100'
+                                      : ch.isMastered
+                                        ? 'bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200/80 dark:border-emerald-800/60 text-emerald-900 dark:text-emerald-200'
+                                        : 'bg-white/80 dark:bg-slate-800/80 border-slate-200/70 dark:border-slate-700/70 text-slate-700 dark:text-slate-200 hover:border-brand-300'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <Folder className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+                                    <span className="font-medium truncate">{ch.chapter}</span>
+                                    <span className="text-[10px] text-slate-400 dark:text-slate-500 shrink-0">
+                                      ({ch.mastered}/{ch.total})
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    {ch.isMastered ? (
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300">
+                                        <CheckCircle className="h-2.5 w-2.5" />
+                                        Mastered
+                                      </span>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        data-testid="study-book-chapter-button"
+                                        aria-label={`Study ${book.title} ${ch.chapter}`}
+                                        disabled={ch.dueCount === 0}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          onStartStudy(book.tag, [ch.chapter]);
+                                        }}
+                                        className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500 hover:bg-amber-600 text-white disabled:opacity-40 transition-colors inline-flex items-center gap-1"
+                                      >
+                                        <Play className="h-2.5 w-2.5 fill-current" />
+                                        Study
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex items-center justify-between gap-2 pt-1">
@@ -1221,71 +1393,142 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
                 return null;
               }
 
+              const activeBookItem = folder.isBooksFolder
+                ? folder.items.find(
+                    item =>
+                      selectedTag === item.rawTag ||
+                      item.chapters?.some(ch => ch.rawTag === selectedTag)
+                  )
+                : undefined;
+
               return (
-                <div
-                  key={`subfolder-${folder.folderName}`}
-                  data-testid={`collection-subfolder-${folder.folderName}`}
-                  className="flex flex-wrap items-center gap-2 pl-3 sm:pl-4 py-2 px-3 rounded-2xl bg-slate-100/80 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/70"
-                >
-                  <span className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 dark:text-slate-400 mr-1">
-                    <CornerDownRight className="h-3.5 w-3.5 text-brand-500" />
-                    {folder.isBooksFolder ? (
-                      <BookOpen className="h-3.5 w-3.5 text-brand-600 dark:text-brand-400" />
-                    ) : (
-                      <FolderOpen className="h-3.5 w-3.5 text-brand-600 dark:text-brand-400" />
-                    )}
-                    <span>{folder.folderName}:</span>
-                  </span>
-
-                  <button
-                    type="button"
-                    data-testid={`collection-folder-all-${folder.folderName}`}
-                    onClick={() =>
-                      setSelectedTag(selectedTag === folderFilterKey ? 'all' : folderFilterKey)
-                    }
-                    className={`px-2.5 py-1 rounded-full text-xs font-semibold transition-colors duration-150 border ${
-                      selectedTag === folderFilterKey
-                        ? 'bg-brand-600 text-white border-brand-600 shadow-sm'
-                        : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-brand-300'
-                    }`}
+                <div key={`subfolder-group-${folder.folderName}`} className="space-y-1.5">
+                  <div
+                    data-testid={`collection-subfolder-${folder.folderName}`}
+                    className="flex flex-wrap items-center gap-2 pl-3 sm:pl-4 py-2 px-3 rounded-2xl bg-slate-100/80 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/70"
                   >
-                    All {folder.folderName} ({folder.totalCards})
-                  </button>
+                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 dark:text-slate-400 mr-1">
+                      <CornerDownRight className="h-3.5 w-3.5 text-brand-500" />
+                      {folder.isBooksFolder ? (
+                        <BookOpen className="h-3.5 w-3.5 text-brand-600 dark:text-brand-400" />
+                      ) : (
+                        <FolderOpen className="h-3.5 w-3.5 text-brand-600 dark:text-brand-400" />
+                      )}
+                      <span>{folder.folderName}:</span>
+                    </span>
 
-                  {folder.items.map((subItem) => {
-                    const isSubSelected = selectedTag === subItem.rawTag;
-                    return (
+                    <button
+                      type="button"
+                      data-testid={`collection-folder-all-${folder.folderName}`}
+                      onClick={() =>
+                        setSelectedTag(selectedTag === folderFilterKey ? 'all' : folderFilterKey)
+                      }
+                      className={`px-2.5 py-1 rounded-full text-xs font-semibold transition-colors duration-150 border ${
+                        selectedTag === folderFilterKey
+                          ? 'bg-brand-600 text-white border-brand-600 shadow-sm'
+                          : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-brand-300'
+                      }`}
+                    >
+                      All {folder.folderName} ({folder.totalCards})
+                    </button>
+
+                    {folder.items.map((subItem) => {
+                      const isSubSelected =
+                        selectedTag === subItem.rawTag ||
+                        Boolean(subItem.chapters?.some(ch => ch.rawTag === selectedTag));
+                      return (
+                        <button
+                          key={subItem.rawTag}
+                          type="button"
+                          data-testid={
+                            folder.isBooksFolder
+                              ? 'collection-book-pill'
+                              : 'collection-subfolder-item-pill'
+                          }
+                          onClick={() =>
+                            setSelectedTag(
+                              selectedTag === subItem.rawTag ? folderFilterKey : subItem.rawTag
+                            )
+                          }
+                          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-colors duration-150 border ${
+                            isSubSelected
+                              ? 'bg-brand-600 text-white border-brand-600 shadow-sm'
+                              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-brand-300'
+                          }`}
+                        >
+                          {folder.isBooksFolder && (
+                            <BookOpen
+                              className={`h-3 w-3 shrink-0 ${
+                                isSubSelected
+                                  ? 'text-white'
+                                  : 'text-brand-600 dark:text-brand-400'
+                              }`}
+                            />
+                          )}
+                          <span>{subItem.name}</span>{' '}
+                          <span className="opacity-75">({subItem.count})</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* 3rd-Level Nested Chapter / 20-Page Folders Bar for the Active Book */}
+                  {activeBookItem && activeBookItem.chapters && activeBookItem.chapters.length > 0 && (
+                    <div
+                      data-testid="collection-book-chapters"
+                      className="flex flex-wrap items-center gap-2 ml-4 sm:ml-6 py-2 px-3 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200/80 dark:border-indigo-800/60"
+                    >
+                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-700 dark:text-indigo-300 mr-1">
+                        <CornerDownRight className="h-3.5 w-3.5 text-indigo-500" />
+                        <FolderOpen className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
+                        <span>{activeBookItem.name} Chapters:</span>
+                      </span>
+
                       <button
-                        key={subItem.rawTag}
                         type="button"
-                        data-testid={
-                          folder.isBooksFolder
-                            ? 'collection-book-pill'
-                            : 'collection-subfolder-item-pill'
-                        }
-                        onClick={() =>
-                          setSelectedTag(isSubSelected ? folderFilterKey : subItem.rawTag)
-                        }
-                        className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-colors duration-150 border ${
-                          isSubSelected
-                            ? 'bg-brand-600 text-white border-brand-600 shadow-sm'
-                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-brand-300'
+                        data-testid="collection-book-all-chapters"
+                        onClick={() => setSelectedTag(activeBookItem.rawTag)}
+                        className={`px-2.5 py-1 rounded-full text-xs font-semibold transition-colors duration-150 border ${
+                          selectedTag === activeBookItem.rawTag
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                            : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-300'
                         }`}
                       >
-                        {folder.isBooksFolder && (
-                          <BookOpen
-                            className={`h-3 w-3 shrink-0 ${
-                              isSubSelected
-                                ? 'text-white'
-                                : 'text-brand-600 dark:text-brand-400'
-                            }`}
-                          />
-                        )}
-                        <span>{subItem.name}</span>{' '}
-                        <span className="opacity-75">({subItem.count})</span>
+                        All Chapters ({activeBookItem.count})
                       </button>
-                    );
-                  })}
+
+                      {activeBookItem.chapters.map((chapItem) => {
+                        const isChapSelected = selectedTag === chapItem.rawTag;
+                        return (
+                          <button
+                            key={chapItem.rawTag}
+                            type="button"
+                            data-testid="collection-chapter-pill"
+                            onClick={() =>
+                              setSelectedTag(
+                                isChapSelected ? activeBookItem.rawTag : chapItem.rawTag
+                              )
+                            }
+                            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-colors duration-150 border ${
+                              isChapSelected
+                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-indigo-300'
+                            }`}
+                          >
+                            <Folder
+                              className={`h-3 w-3 shrink-0 ${
+                                isChapSelected
+                                  ? 'text-white'
+                                  : 'text-indigo-600 dark:text-indigo-400'
+                              }`}
+                            />
+                            <span>{chapItem.chapter}</span>{' '}
+                            <span className="opacity-75">({chapItem.count})</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               );
             })}

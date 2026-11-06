@@ -146,6 +146,7 @@ const sanitizeCardsForCloud = (cards: Flashcard[]): Flashcard[] =>
     if (card.antonyms && card.antonyms.length > 0) clean.antonyms = card.antonyms;
     if (card.complexityLevel) clean.complexityLevel = card.complexityLevel;
     if (card.complexityScore !== undefined) clean.complexityScore = card.complexityScore;
+    if (card.bookChapter) clean.bookChapter = card.bookChapter;
     if (card.interval) clean.interval = card.interval;
     if (card.repetition) clean.repetition = card.repetition;
     if (card.easinessFactor && card.easinessFactor !== 2.5) clean.easinessFactor = card.easinessFactor;

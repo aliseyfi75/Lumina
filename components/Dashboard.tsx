@@ -6,6 +6,7 @@ import { playAudio } from '../utils/audio';
 import { getLocalDateString, calculateCurrentStreak, getDueCards } from '../utils/studyUtils';
 import { BookExtractedWord } from '../services/bookService';
 import { BookPrepModal } from './BookPrepModal';
+import { parseTagHierarchy, formatBookTag } from '../utils/tagUtils';
 import { motion } from 'framer-motion';
 import {
     Search, Play, BookOpen, CheckCircle, Brain, Loader2,
@@ -19,7 +20,7 @@ interface DashboardProps {
     longestStreak: number;
     onNavigate: (view: ViewState) => void;
     onQuickSearch: (word: string) => void;
-    onStartStudy?: (initialTag?: string) => void;
+    onStartStudy?: (initialTag?: string, initialChapters?: string[]) => void;
     onImportBookWords?: (bookTitle: string, words: BookExtractedWord[]) => void;
     onDeleteBook?: (bookTag: string) => void;
 }
@@ -61,17 +62,23 @@ const buildCategoryProgress = (cards: Flashcard[]): CategoryProgressItem[] => {
             continue;
         }
 
+        const seenBucketKeysForCard = new Set<string>();
         for (const rawTag of validTags) {
-            const isBook = /^book:/i.test(rawTag);
+            const parsed = parseTagHierarchy(rawTag);
+            const isBook = parsed.isBook;
             const cleanName = isBook
-                ? rawTag.replace(/^book:\s*/i, '').trim() || rawTag
+                ? (parsed.bookTitle || parsed.name)
                 : rawTag;
+            const canonicalTag = isBook ? formatBookTag(cleanName) : rawTag;
             const key = isBook ? `book:${cleanName.toLowerCase()}` : `tag:${cleanName.toLowerCase()}`;
+            if (seenBucketKeysForCard.has(key)) continue;
+            seenBucketKeysForCard.add(key);
+
             const existing = buckets.get(key);
             if (!existing) {
                 buckets.set(key, {
                     name: cleanName,
-                    rawTag,
+                    rawTag: canonicalTag,
                     kind: isBook ? 'book' : 'tag',
                     cards: [card],
                 });

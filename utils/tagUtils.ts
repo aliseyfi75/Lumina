@@ -1,16 +1,20 @@
 export interface ParsedTag {
-  /** The canonical tag string stored on Flashcard.tags (e.g. "Book: Kite Runner" or "GRE Prep") */
+  /** The canonical tag string stored on Flashcard.tags (e.g. "Book: Kite Runner" or "Book: Kite Runner / Chapter 1") */
   raw: string;
   /** True when the tag belongs to the Books collection */
   isBook: boolean;
   /** Parent folder name if nested (e.g. "Books" or custom folder before "/"), otherwise null */
   folder: string | null;
-  /** Clean leaf name without "#Book:" or folder prefix (e.g. "Kite Runner" or "GRE Prep") */
+  /** Clean leaf name without "#Book:" or folder prefix (e.g. "Kite Runner" or "Chapter 1" or "GRE Prep") */
   name: string;
   /** Clean short label for pills/badges (e.g. "Kite Runner" for books, "#GRE Prep" for flat tags) */
   shortLabel: string;
-  /** Breadcrumb label showing hierarchy (e.g. "Books / Kite Runner") */
+  /** Breadcrumb label showing hierarchy (e.g. "Books / Kite Runner" or "Books / Kite Runner / Chapter 1") */
   breadcrumbLabel: string;
+  /** Book title when isBook is true */
+  bookTitle?: string;
+  /** Nested chapter or page-range folder inside a book (e.g. "Chapter 1" or "Pages 1-20") */
+  chapter?: string;
 }
 
 export interface TagWithCount {
@@ -21,22 +25,113 @@ export interface TagWithCount {
 
 export const BOOKS_FOLDER_FILTER = '__folder:Books__';
 
+export function formatBookTag(bookTitle: string): string {
+  return `Book: ${bookTitle.trim()}`;
+}
+
+export function formatBookChapterTag(bookTitle: string, chapter: string): string {
+  return `Book: ${bookTitle.trim()} / ${chapter.trim()}`;
+}
+
+/**
+ * Natural comparator for chapter and page-range labels
+ * (e.g. "Chapter 1" < "Chapter 2" < "Chapter 10", "Pages 1-20" < "Pages 21-40").
+ */
+export function compareChapterNames(a: string, b: string): number {
+  const extractOrder = (label: string): { group: number; num: number; text: string } => {
+    const trimmed = label.trim();
+    const chapMatch = trimmed.match(/^(?:chapter|chap\.?|letter|part|book|section|stave|act|scene)\s+(\d+)/i);
+    if (chapMatch && chapMatch[1]) {
+      return { group: 1, num: parseInt(chapMatch[1], 10), text: trimmed.toLowerCase() };
+    }
+    const pageMatch = trimmed.match(/^pages?\s+(\d+)/i);
+    if (pageMatch && pageMatch[1]) {
+      return { group: 2, num: parseInt(pageMatch[1], 10), text: trimmed.toLowerCase() };
+    }
+    if (/^prologue$/i.test(trimmed)) {
+      return { group: 0, num: 0, text: trimmed.toLowerCase() };
+    }
+    if (/^epilogue$/i.test(trimmed)) {
+      return { group: 3, num: 999999, text: trimmed.toLowerCase() };
+    }
+    const anyNum = trimmed.match(/(\d+)/);
+    if (anyNum && anyNum[1]) {
+      return { group: 2, num: parseInt(anyNum[1], 10), text: trimmed.toLowerCase() };
+    }
+    return { group: 4, num: 0, text: trimmed.toLowerCase() };
+  };
+
+  const ordA = extractOrder(a);
+  const ordB = extractOrder(b);
+  if (ordA.group !== ordB.group) return ordA.group - ordB.group;
+  if (ordA.num !== ordB.num) return ordA.num - ordB.num;
+  return ordA.text.localeCompare(ordB.text);
+}
+
+/**
+ * Extracts book title and optional chapter/page-range folder from a Flashcard's tags & metadata.
+ */
+export function getCardBookInfo(card: {
+  tags?: string[];
+  bookChapter?: string;
+}): { bookTitle: string; chapter?: string; bookTag: string; chapterTag?: string } | null {
+  let bookTitle: string | undefined;
+  let chapter: string | undefined = card.bookChapter?.trim() || undefined;
+
+  for (const rawTag of card.tags || []) {
+    const parsed = parseTagHierarchy(rawTag);
+    if (parsed.isBook && parsed.bookTitle) {
+      if (!bookTitle) {
+        bookTitle = parsed.bookTitle;
+      }
+      if (parsed.chapter && !chapter) {
+        chapter = parsed.chapter;
+      }
+    }
+  }
+
+  if (!bookTitle) return null;
+  const bookTag = formatBookTag(bookTitle);
+  const chapterTag = chapter ? formatBookChapterTag(bookTitle, chapter) : undefined;
+  return { bookTitle, chapter, bookTag, chapterTag };
+}
+
 /**
  * Parses a raw tag string into a hierarchical folder/item structure.
- * Book tags ("Book: Title" or "Books/Title") are placed inside the "Books" collection
- * and display their clean book title without "#Book:" clutter.
+ * Book tags ("Book: Title", "Book: Title / Chapter 1", or "Books/Title") are placed inside
+ * the "Books" collection and display their clean book title and optional nested chapter folder.
  */
 export function parseTagHierarchy(rawTag: string): ParsedTag {
   const trimmed = rawTag.trim();
 
-  // Match "Book: <Title>" or "Books/<Title>"
+  // Match "Book: <Title>" or "Book: <Title> / <Chapter>" or "Books/<Title>"
   const bookMatch = trimmed.match(/^(?:book\s*:|books\s*\/)\s*(.+)$/i);
   if (bookMatch && bookMatch[1]) {
-    const cleanTitle = bookMatch[1].trim();
+    const remainder = bookMatch[1].trim();
+    const slashIdx = remainder.indexOf('/');
+    if (slashIdx > 0 && slashIdx < remainder.length - 1) {
+      const bookTitle = remainder.slice(0, slashIdx).trim();
+      const chapter = remainder.slice(slashIdx + 1).trim();
+      if (bookTitle && chapter) {
+        return {
+          raw: trimmed,
+          isBook: true,
+          folder: 'Books',
+          bookTitle,
+          chapter,
+          name: chapter,
+          shortLabel: `${bookTitle} / ${chapter}`,
+          breadcrumbLabel: `Books / ${bookTitle} / ${chapter}`,
+        };
+      }
+    }
+
+    const cleanTitle = remainder;
     return {
       raw: trimmed,
       isBook: true,
       folder: 'Books',
+      bookTitle: cleanTitle,
       name: cleanTitle,
       shortLabel: cleanTitle,
       breadcrumbLabel: `Books / ${cleanTitle}`,
@@ -49,10 +144,37 @@ export function parseTagHierarchy(rawTag: string): ParsedTag {
     const folder = trimmed.slice(0, slashIdx).trim();
     const subName = trimmed.slice(slashIdx + 1).trim();
     if (folder && subName) {
+      const isBookFolder = folder.toLowerCase() === 'books' || folder.toLowerCase() === 'book';
+      if (isBookFolder) {
+        const innerSlash = subName.indexOf('/');
+        if (innerSlash > 0 && innerSlash < subName.length - 1) {
+          const bookTitle = subName.slice(0, innerSlash).trim();
+          const chapter = subName.slice(innerSlash + 1).trim();
+          return {
+            raw: trimmed,
+            isBook: true,
+            folder: 'Books',
+            bookTitle,
+            chapter,
+            name: chapter,
+            shortLabel: `${bookTitle} / ${chapter}`,
+            breadcrumbLabel: `Books / ${bookTitle} / ${chapter}`,
+          };
+        }
+        return {
+          raw: trimmed,
+          isBook: true,
+          folder: 'Books',
+          bookTitle: subName,
+          name: subName,
+          shortLabel: subName,
+          breadcrumbLabel: `Books / ${subName}`,
+        };
+      }
       return {
         raw: trimmed,
-        isBook: folder.toLowerCase() === 'books' || folder.toLowerCase() === 'book',
-        folder: folder.toLowerCase() === 'books' || folder.toLowerCase() === 'book' ? 'Books' : folder,
+        isBook: false,
+        folder,
         name: subName,
         shortLabel: subName,
         breadcrumbLabel: `${folder} / ${subName}`,

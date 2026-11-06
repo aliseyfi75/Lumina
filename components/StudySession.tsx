@@ -7,6 +7,7 @@ import { motion, useMotionValue, useTransform, PanInfo, AnimatePresence } from '
 import { useLocation } from 'react-router-dom';
 import { playAudio } from '../utils/audio';
 import { getDueCards, sortStudySessionCards, isBookFlashcard, getCardComplexityLevel } from '../utils/studyUtils';
+import { parseTagHierarchy, getCardBookInfo } from '../utils/tagUtils';
 import { SessionMode } from './SessionConfigModal';
 
 const FALLBACK_DISTRACTORS = [
@@ -45,16 +46,42 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
   const [actionToast, setActionToast] = useState<{ message: string; colorClass: string; bgColorClass: string } | null>(null);
 
   const location = useLocation();
-  const sessionConfig = location.state?.sessionConfig as { mode: SessionMode; count?: number; tag?: string } | undefined;
+  const sessionConfig = location.state?.sessionConfig as {
+    mode: SessionMode;
+    count?: number;
+    tag?: string;
+    chapters?: string[];
+  } | undefined;
   const isQuizMode = sessionConfig?.mode === 'quiz';
 
   useEffect(() => {
     if (isInitialized || cards.length === 0) return;
 
     const allDueCards = getDueCards(cards);
-    const dueCards = sessionConfig?.tag
-      ? allDueCards.filter(c => c.tags?.some(t => t.trim() === sessionConfig.tag))
-      : allDueCards;
+    let dueCards = allDueCards;
+
+    if (sessionConfig?.tag) {
+      const parsed = parseTagHierarchy(sessionConfig.tag);
+      if (parsed.folder === 'Books' && parsed.bookTitle) {
+        const targetBookLower = parsed.bookTitle.toLowerCase();
+        const effectiveChapters =
+          sessionConfig.chapters && sessionConfig.chapters.length > 0
+            ? sessionConfig.chapters
+            : parsed.chapter
+              ? [parsed.chapter]
+              : [];
+        dueCards = allDueCards.filter(c => {
+          const info = getCardBookInfo(c);
+          if (!info || info.bookTitle.toLowerCase() !== targetBookLower) return false;
+          if (effectiveChapters.length > 0) {
+            return Boolean(info.chapter && effectiveChapters.includes(info.chapter));
+          }
+          return true;
+        });
+      } else {
+        dueCards = allDueCards.filter(c => c.tags?.some(t => t.trim() === sessionConfig.tag));
+      }
+    }
 
     const isBookSession = Boolean(
       (sessionConfig?.tag && /^(?:book\s*:|books\s*\/|__folder:Books__)/i.test(sessionConfig.tag.trim())) ||
@@ -75,13 +102,23 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
 
   const currentCard = queue[currentIndex];
 
+  const currentCardBookInfo = useMemo(() => {
+    if (!currentCard) return null;
+    return getCardBookInfo(currentCard);
+  }, [currentCard]);
+
   // Determine if the current card comes from a Book dock and has a real sentence from the book
   const bookSourceTitle = useMemo(() => {
     if (!currentCard?.example?.trim()) return null;
+    if (currentCardBookInfo?.bookTitle) return currentCardBookInfo.bookTitle;
     const bookTag = currentCard.tags?.find(t => /^book\s*:/i.test(t.trim()));
     if (!bookTag) return null;
     return bookTag.replace(/^book\s*:\s*/i, '').trim() || 'Book';
-  }, [currentCard]);
+  }, [currentCard, currentCardBookInfo]);
+
+  const currentCardChapter = useMemo(() => {
+    return currentCardBookInfo?.chapter || null;
+  }, [currentCardBookInfo]);
 
   const currentCardComplexity = useMemo(() => {
     if (!currentCard) return null;
@@ -494,6 +531,14 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
                     {currentCardComplexity}
                   </span>
                 )}
+                {currentCardChapter && (
+                  <span
+                    data-testid="study-card-chapter-badge"
+                    className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/60"
+                  >
+                    {currentCardChapter}
+                  </span>
+                )}
               </div>
               <h2 className="text-4xl font-serif font-bold text-slate-900 dark:text-white">{currentCard.word}</h2>
               <div className="flex items-center justify-center gap-2">
@@ -669,19 +714,31 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
               <motion.div style={{ opacity: swipeUpOpacity }} className="absolute inset-0 rounded-3xl pointer-events-none bg-blue-500/10 dark:bg-blue-500/20" />
 
               <div className="relative z-10 flex flex-col items-center w-full">
-                {currentCardComplexity && (
-                  <span
-                    data-testid="study-card-complexity-badge"
-                    className={`mb-3 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
-                      currentCardComplexity === 'advanced'
-                        ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800/60'
-                        : currentCardComplexity === 'intermediate'
-                          ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/60'
-                          : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/60'
-                    }`}
-                  >
-                    {currentCardComplexity}
-                  </span>
+                {(currentCardComplexity || currentCardChapter) && (
+                  <div className="mb-3 flex flex-wrap items-center justify-center gap-1.5">
+                    {currentCardComplexity && (
+                      <span
+                        data-testid="study-card-complexity-badge"
+                        className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
+                          currentCardComplexity === 'advanced'
+                            ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800/60'
+                            : currentCardComplexity === 'intermediate'
+                              ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/60'
+                              : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/60'
+                        }`}
+                      >
+                        {currentCardComplexity}
+                      </span>
+                    )}
+                    {currentCardChapter && (
+                      <span
+                        data-testid="study-card-chapter-badge"
+                        className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/60"
+                      >
+                        {currentCardChapter}
+                      </span>
+                    )}
+                  </div>
                 )}
                 <h2 className="text-5xl font-serif font-bold text-slate-900 dark:text-white mb-6">{currentCard.word}</h2>
                 <div className="flex items-center gap-3 justify-center">

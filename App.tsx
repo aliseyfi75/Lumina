@@ -182,6 +182,7 @@ const App: React.FC = () => {
 
   const [isSessionConfigOpen, setIsSessionConfigOpen] = useState(false);
   const [sessionInitialTag, setSessionInitialTag] = useState<string | undefined>(undefined);
+  const [sessionInitialChapters, setSessionInitialChapters] = useState<string[] | undefined>(undefined);
 
   // Confetti State
   const { width, height } = useWindowSize();
@@ -267,6 +268,7 @@ const App: React.FC = () => {
               : undefined,
         complexityLevel: winner.complexityLevel || fallback.complexityLevel,
         complexityScore: winner.complexityScore ?? fallback.complexityScore,
+        bookChapter: winner.bookChapter || fallback.bookChapter,
         createdAt: Math.min(
           existing.createdAt || Date.now(),
           inc.createdAt || Date.now()
@@ -1226,12 +1228,13 @@ const App: React.FC = () => {
     recordActivity();
   };
 
-  const handleStartStudySession = (initialTag?: string) => {
+  const handleStartStudySession = (initialTag?: string, initialChapters?: string[]) => {
     setSessionInitialTag(initialTag);
+    setSessionInitialChapters(initialChapters);
     setIsSessionConfigOpen(true);
   };
 
-  const handleSessionStart = (config: { mode: SessionMode; count?: number; tag?: string }) => {
+  const handleSessionStart = (config: { mode: SessionMode; count?: number; tag?: string; chapters?: string[] }) => {
     navigate('/study', { state: { sessionConfig: config } });
   };
 
@@ -1371,26 +1374,33 @@ const App: React.FC = () => {
     const bookTag = `Book: ${cleanTitle}`;
     const now = Date.now();
 
-    const newBookCards: Flashcard[] = words.map((w, idx) => ({
-      id: crypto.randomUUID(),
-      word: w.word.trim(),
-      partOfSpeech: w.partOfSpeech.trim() || 'noun',
-      phonetic: w.phonetic?.trim() || undefined,
-      audio: w.audio,
-      mainDefinition: w.mainDefinition.trim(),
-      example: w.bookSentence?.trim() || undefined,
-      synonyms: w.synonyms && w.synonyms.length > 0 ? w.synonyms : undefined,
-      antonyms: w.antonyms && w.antonyms.length > 0 ? w.antonyms : undefined,
-      complexityLevel: w.complexityLevel,
-      complexityScore: w.complexityScore,
-      tags: [bookTag],
-      status: FlashcardStatus.New,
-      lastReviewed: 0,
-      createdAt: now + idx,
-      repetition: 0,
-      nextReviewDate: now,
-      updatedAt: now + idx,
-    }));
+    const newBookCards: Flashcard[] = words.map((w, idx) => {
+      const cleanChapter = w.chapter?.trim();
+      const cardTags = cleanChapter
+        ? [bookTag, `${bookTag} / ${cleanChapter}`]
+        : [bookTag];
+      return {
+        id: crypto.randomUUID(),
+        word: w.word.trim(),
+        partOfSpeech: w.partOfSpeech.trim() || 'noun',
+        phonetic: w.phonetic?.trim() || undefined,
+        audio: w.audio,
+        mainDefinition: w.mainDefinition.trim(),
+        example: w.bookSentence?.trim() || undefined,
+        synonyms: w.synonyms && w.synonyms.length > 0 ? w.synonyms : undefined,
+        antonyms: w.antonyms && w.antonyms.length > 0 ? w.antonyms : undefined,
+        complexityLevel: w.complexityLevel,
+        complexityScore: w.complexityScore,
+        bookChapter: cleanChapter || undefined,
+        tags: cardTags,
+        status: FlashcardStatus.New,
+        lastReviewed: 0,
+        createdAt: now + idx,
+        repetition: 0,
+        nextReviewDate: now,
+        updatedAt: now + idx,
+      };
+    });
 
     performMerge(newBookCards);
     recordActivity();
@@ -1490,8 +1500,12 @@ const App: React.FC = () => {
     const now = Date.now();
     const removedIds: string[] = [];
 
+    const cleanTagLower = cleanTag.toLowerCase();
     const nextCards = cardsRef.current.filter(c => {
-      const belongsToBook = c.tags?.some(t => t.trim() === cleanTag);
+      const belongsToBook = c.tags?.some(t => {
+        const trimmed = t.trim().toLowerCase();
+        return trimmed === cleanTagLower || trimmed.startsWith(`${cleanTagLower} /`);
+      });
       if (belongsToBook) {
         removedIds.push(c.id);
         return false;
@@ -1841,6 +1855,7 @@ const App: React.FC = () => {
         dueCount={getDueCards(cards).length}
         cards={cards}
         initialTag={sessionInitialTag}
+        initialChapters={sessionInitialChapters}
       />
     </div>
   );

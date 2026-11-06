@@ -22,6 +22,7 @@ import {
   extractTextFromBookFile,
   extractComplexWordsFromText,
 } from '../services/bookService';
+import { compareChapterNames } from '../utils/tagUtils';
 
 interface BookPrepModalProps {
   isOpen: boolean;
@@ -51,6 +52,7 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
   const [extractionProgress, setExtractionProgress] = useState<{ completed: number; total: number } | null>(null);
   const [activeBookTitle, setActiveBookTitle] = useState('');
   const [complexityFilter, setComplexityFilter] = useState<ComplexityFilter>('all');
+  const [chapterFilter, setChapterFilter] = useState<string>('all');
   const [extractedWords, setExtractedWords] = useState<BookExtractedWord[]>([]);
   const [selectedWordSet, setSelectedWordSet] = useState<Set<string>>(new Set());
   const [extractionError, setExtractionError] = useState<string | null>(null);
@@ -72,6 +74,7 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
     setExtractionProgress(null);
     setActiveBookTitle('');
     setComplexityFilter('all');
+    setChapterFilter('all');
     setExtractedWords([]);
     setSelectedWordSet(new Set());
     setExtractionError(null);
@@ -359,9 +362,11 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                           data-testid={`complexity-filter-${lvl.id}`}
                           onClick={() => {
                             setComplexityFilter(lvl.id);
-                            const matching = lvl.id === 'all'
-                              ? extractedWords
-                              : extractedWords.filter(w => (w.complexityLevel || 'intermediate') === lvl.id);
+                            const matching = extractedWords.filter(w => {
+                              const matchLvl = lvl.id === 'all' || (w.complexityLevel || 'intermediate') === lvl.id;
+                              const matchChap = chapterFilter === 'all' || w.chapter === chapterFilter;
+                              return matchLvl && matchChap;
+                            });
                             setSelectedWordSet(new Set(matching.map(w => w.word.toLowerCase())));
                           }}
                           className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
@@ -376,11 +381,75 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                     })}
                   </div>
                 </div>
+
+                {(() => {
+                  const chapters = Array.from(
+                    new Set(extractedWords.map(w => w.chapter).filter((c): c is string => Boolean(c)))
+                  ).sort(compareChapterNames);
+                  if (chapters.length === 0) return null;
+                  return (
+                    <div className="space-y-1.5 pt-1" data-testid="preview-chapter-filter">
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                        Filter by Chapter / Section
+                      </label>
+                      <div className="flex flex-wrap gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setChapterFilter('all');
+                            const matching = extractedWords.filter(
+                              w => complexityFilter === 'all' || (w.complexityLevel || 'intermediate') === complexityFilter
+                            );
+                            setSelectedWordSet(new Set(matching.map(w => w.word.toLowerCase())));
+                          }}
+                          className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
+                            chapterFilter === 'all'
+                              ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                              : 'bg-slate-50 dark:bg-slate-900/50 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-300'
+                          }`}
+                        >
+                          All Sections ({extractedWords.length})
+                        </button>
+                        {chapters.map(chap => {
+                          const count = extractedWords.filter(w => w.chapter === chap).length;
+                          const isActive = chapterFilter === chap;
+                          return (
+                            <button
+                              key={chap}
+                              type="button"
+                              onClick={() => {
+                                setChapterFilter(chap);
+                                const matching = extractedWords.filter(w => {
+                                  const matchLvl =
+                                    complexityFilter === 'all' || (w.complexityLevel || 'intermediate') === complexityFilter;
+                                  return matchLvl && w.chapter === chap;
+                                });
+                                setSelectedWordSet(new Set(matching.map(w => w.word.toLowerCase())));
+                              }}
+                              className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
+                                isActive
+                                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                                  : 'bg-slate-50 dark:bg-slate-900/50 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-300'
+                              }`}
+                            >
+                              {chap} ({count})
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               <div className="space-y-3">
                 {extractedWords
-                  .filter(item => complexityFilter === 'all' || (item.complexityLevel || 'intermediate') === complexityFilter)
+                  .filter(item => {
+                    const matchLvl =
+                      complexityFilter === 'all' || (item.complexityLevel || 'intermediate') === complexityFilter;
+                    const matchChap = chapterFilter === 'all' || item.chapter === chapterFilter;
+                    return matchLvl && matchChap;
+                  })
                   .map((item) => {
                   const lower = item.word.toLowerCase();
                   const isChecked = selectedWordSet.has(lower);
@@ -425,6 +494,14 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                           >
                             {level}
                           </span>
+                          {item.chapter && (
+                            <span
+                              data-testid="word-chapter-badge"
+                              className="px-2 py-0.5 rounded-md text-[10px] font-bold tracking-wider bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60"
+                            >
+                              {item.chapter}
+                            </span>
+                          )}
                           {item.phonetic && (
                             <span className="text-xs text-slate-400 font-mono">
                               {item.phonetic}

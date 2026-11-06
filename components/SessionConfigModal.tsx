@@ -1,19 +1,20 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Play, Zap, BrainCircuit, ListChecks, Tag } from 'lucide-react';
+import { X, Play, Zap, BrainCircuit, ListChecks, Tag, BookOpen, Check } from 'lucide-react';
 import { Flashcard } from '../types';
 import { getDueCards } from '../utils/studyUtils';
-import { parseTagHierarchy } from '../utils/tagUtils';
+import { parseTagHierarchy, formatBookTag, getCardBookInfo, compareChapterNames } from '../utils/tagUtils';
 
 export type SessionMode = 'full' | 'short' | 'quiz';
 
 interface SessionConfigModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onStart: (config: { mode: SessionMode; count?: number; tag?: string }) => void;
+    onStart: (config: { mode: SessionMode; count?: number; tag?: string; chapters?: string[] }) => void;
     dueCount: number;
     cards?: Flashcard[];
     initialTag?: string;
+    initialChapters?: string[];
 }
 
 export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
@@ -23,34 +24,104 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
     dueCount,
     cards = [],
     initialTag,
+    initialChapters,
 }) => {
     const [mode, setMode] = useState<SessionMode>('full');
     const [count, setCount] = useState(10);
     const [selectedTag, setSelectedTag] = useState<string>(initialTag || '');
+    const [selectedChapters, setSelectedChapters] = useState<string[]>(initialChapters || []);
 
     useEffect(() => {
         if (isOpen) {
+            if (initialTag) {
+                const parsed = parseTagHierarchy(initialTag);
+                if (parsed.folder === 'Books' && parsed.bookTitle) {
+                    setSelectedTag(formatBookTag(parsed.bookTitle));
+                    if (initialChapters && initialChapters.length > 0) {
+                        setSelectedChapters(initialChapters);
+                    } else if (parsed.chapter) {
+                        setSelectedChapters([parsed.chapter]);
+                    } else {
+                        setSelectedChapters([]);
+                    }
+                    return;
+                }
+            }
             setSelectedTag(initialTag || '');
+            setSelectedChapters(initialChapters || []);
         }
-    }, [isOpen, initialTag]);
+    }, [isOpen, initialTag, initialChapters]);
 
     const dueCards = useMemo(() => getDueCards(cards), [cards]);
+    const dueCardIds = useMemo(() => new Set(dueCards.map(c => c.id)), [dueCards]);
 
     const availableTags = useMemo(() => {
-        const tagMap = new Map<string, number>();
+        const tagCardSets = new Map<string, Set<string>>();
         for (const card of dueCards) {
             for (const rawTag of card.tags || []) {
                 const t = rawTag.trim();
-                if (t) tagMap.set(t, (tagMap.get(t) || 0) + 1);
+                if (!t) continue;
+                const parsed = parseTagHierarchy(t);
+                const canonicalTag =
+                    parsed.folder === 'Books' && parsed.bookTitle
+                        ? formatBookTag(parsed.bookTitle)
+                        : t;
+                if (!tagCardSets.has(canonicalTag)) {
+                    tagCardSets.set(canonicalTag, new Set());
+                }
+                tagCardSets.get(canonicalTag)!.add(card.id);
             }
         }
-        return Array.from(tagMap.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+        return Array.from(tagCardSets.entries())
+            .map(([tag, set]) => [tag, set.size] as [string, number])
+            .sort((a, b) => a[0].localeCompare(b[0]));
     }, [dueCards]);
+
+    const selectedBookTitle = useMemo(() => {
+        if (!selectedTag) return null;
+        const parsed = parseTagHierarchy(selectedTag);
+        return parsed.folder === 'Books' && parsed.bookTitle ? parsed.bookTitle : null;
+    }, [selectedTag]);
+
+    const availableChaptersForSelectedBook = useMemo(() => {
+        if (!selectedBookTitle) return [];
+        const chapterMap = new Map<string, { dueCount: number; totalCount: number }>();
+        for (const card of cards) {
+            const info = getCardBookInfo(card);
+            if (!info || info.bookTitle.toLowerCase() !== selectedBookTitle.toLowerCase()) continue;
+            if (!info.chapter) continue;
+            const entry = chapterMap.get(info.chapter) || { dueCount: 0, totalCount: 0 };
+            entry.totalCount += 1;
+            if (dueCardIds.has(card.id)) {
+                entry.dueCount += 1;
+            }
+            chapterMap.set(info.chapter, entry);
+        }
+        return Array.from(chapterMap.entries())
+            .map(([chapter, counts]) => ({ chapter, ...counts }))
+            .sort((a, b) => compareChapterNames(a.chapter, b.chapter));
+    }, [selectedBookTitle, cards, dueCardIds]);
+
+    const toggleChapterSelection = (chapter: string) => {
+        setSelectedChapters(prev =>
+            prev.includes(chapter) ? prev.filter(ch => ch !== chapter) : [...prev, chapter]
+        );
+    };
 
     const effectiveDueCount = useMemo(() => {
         if (!selectedTag) return dueCount;
+        if (selectedBookTitle) {
+            return dueCards.filter(c => {
+                const info = getCardBookInfo(c);
+                if (!info || info.bookTitle.toLowerCase() !== selectedBookTitle.toLowerCase()) return false;
+                if (selectedChapters.length > 0) {
+                    return Boolean(info.chapter && selectedChapters.includes(info.chapter));
+                }
+                return true;
+            }).length;
+        }
         return dueCards.filter(c => c.tags?.some(t => t.trim() === selectedTag)).length;
-    }, [selectedTag, dueCount, dueCards]);
+    }, [selectedTag, selectedBookTitle, selectedChapters, dueCount, dueCards]);
 
     if (!isOpen) return null;
 
@@ -59,6 +130,7 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
             mode,
             count: mode === 'short' || mode === 'quiz' ? Math.min(count, effectiveDueCount) : undefined,
             tag: selectedTag || undefined,
+            chapters: selectedBookTitle && selectedChapters.length > 0 ? selectedChapters : undefined,
         });
         onClose();
     };
@@ -101,7 +173,10 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
                             <select
                                 aria-label="Study tag filter"
                                 value={selectedTag}
-                                onChange={(e) => setSelectedTag(e.target.value)}
+                                onChange={(e) => {
+                                    setSelectedTag(e.target.value);
+                                    setSelectedChapters([]);
+                                }}
                                 className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-800 dark:text-slate-100 focus:outline-none focus:border-brand-500"
                             >
                                 <option value="">All Due Cards ({dueCount})</option>
@@ -114,6 +189,67 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
                                     );
                                 })}
                             </select>
+                        </div>
+                    )}
+
+                    {selectedBookTitle && availableChaptersForSelectedBook.length > 0 && (
+                        <div
+                            data-testid="session-chapter-selector"
+                            className="space-y-2.5 p-3.5 rounded-2xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/70 dark:border-amber-800/50"
+                        >
+                            <div className="flex items-center justify-between gap-2">
+                                <label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-amber-800 dark:text-amber-300">
+                                    <BookOpen className="h-3.5 w-3.5" />
+                                    Chapters / Page Sections
+                                </label>
+                                <span className="text-[11px] font-medium text-amber-700/80 dark:text-amber-400/80">
+                                    {selectedChapters.length === 0
+                                        ? 'All chapters selected'
+                                        : `${selectedChapters.length} selected`}
+                                </span>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                                <button
+                                    type="button"
+                                    data-testid="session-chapter-option-all"
+                                    onClick={() => setSelectedChapters([])}
+                                    className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+                                        selectedChapters.length === 0
+                                            ? 'bg-amber-600 text-white shadow-sm'
+                                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-amber-200 dark:border-slate-700 hover:border-amber-400'
+                                    }`}
+                                >
+                                    All Chapters
+                                </button>
+                                {availableChaptersForSelectedBook.map(ch => {
+                                    const isSelected = selectedChapters.includes(ch.chapter);
+                                    return (
+                                        <button
+                                            key={ch.chapter}
+                                            type="button"
+                                            data-testid="session-chapter-option"
+                                            onClick={() => toggleChapterSelection(ch.chapter)}
+                                            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+                                                isSelected
+                                                    ? 'bg-amber-600 text-white shadow-sm'
+                                                    : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-amber-200 dark:border-slate-700 hover:border-amber-400'
+                                            }`}
+                                        >
+                                            {isSelected && <Check className="h-3 w-3" />}
+                                            <span>{ch.chapter}</span>
+                                            <span
+                                                className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                                                    isSelected
+                                                        ? 'bg-amber-700/60 text-amber-50'
+                                                        : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
+                                                }`}
+                                            >
+                                                {ch.dueCount} due
+                                            </span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
                         </div>
                     )}
 

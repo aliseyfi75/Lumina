@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Play, Zap, BrainCircuit, ListChecks, Tag } from 'lucide-react';
 import { Flashcard } from '../types';
 import { getDueCards } from '../utils/studyUtils';
+import { parseTagHierarchy } from '../utils/tagUtils';
 
 export type SessionMode = 'full' | 'short' | 'quiz';
 
@@ -104,11 +105,14 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
                                 className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-800 dark:text-slate-100 focus:outline-none focus:border-brand-500"
                             >
                                 <option value="">All Due Cards ({dueCount})</option>
-                                {availableTags.map(([tag, tagDueCount]) => (
-                                    <option key={tag} value={tag}>
-                                        #{tag} ({tagDueCount} due)
-                                    </option>
-                                ))}
+                                {availableTags.map(([tag, tagDueCount]) => {
+                                    const parsed = parseTagHierarchy(tag);
+                                    return (
+                                        <option key={tag} value={tag}>
+                                            {parsed.breadcrumbLabel} ({tagDueCount} due)
+                                        </option>
+                                    );
+                                })}
                             </select>
                         </div>
                     )}
@@ -142,7 +146,7 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
                                     </h3>
                                     <p className={`text-sm mt-1 ${mode === 'full' ? 'text-brand-700 dark:text-brand-300/70' : 'text-slate-500'
                                         }`}>
-                                        Review all {effectiveDueCount} cards that are due today{selectedTag ? ` in #${selectedTag}` : ''}. Best for keeping up with your daily goal.
+                                        Review all {effectiveDueCount} cards that are due today{selectedTag ? ` in ${parseTagHierarchy(selectedTag).breadcrumbLabel}` : ''}. Best for keeping up with your daily goal.
                                     </p>
                                 </div>
                             </div>

@@ -923,10 +923,13 @@ const App: React.FC = () => {
 
   // --- App Logic ---
 
-  const handleAddCard = (entry: WordEntry, definition: string, example: string, partOfSpeech: string) => {
+  const handleAddCard = (entry: WordEntry, definition: string, example: string, partOfSpeech: string, tags?: string[]) => {
     const matchingMeaning = entry.meanings?.find(m => m.partOfSpeech === partOfSpeech) || entry.meanings?.[0];
     const synonyms = matchingMeaning?.synonyms?.slice(0, 6);
     const antonyms = matchingMeaning?.antonyms?.slice(0, 6);
+    const cleanedTags = tags
+      ? Array.from(new Set(tags.map(t => t.trim()).filter(Boolean)))
+      : [];
     const newCard: Flashcard = {
       id: crypto.randomUUID(),
       word: entry.word,
@@ -938,6 +941,7 @@ const App: React.FC = () => {
       partOfSpeech: partOfSpeech,
       synonyms: synonyms && synonyms.length > 0 ? synonyms : undefined,
       antonyms: antonyms && antonyms.length > 0 ? antonyms : undefined,
+      tags: cleanedTags.length > 0 ? cleanedTags : undefined,
       status: FlashcardStatus.New,
       lastReviewed: 0,
       createdAt: Date.now(),
@@ -1326,6 +1330,7 @@ const App: React.FC = () => {
               <Dictionary
                 onAddCard={handleAddCard}
                 onRemoveCard={handleDeleteCard}
+                onUpdateCard={handleUpdateCard}
                 existingCards={cards}
               />
             }

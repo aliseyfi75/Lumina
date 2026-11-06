@@ -6,6 +6,7 @@ import { getWordSuggestions } from '../services/suggestionService';
 import { trackEvent, TRACKING_ACTION, TRACKING_CATEGORY } from '../services/trackingService';
 import { playAudio } from '../utils/audio';
 import { Search, Plus, Check, Loader2, BookOpen, Clock, Volume2, Sparkles, Compass, X } from 'lucide-react';
+import { TagSelectorInput } from './TagSelectorInput';
 
 const RECENT_SEARCHES_KEY = 'lumina_recent_searches_v1';
 const MAX_RECENT_SEARCHES = 10;
@@ -40,8 +41,9 @@ const CURATED_WORD_PACKS: Array<{
 const ALL_DISCOVERY_WORDS = CURATED_WORD_PACKS.flatMap(p => p.words);
 
 interface DictionaryProps {
-  onAddCard: (entry: WordEntry, definition: string, example: string, partOfSpeech: string) => void;
+  onAddCard: (entry: WordEntry, definition: string, example: string, partOfSpeech: string, tags?: string[]) => void;
   onRemoveCard: (id: string) => void;
+  onUpdateCard?: (id: string, updates: { tags?: string[] }) => void;
   existingCards: Flashcard[];
 }
 
@@ -97,13 +99,43 @@ const ClickableDefinitionText: React.FC<{
   );
 };
 
-export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard, existingCards }) => {
+export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard, onUpdateCard, existingCards }) => {
   const location = useLocation();
   const initialQuery: string | undefined = (location.state as { query?: string } | null)?.query;
   const [query, setQuery] = useState(initialQuery || '');
   const [result, setResult] = useState<WordEntry | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+
+  // Sync selectedTags when a new word result is loaded
+  useEffect(() => {
+    if (!result) return;
+    const savedForWord = existingCards.filter(
+      c => c.word.trim().toLowerCase() === result.word.trim().toLowerCase()
+    );
+    if (savedForWord.length > 0) {
+      const merged = Array.from(
+        new Set(savedForWord.flatMap(c => c.tags || []).map(t => t.trim()).filter(Boolean))
+      );
+      setSelectedTags(merged);
+    } else {
+      setSelectedTags([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result?.word]);
+
+  const handleDictionaryTagsChange = (nextTags: string[]) => {
+    setSelectedTags(nextTags);
+    if (result && onUpdateCard) {
+      const savedForWord = existingCards.filter(
+        c => c.word.trim().toLowerCase() === result.word.trim().toLowerCase()
+      );
+      for (const card of savedForWord) {
+        onUpdateCard(card.id, { tags: nextTags });
+      }
+    }
+  };
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -486,6 +518,18 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
                 <span>{result.origin}</span>
               </div>
             )}
+
+            <div className="pt-2">
+              <TagSelectorInput
+                selectedTags={selectedTags}
+                onChange={handleDictionaryTagsChange}
+                existingCards={existingCards}
+                label="Collections & Tags for this Word"
+                placeholder="Write a tag name to get suggestions or click to select..."
+                compact
+                inputAriaLabel="Dictionary word tags"
+              />
+            </div>
           </div>
 
           <div className="p-8 space-y-8">
@@ -534,7 +578,13 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
                                 onRemoveCard(savedCard.id);
                                 showToast(`"${result.word}" removed from deck`);
                               } else {
-                                onAddCard(result, def.definition, def.example || '', meaning.partOfSpeech);
+                                onAddCard(
+                                  result,
+                                  def.definition,
+                                  def.example || '',
+                                  meaning.partOfSpeech,
+                                  selectedTags.length > 0 ? selectedTags : undefined
+                                );
                                 showToast(`"${result.word}" added to deck`);
                               }
                             }}

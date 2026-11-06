@@ -302,8 +302,10 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                 </button>
 
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 border border-brand-200 dark:border-brand-800">
-                    #Book: {activeBookTitle}
+                  <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 border border-brand-200 dark:border-brand-800">
+                    <BookOpen className="h-3 w-3 shrink-0" />
+                    <span className="opacity-70">Books /</span>
+                    <span>{activeBookTitle}</span>
                   </span>
                   <button
                     type="button"

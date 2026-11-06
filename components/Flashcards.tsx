@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Flashcard, FlashcardStatus } from '../types';
-import { Play, BookOpen, CheckCircle, Brain, Trash2, RotateCw, Upload, Volume2, ChevronDown, Search, X, ArrowUpDown, Filter, Plus, Pencil, Tag, Sparkles, AlertTriangle } from 'lucide-react';
+import { Play, BookOpen, CheckCircle, Brain, Trash2, RotateCw, Upload, Volume2, ChevronDown, ChevronRight, Search, X, ArrowUpDown, Filter, Plus, Pencil, Tag, Sparkles, AlertTriangle, Folder, FolderOpen, CornerDownRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { playAudio } from '../utils/audio';
 import { getDueCards } from '../utils/studyUtils';
 import { BookPrepModal } from './BookPrepModal';
 import { BookExtractedWord } from '../services/bookService';
+import { parseTagHierarchy, BOOKS_FOLDER_FILTER } from '../utils/tagUtils';
+import { TagSelectorInput } from './TagSelectorInput';
 
 const PAGE_SIZE = 24;
 
@@ -103,14 +105,36 @@ const FlashcardItem: React.FC<{
 
           {card.tags && card.tags.length > 0 && (
             <div className="flex flex-wrap items-center justify-center gap-1.5 mt-3 max-w-full px-2">
-              {card.tags.slice(0, 3).map((tag) => (
-                <span
-                  key={tag}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 dark:bg-slate-700/80 text-slate-600 dark:text-slate-300 border border-slate-200/70 dark:border-slate-600"
-                >
-                  #{tag}
-                </span>
-              ))}
+              {card.tags.slice(0, 3).map((tag) => {
+                const parsed = parseTagHierarchy(tag);
+                return (
+                  <span
+                    key={tag}
+                    data-testid="card-tag-badge"
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
+                      parsed.isBook
+                        ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border-emerald-200/70 dark:border-emerald-800/60'
+                        : 'bg-slate-100 dark:bg-slate-700/80 text-slate-600 dark:text-slate-300 border-slate-200/70 dark:border-slate-600'
+                    }`}
+                  >
+                    {parsed.isBook ? (
+                      <>
+                        <BookOpen className="h-2.5 w-2.5 shrink-0" />
+                        <span className="opacity-70">Books /</span>
+                        <span>{parsed.name}</span>
+                      </>
+                    ) : parsed.folder ? (
+                      <>
+                        <Folder className="h-2.5 w-2.5 shrink-0" />
+                        <span className="opacity-70">{parsed.folder} /</span>
+                        <span>{parsed.name}</span>
+                      </>
+                    ) : (
+                      <span>#{parsed.name}</span>
+                    )}
+                  </span>
+                );
+              })}
               {card.tags.length > 3 && (
                 <span className="text-[10px] font-medium text-slate-400">+{card.tags.length - 3}</span>
               )}
@@ -223,16 +247,17 @@ const FlashcardItem: React.FC<{
 const CardEditorModal: React.FC<{
   isOpen: boolean;
   editingCard: Flashcard | null;
+  existingCards: Flashcard[];
   onClose: () => void;
   onSubmit: (data: CustomCardFormData) => void;
-}> = ({ isOpen, editingCard, onClose, onSubmit }) => {
+}> = ({ isOpen, editingCard, existingCards, onClose, onSubmit }) => {
   const [word, setWord] = useState('');
   const [partOfSpeech, setPartOfSpeech] = useState('noun');
   const [phonetic, setPhonetic] = useState('');
   const [mainDefinition, setMainDefinition] = useState('');
   const [example, setExample] = useState('');
   const [image, setImage] = useState('');
-  const [tagsInput, setTagsInput] = useState('');
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
 
   useEffect(() => {
     if (editingCard) {
@@ -242,7 +267,7 @@ const CardEditorModal: React.FC<{
       setMainDefinition(editingCard.mainDefinition || '');
       setExample(editingCard.example || '');
       setImage(editingCard.image || '');
-      setTagsInput((editingCard.tags || []).join(', '));
+      setSelectedTags(editingCard.tags ? [...editingCard.tags] : []);
     } else {
       setWord('');
       setPartOfSpeech('noun');
@@ -250,7 +275,7 @@ const CardEditorModal: React.FC<{
       setMainDefinition('');
       setExample('');
       setImage('');
-      setTagsInput('');
+      setSelectedTags([]);
     }
   }, [editingCard, isOpen]);
 
@@ -261,9 +286,8 @@ const CardEditorModal: React.FC<{
     if (!word.trim() || !mainDefinition.trim()) return;
     const parsedTags = Array.from(
       new Set(
-        tagsInput
-          .split(',')
-          .map(t => t.trim().replace(/^#+/, ''))
+        selectedTags
+          .map(t => t.trim())
           .filter(Boolean)
       )
     );
@@ -392,19 +416,14 @@ const CardEditorModal: React.FC<{
             />
           </div>
 
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
-              Tags / Collections (Optional, comma-separated)
-            </label>
-            <input
-              type="text"
-              aria-label="Tags"
-              value={tagsInput}
-              onChange={(e) => setTagsInput(e.target.value)}
-              placeholder="e.g. GRE, Literary, Book: Dune"
-              className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-brand-500"
-            />
-          </div>
+          <TagSelectorInput
+            selectedTags={selectedTags}
+            onChange={setSelectedTags}
+            existingCards={existingCards}
+            label="Collections & Tags (Optional)"
+            placeholder="Type a tag name to see suggestions or add new..."
+            inputAriaLabel="Tags"
+          />
 
           <div className="pt-2 flex items-center justify-end gap-3 border-t border-slate-100 dark:border-slate-700">
             <button
@@ -546,6 +565,8 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
     return Array.from(posSet).sort();
   }, [cards]);
 
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set(['Books']));
+
   const availableTags = useMemo(() => {
     const tagCounts = new Map<string, number>();
     for (const c of cards) {
@@ -556,6 +577,113 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
     }
     return Array.from(tagCounts.entries()).sort((a, b) => a[0].localeCompare(b[0]));
   }, [cards]);
+
+  const collectionsTree = useMemo(() => {
+    const folders = new Map<
+      string,
+      {
+        folderName: string;
+        isBooksFolder: boolean;
+        cardIds: Set<string>;
+        items: { rawTag: string; name: string; count: number }[];
+      }
+    >();
+    const flatTags: { rawTag: string; name: string; count: number }[] = [];
+
+    for (const [rawTag, count] of availableTags) {
+      const parsed = parseTagHierarchy(rawTag);
+      if (parsed.folder) {
+        let folderEntry = folders.get(parsed.folder);
+        if (!folderEntry) {
+          folderEntry = {
+            folderName: parsed.folder,
+            isBooksFolder: parsed.isBook || parsed.folder === 'Books',
+            cardIds: new Set<string>(),
+            items: [],
+          };
+          folders.set(parsed.folder, folderEntry);
+        }
+        folderEntry.items.push({
+          rawTag,
+          name: parsed.name,
+          count,
+        });
+      } else {
+        flatTags.push({
+          rawTag,
+          name: parsed.name,
+          count,
+        });
+      }
+    }
+
+    for (const c of cards) {
+      for (const raw of c.tags || []) {
+        const parsed = parseTagHierarchy(raw);
+        if (parsed.folder) {
+          folders.get(parsed.folder)?.cardIds.add(c.id);
+        }
+      }
+    }
+
+    const folderList = Array.from(folders.values())
+      .map(f => ({
+        ...f,
+        totalCards: f.cardIds.size,
+        items: f.items.sort((a, b) => a.name.localeCompare(b.name)),
+      }))
+      .sort((a, b) => {
+        if (a.isBooksFolder !== b.isBooksFolder) return a.isBooksFolder ? -1 : 1;
+        return a.folderName.localeCompare(b.folderName);
+      });
+
+    return {
+      folders: folderList,
+      flatTags: flatTags.sort((a, b) => a.name.localeCompare(b.name)),
+    };
+  }, [availableTags, cards]);
+
+  // Ensure parent folder is expanded whenever one of its sub-tags is selected
+  useEffect(() => {
+    if (selectedTag !== 'all' && !selectedTag.startsWith('__folder:')) {
+      const parsed = parseTagHierarchy(selectedTag);
+      if (parsed.folder) {
+        setExpandedFolders(prev => {
+          if (prev.has(parsed.folder!)) return prev;
+          const next = new Set(prev);
+          next.add(parsed.folder!);
+          return next;
+        });
+      }
+    }
+  }, [selectedTag]);
+
+  const toggleFolder = (folderName: string) => {
+    const folderFilterKey = `__folder:${folderName}__`;
+    const isCurrentlyInFolder =
+      selectedTag === folderFilterKey ||
+      (selectedTag !== 'all' &&
+        !selectedTag.startsWith('__folder:') &&
+        parseTagHierarchy(selectedTag).folder === folderName);
+
+    setExpandedFolders(prev => {
+      const next = new Set(prev);
+      if (next.has(folderName) && selectedTag === folderFilterKey) {
+        next.delete(folderName);
+      } else {
+        next.add(folderName);
+      }
+      return next;
+    });
+
+    if (selectedTag === folderFilterKey) {
+      setSelectedTag('all');
+    } else if (!isCurrentlyInFolder) {
+      setSelectedTag(folderFilterKey);
+    } else {
+      setSelectedTag(folderFilterKey);
+    }
+  };
 
   const statusPriority = {
     [FlashcardStatus.New]: 0,
@@ -569,7 +697,15 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
       .filter(c => {
         if (selectedStatus && c.status !== selectedStatus) return false;
         if (selectedPos !== 'all' && (c.partOfSpeech?.trim().toLowerCase() || '') !== selectedPos) return false;
-        if (selectedTag !== 'all' && !c.tags?.some(t => t.trim() === selectedTag)) return false;
+        if (selectedTag !== 'all') {
+          if (selectedTag.startsWith('__folder:') && selectedTag.endsWith('__')) {
+            const folderName = selectedTag.slice('__folder:'.length, -2);
+            const inFolder = c.tags?.some(t => parseTagHierarchy(t).folder === folderName);
+            if (!inFolder) return false;
+          } else if (!c.tags?.some(t => t.trim() === selectedTag)) {
+            return false;
+          }
+        }
         if (q) {
           const wordMatch = c.word.toLowerCase().includes(q);
           const defMatch = c.mainDefinition.toLowerCase().includes(q);
@@ -689,6 +825,7 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
         <CardEditorModal
           isOpen={isEditorOpen}
           editingCard={editingCard}
+          existingCards={cards}
           onClose={() => setIsEditorOpen(false)}
           onSubmit={handleEditorSubmit}
         />
@@ -993,36 +1130,165 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
           </div>
         </div>
 
-        {/* Tag / Collection Filter Pills */}
+        {/* Nested Folder Architecture for Collections & Tags */}
         {availableTags.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2" aria-label="Tag filter pills">
-            <span className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mr-1">
-              <Tag className="h-3.5 w-3.5" />
-              Collections:
-            </span>
-            <button
-              onClick={() => setSelectedTag('all')}
-              className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors duration-150 border ${
-                selectedTag === 'all'
-                  ? 'bg-brand-600 text-white border-brand-600 shadow-sm'
-                  : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-brand-300'
-              }`}
-            >
-              All ({cards.length})
-            </button>
-            {availableTags.map(([tag, count]) => (
+          <div className="space-y-2" aria-label="Tag filter pills">
+            {/* Top-Level Collections Bar */}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mr-1">
+                <Tag className="h-3.5 w-3.5" />
+                Collections:
+              </span>
               <button
-                key={tag}
-                onClick={() => setSelectedTag(selectedTag === tag ? 'all' : tag)}
-                className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors duration-150 border ${
-                  selectedTag === tag
+                type="button"
+                onClick={() => setSelectedTag('all')}
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors duration-150 border ${
+                  selectedTag === 'all'
                     ? 'bg-brand-600 text-white border-brand-600 shadow-sm'
                     : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-brand-300'
                 }`}
               >
-                #{tag} ({count})
+                All ({cards.length})
               </button>
-            ))}
+
+              {/* Folder Collections (e.g. Books folder, custom folders) */}
+              {collectionsTree.folders.map((folder) => {
+                const folderFilterKey = `__folder:${folder.folderName}__`;
+                const isExpanded = expandedFolders.has(folder.folderName);
+                const isChildSelected =
+                  selectedTag !== 'all' &&
+                  !selectedTag.startsWith('__folder:') &&
+                  parseTagHierarchy(selectedTag).folder === folder.folderName;
+                const isFolderActive = selectedTag === folderFilterKey || isChildSelected;
+                const FolderIcon = isExpanded ? FolderOpen : Folder;
+
+                return (
+                  <button
+                    key={folder.folderName}
+                    type="button"
+                    data-testid={`collection-folder-${folder.folderName}`}
+                    onClick={() => toggleFolder(folder.folderName)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all duration-150 border ${
+                      isFolderActive
+                        ? 'bg-brand-600 text-white border-brand-600 shadow-sm'
+                        : isExpanded
+                          ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 border-brand-300 dark:border-brand-700'
+                          : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-brand-300'
+                    }`}
+                  >
+                    <FolderIcon className="h-3.5 w-3.5 shrink-0" />
+                    <span>{folder.folderName}</span>{' '}
+                    <span className="opacity-80">({folder.totalCards})</span>
+                    {isExpanded ? (
+                      <ChevronDown className="h-3 w-3 opacity-80 shrink-0" />
+                    ) : (
+                      <ChevronRight className="h-3 w-3 opacity-80 shrink-0" />
+                    )}
+                  </button>
+                );
+              })}
+
+              {/* Top-Level Flat Tags */}
+              {collectionsTree.flatTags.map((tagItem) => (
+                <button
+                  key={tagItem.rawTag}
+                  type="button"
+                  data-testid="collection-flat-tag-pill"
+                  onClick={() =>
+                    setSelectedTag(selectedTag === tagItem.rawTag ? 'all' : tagItem.rawTag)
+                  }
+                  className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors duration-150 border ${
+                    selectedTag === tagItem.rawTag
+                      ? 'bg-brand-600 text-white border-brand-600 shadow-sm'
+                      : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-brand-300'
+                  }`}
+                >
+                  #{tagItem.name} ({tagItem.count})
+                </button>
+              ))}
+            </div>
+
+            {/* Nested Subfolder Bars (e.g. Books -> individual books without #Book: prefix) */}
+            {collectionsTree.folders.map((folder) => {
+              const folderFilterKey = `__folder:${folder.folderName}__`;
+              const isExpanded = expandedFolders.has(folder.folderName);
+              const isChildSelected =
+                selectedTag !== 'all' &&
+                !selectedTag.startsWith('__folder:') &&
+                parseTagHierarchy(selectedTag).folder === folder.folderName;
+
+              if (!isExpanded && !isChildSelected && selectedTag !== folderFilterKey) {
+                return null;
+              }
+
+              return (
+                <div
+                  key={`subfolder-${folder.folderName}`}
+                  data-testid={`collection-subfolder-${folder.folderName}`}
+                  className="flex flex-wrap items-center gap-2 pl-3 sm:pl-4 py-2 px-3 rounded-2xl bg-slate-100/80 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/70"
+                >
+                  <span className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 dark:text-slate-400 mr-1">
+                    <CornerDownRight className="h-3.5 w-3.5 text-brand-500" />
+                    {folder.isBooksFolder ? (
+                      <BookOpen className="h-3.5 w-3.5 text-brand-600 dark:text-brand-400" />
+                    ) : (
+                      <FolderOpen className="h-3.5 w-3.5 text-brand-600 dark:text-brand-400" />
+                    )}
+                    <span>{folder.folderName}:</span>
+                  </span>
+
+                  <button
+                    type="button"
+                    data-testid={`collection-folder-all-${folder.folderName}`}
+                    onClick={() =>
+                      setSelectedTag(selectedTag === folderFilterKey ? 'all' : folderFilterKey)
+                    }
+                    className={`px-2.5 py-1 rounded-full text-xs font-semibold transition-colors duration-150 border ${
+                      selectedTag === folderFilterKey
+                        ? 'bg-brand-600 text-white border-brand-600 shadow-sm'
+                        : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-brand-300'
+                    }`}
+                  >
+                    All {folder.folderName} ({folder.totalCards})
+                  </button>
+
+                  {folder.items.map((subItem) => {
+                    const isSubSelected = selectedTag === subItem.rawTag;
+                    return (
+                      <button
+                        key={subItem.rawTag}
+                        type="button"
+                        data-testid={
+                          folder.isBooksFolder
+                            ? 'collection-book-pill'
+                            : 'collection-subfolder-item-pill'
+                        }
+                        onClick={() =>
+                          setSelectedTag(isSubSelected ? folderFilterKey : subItem.rawTag)
+                        }
+                        className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-colors duration-150 border ${
+                          isSubSelected
+                            ? 'bg-brand-600 text-white border-brand-600 shadow-sm'
+                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-brand-300'
+                        }`}
+                      >
+                        {folder.isBooksFolder && (
+                          <BookOpen
+                            className={`h-3 w-3 shrink-0 ${
+                              isSubSelected
+                                ? 'text-white'
+                                : 'text-brand-600 dark:text-brand-400'
+                            }`}
+                          />
+                        )}
+                        <span>{subItem.name}</span>{' '}
+                        <span className="opacity-75">({subItem.count})</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -1073,6 +1339,7 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
       <CardEditorModal
         isOpen={isEditorOpen}
         editingCard={editingCard}
+        existingCards={cards}
         onClose={() => setIsEditorOpen(false)}
         onSubmit={handleEditorSubmit}
       />

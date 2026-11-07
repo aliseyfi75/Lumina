@@ -62,6 +62,7 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
   const [complexityFilter, setComplexityFilter] = useState<ComplexityFilter>('all');
   const [segmentationMode, setSegmentationMode] = useState<BookSegmentationMode>('chapters');
   const [pagesPerSection, setPagesPerSection] = useState<number>(20);
+  const [pagesPerSectionInput, setPagesPerSectionInput] = useState<string>('20');
   const [extractedRawText, setExtractedRawText] = useState<string>('');
   const [chapterFilter, setChapterFilter] = useState<string>('all');
   const [isPreviewChaptersExpanded, setIsPreviewChaptersExpanded] = useState(false);
@@ -88,6 +89,7 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
     setComplexityFilter('all');
     setSegmentationMode('chapters');
     setPagesPerSection(20);
+    setPagesPerSectionInput('20');
     setExtractedRawText('');
     setChapterFilter('all');
     setIsPreviewChaptersExpanded(false);
@@ -101,10 +103,17 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
     onClose();
   };
 
-  const applySegmentationConfig = (nextMode: BookSegmentationMode, nextPages: number) => {
+  const applySegmentationConfig = (
+    nextMode: BookSegmentationMode,
+    nextPages: number,
+    syncInput = true
+  ) => {
     const safePages = Math.max(1, Math.min(500, Math.floor(nextPages || 20)));
     setSegmentationMode(nextMode);
     setPagesPerSection(safePages);
+    if (syncInput) {
+      setPagesPerSectionInput(String(safePages));
+    }
     if (extractedWords.length > 0 && extractedRawText.trim()) {
       const updated = reassignWordsToBookSections(extractedRawText, extractedWords, {
         mode: nextMode,
@@ -112,6 +121,28 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
       });
       setExtractedWords(updated);
       setChapterFilter('all');
+    }
+  };
+
+  const handleCustomPagesChange = (rawValue: string) => {
+    // Allow empty string or digits so the user can freely backspace and type single digits like "2"
+    const cleaned = rawValue.replace(/[^0-9]/g, '');
+    setPagesPerSectionInput(cleaned);
+    if (cleaned !== '') {
+      const parsed = parseInt(cleaned, 10);
+      if (!Number.isNaN(parsed) && parsed >= 1) {
+        applySegmentationConfig('pages', parsed, false);
+      }
+    }
+  };
+
+  const handleCustomPagesBlur = () => {
+    const parsed = parseInt(pagesPerSectionInput, 10);
+    if (Number.isNaN(parsed) || parsed < 1) {
+      setPagesPerSectionInput(String(pagesPerSection));
+    } else {
+      const clamped = Math.max(1, Math.min(500, parsed));
+      applySegmentationConfig('pages', clamped, true);
     }
   };
 
@@ -476,13 +507,9 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                           max={500}
                           aria-label="Pages per section"
                           data-testid="pages-per-section-input"
-                          value={pagesPerSection}
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value, 10);
-                            if (!Number.isNaN(val) && val >= 1) {
-                              applySegmentationConfig('pages', val);
-                            }
-                          }}
+                          value={pagesPerSectionInput}
+                          onChange={(e) => handleCustomPagesChange(e.target.value)}
+                          onBlur={handleCustomPagesBlur}
                           className="w-16 px-2 py-0.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md text-xs font-semibold text-slate-900 dark:text-slate-100 focus:outline-none focus:border-brand-500"
                         />
                       </div>
@@ -830,13 +857,9 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                           max={500}
                           aria-label="Pages per section"
                           data-testid="pages-per-section-input"
-                          value={pagesPerSection}
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value, 10);
-                            if (!Number.isNaN(val) && val >= 1) {
-                              applySegmentationConfig('pages', val);
-                            }
-                          }}
+                          value={pagesPerSectionInput}
+                          onChange={(e) => handleCustomPagesChange(e.target.value)}
+                          onBlur={handleCustomPagesBlur}
                           className="w-16 px-2 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-semibold text-slate-900 dark:text-slate-100 focus:outline-none focus:border-brand-500"
                         />
                       </div>

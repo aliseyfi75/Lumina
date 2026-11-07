@@ -431,12 +431,22 @@ test.describe('Book Nested Chapters & Page Sections E2E', () => {
     const segSelector = page.getByTestId('segmentation-selector');
     await expect(segSelector).toBeVisible();
 
-    // Select Page-based mode and choose 10 pages per section
+    // Select Page-based mode and verify user can clear the custom input with Backspace and type "2"
     await segSelector.getByTestId('segmentation-mode-pages').click();
     const pagesControl = segSelector.getByTestId('pages-per-section-control');
     await expect(pagesControl).toBeVisible();
+    const customInput = pagesControl.getByTestId('pages-per-section-input');
+    await customInput.click();
+    await page.keyboard.press('Backspace');
+    await page.keyboard.press('Backspace');
+    await expect(customInput).toHaveValue('');
+    await page.keyboard.type('2');
+    await expect(customInput).toHaveValue('2');
+    await expect(segSelector).toContainText('Groups every 2 pages per section');
+
+    // Now select 10 pages per section for the 8-section test book
     await pagesControl.getByTestId('pages-per-section-preset-10').click();
-    await expect(pagesControl.getByTestId('pages-per-section-input')).toHaveValue('10');
+    await expect(customInput).toHaveValue('10');
 
     // Capture screenshot of BookPrepModal with Page-based & Pages per Section selector
     await page.screenshot({

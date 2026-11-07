@@ -3,6 +3,7 @@ import { lookupWord } from './dictionaryService';
 
 export type ComplexityLevel = 'beginner' | 'intermediate' | 'advanced';
 export type ComplexityFilter = 'all' | ComplexityLevel;
+export type BookSegmentationMode = 'chapters' | 'pages';
 
 export interface GutenbergBook {
   id: number;
@@ -37,6 +38,7 @@ export interface BookExtractedWord {
   frequency?: number;
   complexityLevel?: ComplexityLevel;
   complexityScore?: number;
+  chapter?: string;
 }
 
 const GUTENDEX_API_URL = 'https://gutendex.com/books';
@@ -1585,87 +1587,99 @@ const matchChapterHeadingLine = (line: string): string | null => {
   return `${prefix} ${num}`;
 };
 
-export const formatTwentyPageBucket = (pageNumber: number): string => {
+export const formatPageRangeBucket = (pageNumber: number, pagesPerSection = 20): string => {
+  const safeSpan = Math.max(1, Math.floor(pagesPerSection));
   const safePage = Math.max(1, Math.floor(pageNumber));
-  const bucketIdx = Math.floor((safePage - 1) / 20);
-  const startPage = bucketIdx * 20 + 1;
-  const endPage = (bucketIdx + 1) * 20;
-  return `Pages ${startPage}-${endPage}`;
+  const bucketIdx = Math.floor((safePage - 1) / safeSpan);
+  const startPage = bucketIdx * safeSpan + 1;
+  const endPage = (bucketIdx + 1) * safeSpan;
+  return safeSpan === 1 ? `Page ${startPage}` : `Pages ${startPage}-${endPage}`;
+};
+
+export const formatTwentyPageBucket = (pageNumber: number): string => {
+  return formatPageRangeBucket(pageNumber, 20);
 };
 
 /**
- * Segments a book's text into chapter sections when chapter headings exist,
- * or into 20-page folders ("Pages 1-20", "Pages 21-40", ...) when the book has no chapters.
+ * Segments a book's text into chapter sections when mode is 'chapters' (falling back to page ranges if no chapters exist),
+ * or directly into page-range folders ("Pages 1-N", "Pages (N+1)-2N", ...) when mode is 'pages'.
  */
 export const segmentBookIntoChaptersOrPageRanges = (
   text: string,
-  wordsPerPage = 250
+  wordsPerPage = 250,
+  options?: {
+    mode?: BookSegmentationMode;
+    pagesPerSection?: number;
+  }
 ): Array<{ label: string; text: string }> => {
+  const mode: BookSegmentationMode = options?.mode ?? 'chapters';
+  const pagesPerSection = Math.max(1, Math.floor(options?.pagesPerSection ?? 20));
   const normalized = text.replace(/\r\n/g, '\n');
   const lines = normalized.split('\n');
 
-  const rawChapterSections: Array<{ label: string; lines: string[] }> = [];
-  let preChapterLines: string[] = [];
-  let currentChapter: { label: string; lines: string[] } | null = null;
+  if (mode === 'chapters') {
+    const rawChapterSections: Array<{ label: string; lines: string[] }> = [];
+    let preChapterLines: string[] = [];
+    let currentChapter: { label: string; lines: string[] } | null = null;
 
-  for (const line of lines) {
-    const heading = matchChapterHeadingLine(line);
-    if (heading) {
-      if (currentChapter) {
-        const body = currentChapter.lines.join('\n').trim();
-        if (body.length >= 25) {
-          rawChapterSections.push({ label: currentChapter.label, lines: [...currentChapter.lines] });
+    for (const line of lines) {
+      const heading = matchChapterHeadingLine(line);
+      if (heading) {
+        if (currentChapter) {
+          const body = currentChapter.lines.join('\n').trim();
+          if (body.length >= 25) {
+            rawChapterSections.push({ label: currentChapter.label, lines: [...currentChapter.lines] });
+          }
         }
+        currentChapter = { label: heading, lines: [] };
+      } else if (currentChapter) {
+        currentChapter.lines.push(line);
+      } else {
+        preChapterLines.push(line);
       }
-      currentChapter = { label: heading, lines: [] };
-    } else if (currentChapter) {
-      currentChapter.lines.push(line);
-    } else {
-      preChapterLines.push(line);
+    }
+
+    if (currentChapter) {
+      const body = currentChapter.lines.join('\n').trim();
+      if (body.length >= 25) {
+        rawChapterSections.push({ label: currentChapter.label, lines: [...currentChapter.lines] });
+      }
+    }
+
+    // Merge duplicate chapter labels (e.g. if a book repeats a heading after TOC)
+    if (rawChapterSections.length > 0) {
+      const mergedMap = new Map<string, string[]>();
+      const preBody = preChapterLines.join('\n').trim();
+      const firstLabel = rawChapterSections[0].label;
+      if (preBody.length >= 40) {
+        mergedMap.set(firstLabel, [preBody]);
+      }
+
+      for (const sec of rawChapterSections) {
+        const existing = mergedMap.get(sec.label) || [];
+        existing.push(sec.lines.join('\n').trim());
+        mergedMap.set(sec.label, existing);
+      }
+
+      return Array.from(mergedMap.entries()).map(([label, chunks]) => ({
+        label,
+        text: chunks.join('\n\n'),
+      }));
     }
   }
 
-  if (currentChapter) {
-    const body = currentChapter.lines.join('\n').trim();
-    if (body.length >= 25) {
-      rawChapterSections.push({ label: currentChapter.label, lines: [...currentChapter.lines] });
-    }
-  }
-
-  // Merge duplicate chapter labels (e.g. if a book repeats a heading after TOC)
-  if (rawChapterSections.length > 0) {
-    const mergedMap = new Map<string, string[]>();
-    const preBody = preChapterLines.join('\n').trim();
-    const firstLabel = rawChapterSections[0].label;
-    if (preBody.length >= 40) {
-      mergedMap.set(firstLabel, [preBody]);
-    }
-
-    for (const sec of rawChapterSections) {
-      const existing = mergedMap.get(sec.label) || [];
-      existing.push(sec.lines.join('\n').trim());
-      mergedMap.set(sec.label, existing);
-    }
-
-    return Array.from(mergedMap.entries()).map(([label, chunks]) => ({
-      label,
-      text: chunks.join('\n\n'),
-    }));
-  }
-
-  // No chapter headings found: group into 20-page folders ("Pages 1-20", "Pages 21-40", ...)
-  const WORDS_PER_20_PAGES = Math.max(50, wordsPerPage * 20);
+  // Page-based segmentation (or fallback when no chapter headings exist)
   const pageBuckets = new Map<string, string[]>();
   let currentExplicitPage: number | null = null;
   let runningWordCount = 0;
 
-  // Check if form-feed characters (\f) or standalone "Page <N>" markers exist
+  // Check if form-feed characters (\f) exist
   const formFeedPages = normalized.split('\f');
   if (formFeedPages.length > 1) {
     formFeedPages.forEach((pageContent, idx) => {
       const trimmedPage = pageContent.trim();
       if (!trimmedPage) return;
-      const label = formatTwentyPageBucket(idx + 1);
+      const label = formatPageRangeBucket(idx + 1, pagesPerSection);
       const list = pageBuckets.get(label) || [];
       list.push(trimmedPage);
       pageBuckets.set(label, list);
@@ -1678,9 +1692,16 @@ export const segmentBookIntoChaptersOrPageRanges = (
     }
   }
 
+  const safeWordsPerPage = Math.max(1, wordsPerPage);
+
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
+
+    // In page mode, skip standalone chapter heading lines so they don't pollute sentences
+    if (mode === 'pages' && matchChapterHeadingLine(trimmed)) {
+      continue;
+    }
 
     const pageMarker = trimmed.match(/^(?:\[|\b|-+\s*)?page\s+(\d{1,4})(?:\]|\s*-+)?$/i);
     if (pageMarker && pageMarker[1]) {
@@ -1688,32 +1709,78 @@ export const segmentBookIntoChaptersOrPageRanges = (
       continue;
     }
 
-    const lineWords = trimmed.split(/\s+/).filter(Boolean).length;
-    const effectivePage =
-      currentExplicitPage !== null
-        ? currentExplicitPage
-        : Math.floor(runningWordCount / Math.max(1, wordsPerPage)) + 1;
-    runningWordCount += lineWords;
+    // If a single line is very long (e.g. a long paragraph without line breaks) and we are estimating pages by word count,
+    // split it into sentences so each sentence lands in its accurate page bucket.
+    const subChunks =
+      currentExplicitPage === null && trimmed.split(/\s+/).length > safeWordsPerPage
+        ? trimmed.split(/(?<=[.!?])\s+/).filter(Boolean)
+        : [trimmed];
 
-    const bucketLabel =
-      currentExplicitPage !== null
-        ? formatTwentyPageBucket(effectivePage)
-        : formatTwentyPageBucket(
-            Math.floor((Math.max(1, runningWordCount - lineWords) / WORDS_PER_20_PAGES) * 20) + 1
-          );
+    for (const chunk of subChunks) {
+      const chunkWords = chunk.split(/\s+/).filter(Boolean).length;
+      const effectivePage =
+        currentExplicitPage !== null
+          ? currentExplicitPage
+          : Math.floor(runningWordCount / safeWordsPerPage) + 1;
+      runningWordCount += chunkWords;
 
-    const list = pageBuckets.get(bucketLabel) || [];
-    list.push(trimmed);
-    pageBuckets.set(bucketLabel, list);
+      const bucketLabel = formatPageRangeBucket(effectivePage, pagesPerSection);
+      const list = pageBuckets.get(bucketLabel) || [];
+      list.push(chunk);
+      pageBuckets.set(bucketLabel, list);
+    }
   }
 
   if (pageBuckets.size === 0) {
-    return [{ label: 'Pages 1-20', text: normalized }];
+    return [{ label: formatPageRangeBucket(1, pagesPerSection), text: normalized }];
   }
 
   return Array.from(pageBuckets.entries()).map(([label, chunks]) => ({
     label,
     text: chunks.join('\n'),
+  }));
+};
+
+/**
+ * Re-computes the `chapter` (section) assignment for an existing list of extracted words
+ * when the user switches between Chapter-based and Page-based organization or changes `pagesPerSection`.
+ */
+export const reassignWordsToBookSections = (
+  text: string,
+  words: BookExtractedWord[],
+  options?: {
+    mode?: BookSegmentationMode;
+    pagesPerSection?: number;
+    wordsPerPage?: number;
+  }
+): BookExtractedWord[] => {
+  if (!text.trim() || words.length === 0) return words;
+  const sampledText = text.length > 500_000 ? text.slice(0, 500_000) : text;
+  const segments = segmentBookIntoChaptersOrPageRanges(
+    sampledText,
+    options?.wordsPerPage ?? 250,
+    {
+      mode: options?.mode,
+      pagesPerSection: options?.pagesPerSection,
+    }
+  );
+
+  const wordToSection = new Map<string, string>();
+  for (const seg of segments) {
+    const tokenRegex = /\b[a-zA-Z]{6,16}\b/g;
+    let match: RegExpExecArray | null;
+    while ((match = tokenRegex.exec(seg.text)) !== null) {
+      const lower = match[0].toLowerCase();
+      if (!wordToSection.has(lower)) {
+        wordToSection.set(lower, seg.label);
+      }
+    }
+  }
+
+  const fallbackLabel = segments[0]?.label || formatPageRangeBucket(1, options?.pagesPerSection ?? 20);
+  return words.map(w => ({
+    ...w,
+    chapter: wordToSection.get(w.word.toLowerCase()) || w.chapter || fallbackLabel,
   }));
 };
 
@@ -1816,6 +1883,9 @@ export const extractComplexWordsFromText = async (
     maxWords?: number;
     complexityLevel?: ComplexityFilter;
     existingWords?: Set<string>;
+    segmentationMode?: BookSegmentationMode;
+    pagesPerSection?: number;
+    wordsPerPage?: number;
     onProgress?: (stage: string, completed?: number, total?: number) => void;
   }
 ): Promise<BookExtractedWord[]> => {
@@ -1828,7 +1898,14 @@ export const extractComplexWordsFromText = async (
   // Sample up to ~500 KB from the book body so even massive novels process quickly
   const sampledText = text.length > 500_000 ? text.slice(0, 500_000) : text;
 
-  const segments = segmentBookIntoChaptersOrPageRanges(sampledText);
+  const segments = segmentBookIntoChaptersOrPageRanges(
+    sampledText,
+    options?.wordsPerPage ?? 250,
+    {
+      mode: options?.segmentationMode,
+      pagesPerSection: options?.pagesPerSection,
+    }
+  );
 
   const formatSentenceSnippet = (sentence: string, targetWord: string): string => {
     if (sentence.length <= 220) return sentence;

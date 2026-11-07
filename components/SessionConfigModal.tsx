@@ -1,11 +1,13 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Play, Zap, BrainCircuit, ListChecks, Tag, BookOpen, Check } from 'lucide-react';
+import { X, Play, Zap, BrainCircuit, ListChecks, Tag, BookOpen, Check, ChevronDown, ChevronUp } from 'lucide-react';
 import { Flashcard } from '../types';
 import { getDueCards } from '../utils/studyUtils';
 import { parseTagHierarchy, formatBookTag, getCardBookInfo, compareChapterNames } from '../utils/tagUtils';
 
 export type SessionMode = 'full' | 'short' | 'quiz';
+
+const COLLAPSED_SESSION_CHAPTER_LIMIT = 6;
 
 interface SessionConfigModalProps {
     isOpen: boolean;
@@ -30,9 +32,11 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
     const [count, setCount] = useState(10);
     const [selectedTag, setSelectedTag] = useState<string>(initialTag || '');
     const [selectedChapters, setSelectedChapters] = useState<string[]>(initialChapters || []);
+    const [isChaptersExpanded, setIsChaptersExpanded] = useState(false);
 
     useEffect(() => {
         if (isOpen) {
+            setIsChaptersExpanded(false);
             if (initialTag) {
                 const parsed = parseTagHierarchy(initialTag);
                 if (parsed.folder === 'Books' && parsed.bookTitle) {
@@ -176,6 +180,7 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
                                 onChange={(e) => {
                                     setSelectedTag(e.target.value);
                                     setSelectedChapters([]);
+                                    setIsChaptersExpanded(false);
                                 }}
                                 className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-800 dark:text-slate-100 focus:outline-none focus:border-brand-500"
                             >
@@ -192,66 +197,103 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
                         </div>
                     )}
 
-                    {selectedBookTitle && availableChaptersForSelectedBook.length > 0 && (
-                        <div
-                            data-testid="session-chapter-selector"
-                            className="space-y-2.5 p-3.5 rounded-2xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/70 dark:border-amber-800/50"
-                        >
-                            <div className="flex items-center justify-between gap-2">
-                                <label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-amber-800 dark:text-amber-300">
-                                    <BookOpen className="h-3.5 w-3.5" />
-                                    Chapters / Page Sections
-                                </label>
-                                <span className="text-[11px] font-medium text-amber-700/80 dark:text-amber-400/80">
-                                    {selectedChapters.length === 0
-                                        ? 'All chapters selected'
-                                        : `${selectedChapters.length} selected`}
-                                </span>
-                            </div>
-                            <div className="flex flex-wrap gap-1.5">
-                                <button
-                                    type="button"
-                                    data-testid="session-chapter-option-all"
-                                    onClick={() => setSelectedChapters([])}
-                                    className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-                                        selectedChapters.length === 0
-                                            ? 'bg-amber-600 text-white shadow-sm'
-                                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-amber-200 dark:border-slate-700 hover:border-amber-400'
-                                    }`}
-                                >
-                                    All Chapters
-                                </button>
-                                {availableChaptersForSelectedBook.map(ch => {
-                                    const isSelected = selectedChapters.includes(ch.chapter);
-                                    return (
-                                        <button
-                                            key={ch.chapter}
-                                            type="button"
-                                            data-testid="session-chapter-option"
-                                            onClick={() => toggleChapterSelection(ch.chapter)}
-                                            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-                                                isSelected
-                                                    ? 'bg-amber-600 text-white shadow-sm'
-                                                    : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-amber-200 dark:border-slate-700 hover:border-amber-400'
-                                            }`}
-                                        >
-                                            {isSelected && <Check className="h-3 w-3" />}
-                                            <span>{ch.chapter}</span>
-                                            <span
-                                                className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                    {selectedBookTitle && availableChaptersForSelectedBook.length > 0 && (() => {
+                        const hasManyChapters = availableChaptersForSelectedBook.length > COLLAPSED_SESSION_CHAPTER_LIMIT;
+                        const visibleChapters =
+                            hasManyChapters && !isChaptersExpanded
+                                ? (() => {
+                                      const sliced = availableChaptersForSelectedBook.slice(0, COLLAPSED_SESSION_CHAPTER_LIMIT);
+                                      const extraSelected = availableChaptersForSelectedBook.filter(
+                                          (ch, idx) =>
+                                              idx >= COLLAPSED_SESSION_CHAPTER_LIMIT &&
+                                              selectedChapters.includes(ch.chapter)
+                                      );
+                                      return [...sliced, ...extraSelected];
+                                  })()
+                                : availableChaptersForSelectedBook;
+                        const hiddenCount = Math.max(0, availableChaptersForSelectedBook.length - visibleChapters.length);
+
+                        return (
+                            <div
+                                data-testid="session-chapter-selector"
+                                className="space-y-2.5 p-3.5 rounded-2xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/70 dark:border-amber-800/50"
+                            >
+                                <div className="flex items-center justify-between gap-2">
+                                    <label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-amber-800 dark:text-amber-300">
+                                        <BookOpen className="h-3.5 w-3.5" />
+                                        Chapters / Page Sections ({availableChaptersForSelectedBook.length})
+                                    </label>
+                                    <span className="text-[11px] font-medium text-amber-700/80 dark:text-amber-400/80">
+                                        {selectedChapters.length === 0
+                                            ? 'All chapters selected'
+                                            : `${selectedChapters.length} selected`}
+                                    </span>
+                                </div>
+                                <div className="flex flex-wrap gap-1.5">
+                                    <button
+                                        type="button"
+                                        data-testid="session-chapter-option-all"
+                                        onClick={() => setSelectedChapters([])}
+                                        className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+                                            selectedChapters.length === 0
+                                                ? 'bg-amber-600 text-white shadow-sm'
+                                                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-amber-200 dark:border-slate-700 hover:border-amber-400'
+                                        }`}
+                                    >
+                                        All Chapters
+                                    </button>
+                                    {visibleChapters.map(ch => {
+                                        const isSelected = selectedChapters.includes(ch.chapter);
+                                        return (
+                                            <button
+                                                key={ch.chapter}
+                                                type="button"
+                                                data-testid="session-chapter-option"
+                                                onClick={() => toggleChapterSelection(ch.chapter)}
+                                                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
                                                     isSelected
-                                                        ? 'bg-amber-700/60 text-amber-50'
-                                                        : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
+                                                        ? 'bg-amber-600 text-white shadow-sm'
+                                                        : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-amber-200 dark:border-slate-700 hover:border-amber-400'
                                                 }`}
                                             >
-                                                {ch.dueCount} due
-                                            </span>
+                                                {isSelected && <Check className="h-3 w-3" />}
+                                                <span>{ch.chapter}</span>
+                                                <span
+                                                    className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                                                        isSelected
+                                                            ? 'bg-amber-700/60 text-amber-50'
+                                                            : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
+                                                    }`}
+                                                >
+                                                    {ch.dueCount} due
+                                                </span>
+                                            </button>
+                                        );
+                                    })}
+                                    {hasManyChapters && (
+                                        <button
+                                            type="button"
+                                            data-testid="session-chapters-expand-button"
+                                            onClick={() => setIsChaptersExpanded(prev => !prev)}
+                                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-amber-100/80 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700 hover:bg-amber-200/80 transition-colors"
+                                        >
+                                            {isChaptersExpanded ? (
+                                                <>
+                                                    <span>Show fewer sections</span>
+                                                    <ChevronUp className="h-3.5 w-3.5" />
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <span>+{hiddenCount} more sections</span>
+                                                    <ChevronDown className="h-3.5 w-3.5" />
+                                                </>
+                                            )}
                                         </button>
-                                    );
-                                })}
+                                    )}
+                                </div>
                             </div>
-                        </div>
-                    )}
+                        );
+                    })()}
 
                     <div className="space-y-4">
 

@@ -3,6 +3,8 @@ import {
   segmentBookIntoChaptersOrPageRanges,
   extractComplexWordsFromText,
   formatTwentyPageBucket,
+  formatPageRangeBucket,
+  reassignWordsToBookSections,
 } from '../services/bookService';
 import {
   parseTagHierarchy,
@@ -12,7 +14,7 @@ import {
 } from '../utils/tagUtils';
 import { Flashcard, FlashcardStatus } from '../types';
 
-test.describe('Book Chapters & 20-Page Folders Unit Tests', () => {
+test.describe('Book Chapters & Page Sections Unit Tests', () => {
   test('segments books with explicit chapter headings into per-chapter sections', async () => {
     const sampleBookWithChapters = `
 Chapter 1: The Arrival
@@ -79,6 +81,84 @@ The magnanimous sovereign articulated an eloquent benediction before the assembl
     expect(wordPaginatedSections.map(s => s.label)).toEqual(['Pages 1-20', 'Pages 21-40']);
   });
 
+  test('supports Page-based mode with custom pagesPerSection and reassigns words across modes', async () => {
+    expect(formatPageRangeBucket(1, 10)).toBe('Pages 1-10');
+    expect(formatPageRangeBucket(10, 10)).toBe('Pages 1-10');
+    expect(formatPageRangeBucket(11, 10)).toBe('Pages 11-20');
+    expect(formatPageRangeBucket(25, 10)).toBe('Pages 21-30');
+    expect(formatPageRangeBucket(3, 5)).toBe('Pages 1-5');
+    expect(formatPageRangeBucket(6, 5)).toBe('Pages 6-10');
+
+    // A book that has Chapter headings AND explicit Page markers
+    const hybridBook = `
+Chapter 1: The Beginning
+Page 1
+The ephemeral twilight settled over the labyrinthine citadel while the protagonist contemplated his trajectory.
+Page 8
+An ubiquitous murmur echoed through the cavernous sanctuary as the indomitable council convened.
+Chapter 2: The Continuation
+Page 12
+The magnanimous sovereign articulated an eloquent benediction before the assembled multitude.
+Page 23
+A cacophonous symphony reverberated across the subterranean amphitheater during the solstice.
+    `;
+
+    // In 'chapters' mode -> Chapter 1, Chapter 2
+    const chapterSections = segmentBookIntoChaptersOrPageRanges(hybridBook, 250, {
+      mode: 'chapters',
+      pagesPerSection: 10,
+    });
+    expect(chapterSections.map(s => s.label)).toEqual(['Chapter 1', 'Chapter 2']);
+
+    // In 'pages' mode with 10 pages per section -> Pages 1-10, Pages 11-20, Pages 21-30
+    const pageSections10 = segmentBookIntoChaptersOrPageRanges(hybridBook, 250, {
+      mode: 'pages',
+      pagesPerSection: 10,
+    });
+    expect(pageSections10.map(s => s.label)).toEqual(['Pages 1-10', 'Pages 11-20', 'Pages 21-30']);
+
+    // Reassign words dynamically from Chapter-based to Page-based (10 pages/section and 5 pages/section)
+    const sampleWords = [
+      {
+        word: 'Ephemeral',
+        partOfSpeech: 'adjective',
+        mainDefinition: 'Lasting for a very short time.',
+        bookSentence: 'The ephemeral twilight settled over the labyrinthine citadel.',
+        chapter: 'Chapter 1',
+      },
+      {
+        word: 'Magnanimous',
+        partOfSpeech: 'adjective',
+        mainDefinition: 'Generous or forgiving.',
+        bookSentence: 'The magnanimous sovereign articulated an eloquent benediction.',
+        chapter: 'Chapter 2',
+      },
+      {
+        word: 'Cacophonous',
+        partOfSpeech: 'adjective',
+        mainDefinition: 'Involving or producing a harsh, discordant mixture of sounds.',
+        bookSentence: 'A cacophonous symphony reverberated across the subterranean amphitheater.',
+        chapter: 'Chapter 2',
+      },
+    ];
+
+    const reassigned10 = reassignWordsToBookSections(hybridBook, sampleWords, {
+      mode: 'pages',
+      pagesPerSection: 10,
+    });
+    expect(reassigned10.find(w => w.word === 'Ephemeral')?.chapter).toBe('Pages 1-10');
+    expect(reassigned10.find(w => w.word === 'Magnanimous')?.chapter).toBe('Pages 11-20');
+    expect(reassigned10.find(w => w.word === 'Cacophonous')?.chapter).toBe('Pages 21-30');
+
+    const reassignedBackToChapters = reassignWordsToBookSections(hybridBook, reassigned10, {
+      mode: 'chapters',
+      pagesPerSection: 10,
+    });
+    expect(reassignedBackToChapters.find(w => w.word === 'Ephemeral')?.chapter).toBe('Chapter 1');
+    expect(reassignedBackToChapters.find(w => w.word === 'Magnanimous')?.chapter).toBe('Chapter 2');
+    expect(reassignedBackToChapters.find(w => w.word === 'Cacophonous')?.chapter).toBe('Chapter 2');
+  });
+
   test('parses nested book chapter tags and sorts chapter & page range names naturally', () => {
     const tag = formatBookChapterTag('Dune', 'Chapter 1');
     expect(tag).toBe('Book: Dune / Chapter 1');
@@ -107,7 +187,7 @@ The magnanimous sovereign articulated an eloquent benediction before the assembl
   });
 });
 
-test.describe('Book Nested Chapters & 20-Page Folders E2E', () => {
+test.describe('Book Nested Chapters & Page Sections E2E', () => {
   test('renders nested chapter & 20-page folders, supports multi-chapter study selection, and masters Chapter 1 separately', async ({ page }) => {
     const now = Date.now() - 60_000;
     const seededCards: Flashcard[] = [
@@ -263,12 +343,6 @@ test.describe('Book Nested Chapters & 20-Page Folders E2E', () => {
     await expect(page.getByRole('heading', { name: 'prescience' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'benevolent' })).toHaveCount(0);
 
-    // Capture screenshot of nested chapter folders & 20-page folders
-    await page.screenshot({
-      path: '/home/antigravity/.gemini/jetski/brain/v1/default/jetski_remote_agents_3p/a7fcfaec-b0d2-4bc2-b62c-d69cd223389f/scratch/feature2-nested-chapters-dock.png',
-      fullPage: false,
-    });
-
     // 3. Click Study on Chapter 1 in Book Vocabulary Dock to open SessionConfigModal pre-configured for Dune -> Chapter 1
     await dock.getByRole('button', { name: 'Study Dune Chapter 1' }).click();
 
@@ -288,11 +362,6 @@ test.describe('Book Nested Chapters & 20-Page Folders E2E', () => {
     await expect(chapterSelector).toContainText('1 selected');
     await expect(page.getByText(/Review all 2 cards that are due today/i)).toBeVisible();
 
-    // Capture screenshot of SessionConfigModal with Chapter selector
-    await page.screenshot({
-      path: '/home/antigravity/.gemini/jetski/brain/v1/default/jetski_remote_agents_3p/a7fcfaec-b0d2-4bc2-b62c-d69cd223389f/scratch/feature2-session-chapter-selector.png',
-    });
-
     // 4. Start the study session for Chapter 1 and master both words in Chapter 1
     await page.getByRole('button', { name: /Start Full Session/i }).click();
 
@@ -300,11 +369,6 @@ test.describe('Book Nested Chapters & 20-Page Folders E2E', () => {
     await expect(page.getByRole('heading', { name: 'melange' })).toBeVisible();
     await expect(page.getByTestId('study-card-complexity-badge').first()).toHaveText(/beginner/i);
     await expect(page.getByTestId('study-card-chapter-badge').first()).toHaveText('Chapter 1');
-
-    // Capture screenshot of studying a specific chapter
-    await page.screenshot({
-      path: '/home/antigravity/.gemini/jetski/brain/v1/default/jetski_remote_agents_3p/a7fcfaec-b0d2-4bc2-b62c-d69cd223389f/scratch/feature2-study-chapter.png',
-    });
 
     // Mark 'melange' as Mastered
     await page.getByText('Click to reveal').click();
@@ -333,9 +397,168 @@ test.describe('Book Nested Chapters & 20-Page Folders E2E', () => {
 
     const ch2Folder = updatedDock.getByTestId('book-chapter-folder').filter({ hasText: 'Chapter 2' });
     await expect(ch2Folder).toContainText('0/1');
+  });
+
+  test('allows selecting Chapter-based or Page-based vocab with custom pages per section when adding a book, and supports expandable section lists when sections are many', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+
+    // Mock Datamuse and Dictionary APIs so book extraction runs deterministically and fast in E2E
+    await page.route('https://api.datamuse.com/words*', async (route) => {
+      const url = new URL(route.request().url());
+      const word = url.searchParams.get('sp') || 'ephemeral';
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            word,
+            tags: ['f:0.45', 'pron:ɪˈfɛmərəl'],
+            defs: [`adj\tLiterary definition for ${word} in this section.`],
+          },
+        ]),
+      });
+    });
+
+    await page.route('https://api.dictionaryapi.dev/**', async (route) => {
+      await route.fulfill({ status: 404, body: 'Not found' });
+    });
+
+    await page.goto('/#/flashcards');
+
+    // Open "Prepare for a Book" modal
+    await page.getByRole('button', { name: /Prepare for a Book/i }).first().click();
+
+    const segSelector = page.getByTestId('segmentation-selector');
+    await expect(segSelector).toBeVisible();
+
+    // Select Page-based mode and choose 10 pages per section
+    await segSelector.getByTestId('segmentation-mode-pages').click();
+    const pagesControl = segSelector.getByTestId('pages-per-section-control');
+    await expect(pagesControl).toBeVisible();
+    await pagesControl.getByTestId('pages-per-section-preset-10').click();
+    await expect(pagesControl.getByTestId('pages-per-section-input')).toHaveValue('10');
+
+    // Capture screenshot of BookPrepModal with Page-based & Pages per Section selector
+    await page.screenshot({
+      path: '/home/antigravity/.gemini/jetski/brain/v1/default/jetski_remote_agents_3p/a7fcfaec-b0d2-4bc2-b62c-d69cd223389f/scratch/feature3-bookprep-page-mode-selector.png',
+    });
+
+    // Upload a book with 8 distinct 10-page sections (Pages 1-10 through Pages 71-80) AND Chapter headings
+    const eightSectionWords = [
+      'ephemeral',
+      'labyrinthine',
+      'magnanimous',
+      'ubiquitous',
+      'cacophonous',
+      'indomitable',
+      'luminescent',
+      'subterranean',
+    ];
+    const bookLines: string[] = [];
+    eightSectionWords.forEach((word, idx) => {
+      const pageNum = idx * 10 + 2; // Pages 2, 12, 22, 32, 42, 52, 62, 72 -> 8 sections of 10 pages
+      bookLines.push(`Chapter ${idx + 1}`);
+      bookLines.push(`Page ${pageNum}`);
+      bookLines.push(
+        `The ${word} phenomenon captivated every scholar exploring the ancient library archives.`
+      );
+    });
+
+    await page.getByLabel('Search book title').fill('Chronicles of Antiquity');
+    const fileInput = page.locator('input[type="file"][aria-label="Upload book file"]');
+    await fileInput.setInputFiles({
+      name: 'chronicles.txt',
+      mimeType: 'text/plain',
+      buffer: Buffer.from(bookLines.join('\n'), 'utf-8'),
+    });
+
+    // Verify Preview screen appears with 8 page-based sections (10 pages each: Pages 1-10 ... Pages 71-80)
+    const previewChapterFilter = page.getByTestId('preview-chapter-filter');
+    await expect(previewChapterFilter).toBeVisible();
+    await expect(previewChapterFilter).toContainText('Filter by Chapter / Section (8)');
+    await expect(previewChapterFilter).toContainText('Pages 1-10');
+    await expect(previewChapterFilter).toContainText('Pages 51-60');
+
+    // Because there are 8 sections (> 6), the preview chapter filter collapses the remaining +2 sections behind an expand button
+    const previewExpandBtn = previewChapterFilter.getByTestId('preview-chapters-expand-button');
+    await expect(previewExpandBtn).toBeVisible();
+    await expect(previewExpandBtn).toContainText('+2 more sections');
+    await expect(previewChapterFilter).not.toContainText('Pages 71-80');
+
+    // Expand all sections in Preview
+    await previewExpandBtn.click();
+    await expect(previewChapterFilter).toContainText('Pages 71-80');
+    await expect(previewExpandBtn).toContainText('Show fewer sections');
+
+    // Capture screenshot of Preview with Page-based 10-page sections and expandable filter
+    await page.screenshot({
+      path: '/home/antigravity/.gemini/jetski/brain/v1/default/jetski_remote_agents_3p/a7fcfaec-b0d2-4bc2-b62c-d69cd223389f/scratch/feature3-preview-page-sections-expanded.png',
+    });
+
+    // Also verify switching live to 20 pages per section in Preview updates sections to 4 buckets (Pages 1-20 ... Pages 61-80)
+    const previewSegSelector = page.getByTestId('preview-segmentation-selector');
+    await previewSegSelector.getByTestId('pages-per-section-preset-20').click();
+    await expect(previewChapterFilter).toContainText('Filter by Chapter / Section (4)');
+    await expect(previewChapterFilter).toContainText('Pages 1-20');
+    await expect(previewChapterFilter).toContainText('Pages 61-80');
+
+    // Switch back to 10 pages per section so we import 8 sections to test expandable sections across the app
+    await previewSegSelector.getByTestId('pages-per-section-preset-10').click();
+    await expect(previewChapterFilter).toContainText('Filter by Chapter / Section (8)');
+
+    // Import the 8-section book into the deck
+    await page.getByRole('button', { name: /Add \d+ Words to Book Dock/i }).click();
+
+    // 1. Verify Book Vocabulary Dock shows only first 4 sections by default with "Show all 8 sections (+4 more)" button
+    const dock = page.getByTestId('book-vocabulary-dock');
+    await expect(dock).toBeVisible();
+    await expect(dock.getByTestId('book-chapter-folder')).toHaveCount(4);
+    const dockExpandBtn = dock.getByTestId('book-chapters-expand-button');
+    await expect(dockExpandBtn).toBeVisible();
+    await expect(dockExpandBtn).toContainText('Show all 8 sections (+4 more)');
+
+    // Capture screenshot of collapsed Book Vocabulary Dock & Collections with expand buttons
+    await page.screenshot({
+      path: '/home/antigravity/.gemini/jetski/brain/v1/default/jetski_remote_agents_3p/a7fcfaec-b0d2-4bc2-b62c-d69cd223389f/scratch/feature3-dock-collapsed-sections.png',
+    });
+
+    // Click expand in Book Vocabulary Dock -> all 8 sections appear
+    await dockExpandBtn.click();
+    await expect(dock.getByTestId('book-chapter-folder')).toHaveCount(8);
+    await expect(dockExpandBtn).toContainText('Show fewer sections');
 
     await page.screenshot({
-      path: '/home/antigravity/.gemini/jetski/brain/v1/default/jetski_remote_agents_3p/a7fcfaec-b0d2-4bc2-b62c-d69cd223389f/scratch/feature2-chapter1-mastered.png',
+      path: '/home/antigravity/.gemini/jetski/brain/v1/default/jetski_remote_agents_3p/a7fcfaec-b0d2-4bc2-b62c-d69cd223389f/scratch/feature3-dock-expanded-sections.png',
+    });
+
+    // Also test collapsing the entire Chapters / Sections drawer via header toggle
+    const drawerToggle = dock.getByTestId('book-chapters-collapse-toggle');
+    await drawerToggle.click();
+    await expect(dock.getByTestId('book-chapter-folder')).toHaveCount(0);
+    await drawerToggle.click();
+    await expect(dock.getByTestId('book-chapter-folder')).toHaveCount(8);
+
+    // 2. Verify Collections -> Books -> Chronicles of Antiquity Chapters bar has expandable pills (+2 more sections)
+    const collectionChapters = page.getByTestId('collection-book-chapters');
+    await expect(collectionChapters).toBeVisible();
+    await expect(collectionChapters.getByTestId('collection-chapter-pill')).toHaveCount(6);
+    const collectionExpandBtn = collectionChapters.getByTestId('collection-chapters-expand-button');
+    await expect(collectionExpandBtn).toContainText('+2 more sections');
+    await collectionExpandBtn.click();
+    await expect(collectionChapters.getByTestId('collection-chapter-pill')).toHaveCount(8);
+
+    // 3. Verify SessionConfigModal also collapses >6 sections and expands on click
+    await dock.getByRole('button', { name: 'Study Chronicles of Antiquity', exact: true }).click();
+    const sessionChapterSelector = page.getByTestId('session-chapter-selector');
+    await expect(sessionChapterSelector).toBeVisible();
+    await expect(sessionChapterSelector.getByTestId('session-chapter-option')).toHaveCount(6);
+    const sessionExpandBtn = sessionChapterSelector.getByTestId('session-chapters-expand-button');
+    await expect(sessionExpandBtn).toContainText('+2 more sections');
+    await sessionExpandBtn.click();
+    await expect(sessionChapterSelector.getByTestId('session-chapter-option')).toHaveCount(8);
+
+    await page.screenshot({
+      path: '/home/antigravity/.gemini/jetski/brain/v1/default/jetski_remote_agents_3p/a7fcfaec-b0d2-4bc2-b62c-d69cd223389f/scratch/feature3-session-expanded-sections.png',
     });
   });
 });

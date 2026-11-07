@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Flashcard, FlashcardStatus } from '../types';
-import { Play, BookOpen, CheckCircle, Brain, Trash2, RotateCw, Upload, Volume2, ChevronDown, ChevronRight, Search, X, ArrowUpDown, Filter, Plus, Pencil, Tag, Sparkles, AlertTriangle, Folder, FolderOpen, CornerDownRight } from 'lucide-react';
+import { Play, BookOpen, CheckCircle, Brain, Trash2, RotateCw, Upload, Volume2, ChevronDown, ChevronRight, ChevronUp, Search, X, ArrowUpDown, Filter, Plus, Pencil, Tag, Sparkles, AlertTriangle, Folder, FolderOpen, CornerDownRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { playAudio } from '../utils/audio';
 import { getDueCards } from '../utils/studyUtils';
@@ -10,6 +10,8 @@ import { parseTagHierarchy, BOOKS_FOLDER_FILTER, compareChapterNames, getCardBoo
 import { TagSelectorInput } from './TagSelectorInput';
 
 const PAGE_SIZE = 24;
+const COLLAPSED_DOCK_CHAPTER_LIMIT = 4;
+const COLLAPSED_COLLECTION_CHAPTER_LIMIT = 6;
 
 export type FlashcardSortOption = 'priority' | 'newest' | 'oldest' | 'alpha' | 'due';
 
@@ -627,6 +629,18 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
   }, [cards]);
 
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set(['Books']));
+  const [expandedDockBookChapters, setExpandedDockBookChapters] = useState<Set<string>>(() => new Set());
+  const [collapsedDockBookDrawers, setCollapsedDockBookDrawers] = useState<Set<string>>(() => new Set());
+  const [expandedCollectionBookChapters, setExpandedCollectionBookChapters] = useState<Set<string>>(() => new Set());
+
+  const toggleSetEntry = (setter: React.Dispatch<React.SetStateAction<Set<string>>>, key: string) => {
+    setter(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   const availableTags = useMemo(() => {
     const tagCounts = new Map<string, number>();
@@ -1080,70 +1094,135 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
                         />
                       </div>
 
-                      {book.chapters.length > 0 && (
-                        <div
-                          data-testid="book-chapters-list"
-                          className="pt-1.5 space-y-1.5 border-t border-slate-200/70 dark:border-slate-700/70"
-                        >
-                          <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                            <span>Chapters / Sections ({book.chapters.length})</span>
-                            <span>Mastery</span>
-                          </div>
-                          <div className="space-y-1 max-h-40 overflow-y-auto pr-0.5 custom-scrollbar">
-                            {book.chapters.map((ch) => {
-                              const isChapActive = selectedTag === ch.chapterTag;
-                              return (
-                                <div
-                                  key={ch.chapterTag}
-                                  data-testid="book-chapter-folder"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSelectedTag(isChapActive ? book.tag : ch.chapterTag);
-                                  }}
-                                  className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg text-xs border transition-colors ${
-                                    isChapActive
-                                      ? 'bg-brand-100/80 dark:bg-brand-900/50 border-brand-400 text-brand-900 dark:text-brand-100'
-                                      : ch.isMastered
-                                        ? 'bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200/80 dark:border-emerald-800/60 text-emerald-900 dark:text-emerald-200'
-                                        : 'bg-white/80 dark:bg-slate-800/80 border-slate-200/70 dark:border-slate-700/70 text-slate-700 dark:text-slate-200 hover:border-brand-300'
-                                  }`}
-                                >
-                                  <div className="flex items-center gap-1.5 min-w-0">
-                                    <Folder className="h-3.5 w-3.5 shrink-0 text-amber-500" />
-                                    <span className="font-medium truncate">{ch.chapter}</span>
-                                    <span className="text-[10px] text-slate-400 dark:text-slate-500 shrink-0">
-                                      ({ch.mastered}/{ch.total})
-                                    </span>
-                                  </div>
-                                  <div className="flex items-center gap-1.5 shrink-0">
-                                    {ch.isMastered ? (
-                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300">
-                                        <CheckCircle className="h-2.5 w-2.5" />
-                                        Mastered
-                                      </span>
-                                    ) : (
-                                      <button
-                                        type="button"
-                                        data-testid="study-book-chapter-button"
-                                        aria-label={`Study ${book.title} ${ch.chapter}`}
-                                        disabled={ch.dueCount === 0}
+                      {book.chapters.length > 0 && (() => {
+                        const isDrawerCollapsed = collapsedDockBookDrawers.has(book.tag);
+                        const isAllExpanded = expandedDockBookChapters.has(book.tag);
+                        const hasManySections = book.chapters.length > COLLAPSED_DOCK_CHAPTER_LIMIT;
+                        const visibleChapters =
+                          hasManySections && !isAllExpanded
+                            ? (() => {
+                                const sliced = book.chapters.slice(0, COLLAPSED_DOCK_CHAPTER_LIMIT);
+                                const activeBeyondSlice = book.chapters.find(
+                                  (ch, idx) =>
+                                    idx >= COLLAPSED_DOCK_CHAPTER_LIMIT && selectedTag === ch.chapterTag
+                                );
+                                if (activeBeyondSlice) sliced.push(activeBeyondSlice);
+                                return sliced;
+                              })()
+                            : book.chapters;
+                        const hiddenCount = Math.max(0, book.chapters.length - visibleChapters.length);
+
+                        return (
+                          <div
+                            data-testid="book-chapters-list"
+                            className="pt-1.5 space-y-1.5 border-t border-slate-200/70 dark:border-slate-700/70"
+                          >
+                            <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                              <button
+                                type="button"
+                                data-testid="book-chapters-collapse-toggle"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleSetEntry(setCollapsedDockBookDrawers, book.tag);
+                                }}
+                                className="inline-flex items-center gap-1 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
+                              >
+                                {isDrawerCollapsed ? (
+                                  <ChevronRight className="h-3 w-3 shrink-0" />
+                                ) : (
+                                  <ChevronDown className="h-3 w-3 shrink-0" />
+                                )}
+                                <span>Chapters / Sections ({book.chapters.length})</span>
+                              </button>
+                              {!isDrawerCollapsed && <span>Mastery</span>}
+                            </div>
+
+                            {!isDrawerCollapsed && (
+                              <>
+                                <div className={`space-y-1 ${isAllExpanded ? 'max-h-80' : 'max-h-44'} overflow-y-auto pr-0.5 custom-scrollbar`}>
+                                  {visibleChapters.map((ch) => {
+                                    const isChapActive = selectedTag === ch.chapterTag;
+                                    return (
+                                      <div
+                                        key={ch.chapterTag}
+                                        data-testid="book-chapter-folder"
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          onStartStudy(book.tag, [ch.chapter]);
+                                          setSelectedTag(isChapActive ? book.tag : ch.chapterTag);
                                         }}
-                                        className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500 hover:bg-amber-600 text-white disabled:opacity-40 transition-colors inline-flex items-center gap-1"
+                                        className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg text-xs border transition-colors ${
+                                          isChapActive
+                                            ? 'bg-brand-100/80 dark:bg-brand-900/50 border-brand-400 text-brand-900 dark:text-brand-100'
+                                            : ch.isMastered
+                                              ? 'bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200/80 dark:border-emerald-800/60 text-emerald-900 dark:text-emerald-200'
+                                              : 'bg-white/80 dark:bg-slate-800/80 border-slate-200/70 dark:border-slate-700/70 text-slate-700 dark:text-slate-200 hover:border-brand-300'
+                                        }`}
                                       >
-                                        <Play className="h-2.5 w-2.5 fill-current" />
-                                        Study
-                                      </button>
-                                    )}
-                                  </div>
+                                        <div className="flex items-center gap-1.5 min-w-0">
+                                          <Folder className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+                                          <span className="font-medium truncate">{ch.chapter}</span>
+                                          <span className="text-[10px] text-slate-400 dark:text-slate-500 shrink-0">
+                                            ({ch.mastered}/{ch.total})
+                                          </span>
+                                        </div>
+                                        <div className="flex items-center gap-1.5 shrink-0">
+                                          {ch.isMastered ? (
+                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300">
+                                              <CheckCircle className="h-2.5 w-2.5" />
+                                              Mastered
+                                            </span>
+                                          ) : (
+                                            <button
+                                              type="button"
+                                              data-testid="study-book-chapter-button"
+                                              aria-label={`Study ${book.title} ${ch.chapter}`}
+                                              disabled={ch.dueCount === 0}
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                onStartStudy(book.tag, [ch.chapter]);
+                                              }}
+                                              className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500 hover:bg-amber-600 text-white disabled:opacity-40 transition-colors inline-flex items-center gap-1"
+                                            >
+                                              <Play className="h-2.5 w-2.5 fill-current" />
+                                              Study
+                                            </button>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
                                 </div>
-                              );
-                            })}
+
+                                {hasManySections && (
+                                  <button
+                                    type="button"
+                                    data-testid="book-chapters-expand-button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      toggleSetEntry(setExpandedDockBookChapters, book.tag);
+                                    }}
+                                    className="w-full py-1 px-2 rounded-lg text-[11px] font-semibold text-brand-600 dark:text-brand-400 bg-brand-50/60 dark:bg-brand-900/20 hover:bg-brand-100/70 dark:hover:bg-brand-900/40 transition-colors inline-flex items-center justify-center gap-1"
+                                  >
+                                    {isAllExpanded ? (
+                                      <>
+                                        <span>Show fewer sections</span>
+                                        <ChevronUp className="h-3 w-3" />
+                                      </>
+                                    ) : (
+                                      <>
+                                        <span>
+                                          Show all {book.chapters.length} sections (+{hiddenCount} more)
+                                        </span>
+                                        <ChevronDown className="h-3 w-3" />
+                                      </>
+                                    )}
+                                  </button>
+                                )}
+                              </>
+                            )}
                           </div>
-                        </div>
-                      )}
+                        );
+                      })()}
                     </div>
 
                     <div className="flex items-center justify-between gap-2 pt-1">
@@ -1472,63 +1551,105 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
                     })}
                   </div>
 
-                  {/* 3rd-Level Nested Chapter / 20-Page Folders Bar for the Active Book */}
-                  {activeBookItem && activeBookItem.chapters && activeBookItem.chapters.length > 0 && (
-                    <div
-                      data-testid="collection-book-chapters"
-                      className="flex flex-wrap items-center gap-2 ml-4 sm:ml-6 py-2 px-3 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200/80 dark:border-indigo-800/60"
-                    >
-                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-700 dark:text-indigo-300 mr-1">
-                        <CornerDownRight className="h-3.5 w-3.5 text-indigo-500" />
-                        <FolderOpen className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
-                        <span>{activeBookItem.name} Chapters:</span>
-                      </span>
+                  {/* 3rd-Level Nested Chapter / Page Section Folders Bar for the Active Book */}
+                  {activeBookItem && activeBookItem.chapters && activeBookItem.chapters.length > 0 && (() => {
+                    const allChapters = activeBookItem.chapters;
+                    const isExpanded = expandedCollectionBookChapters.has(activeBookItem.rawTag);
+                    const hasMany = allChapters.length > COLLAPSED_COLLECTION_CHAPTER_LIMIT;
+                    const visibleChapters =
+                      hasMany && !isExpanded
+                        ? (() => {
+                            const sliced = allChapters.slice(0, COLLAPSED_COLLECTION_CHAPTER_LIMIT);
+                            const activeBeyond = allChapters.find(
+                              (ch, idx) =>
+                                idx >= COLLAPSED_COLLECTION_CHAPTER_LIMIT && selectedTag === ch.rawTag
+                            );
+                            if (activeBeyond) sliced.push(activeBeyond);
+                            return sliced;
+                          })()
+                        : allChapters;
+                    const hiddenCount = Math.max(0, allChapters.length - visibleChapters.length);
 
-                      <button
-                        type="button"
-                        data-testid="collection-book-all-chapters"
-                        onClick={() => setSelectedTag(activeBookItem.rawTag)}
-                        className={`px-2.5 py-1 rounded-full text-xs font-semibold transition-colors duration-150 border ${
-                          selectedTag === activeBookItem.rawTag
-                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
-                            : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-300'
-                        }`}
+                    return (
+                      <div
+                        data-testid="collection-book-chapters"
+                        className="flex flex-wrap items-center gap-2 ml-4 sm:ml-6 py-2 px-3 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200/80 dark:border-indigo-800/60"
                       >
-                        All Chapters ({activeBookItem.count})
-                      </button>
+                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-700 dark:text-indigo-300 mr-1">
+                          <CornerDownRight className="h-3.5 w-3.5 text-indigo-500" />
+                          <FolderOpen className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
+                          <span>{activeBookItem.name} Chapters:</span>
+                        </span>
 
-                      {activeBookItem.chapters.map((chapItem) => {
-                        const isChapSelected = selectedTag === chapItem.rawTag;
-                        return (
-                          <button
-                            key={chapItem.rawTag}
-                            type="button"
-                            data-testid="collection-chapter-pill"
-                            onClick={() =>
-                              setSelectedTag(
-                                isChapSelected ? activeBookItem.rawTag : chapItem.rawTag
-                              )
-                            }
-                            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-colors duration-150 border ${
-                              isChapSelected
-                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
-                                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-indigo-300'
-                            }`}
-                          >
-                            <Folder
-                              className={`h-3 w-3 shrink-0 ${
+                        <button
+                          type="button"
+                          data-testid="collection-book-all-chapters"
+                          onClick={() => setSelectedTag(activeBookItem.rawTag)}
+                          className={`px-2.5 py-1 rounded-full text-xs font-semibold transition-colors duration-150 border ${
+                            selectedTag === activeBookItem.rawTag
+                              ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                              : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-300'
+                          }`}
+                        >
+                          All Chapters ({activeBookItem.count})
+                        </button>
+
+                        {visibleChapters.map((chapItem) => {
+                          const isChapSelected = selectedTag === chapItem.rawTag;
+                          return (
+                            <button
+                              key={chapItem.rawTag}
+                              type="button"
+                              data-testid="collection-chapter-pill"
+                              onClick={() =>
+                                setSelectedTag(
+                                  isChapSelected ? activeBookItem.rawTag : chapItem.rawTag
+                                )
+                              }
+                              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-colors duration-150 border ${
                                 isChapSelected
-                                  ? 'text-white'
-                                  : 'text-indigo-600 dark:text-indigo-400'
+                                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-indigo-300'
                               }`}
-                            />
-                            <span>{chapItem.chapter}</span>{' '}
-                            <span className="opacity-75">({chapItem.count})</span>
+                            >
+                              <Folder
+                                className={`h-3 w-3 shrink-0 ${
+                                  isChapSelected
+                                    ? 'text-white'
+                                    : 'text-indigo-600 dark:text-indigo-400'
+                                }`}
+                              />
+                              <span>{chapItem.chapter}</span>{' '}
+                              <span className="opacity-75">({chapItem.count})</span>
+                            </button>
+                          );
+                        })}
+
+                        {hasMany && (
+                          <button
+                            type="button"
+                            data-testid="collection-chapters-expand-button"
+                            onClick={() =>
+                              toggleSetEntry(setExpandedCollectionBookChapters, activeBookItem.rawTag)
+                            }
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-100/80 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-700 hover:bg-indigo-200/80 transition-colors"
+                          >
+                            {isExpanded ? (
+                              <>
+                                <span>Show fewer sections</span>
+                                <ChevronUp className="h-3 w-3" />
+                              </>
+                            ) : (
+                              <>
+                                <span>+{hiddenCount} more sections</span>
+                                <ChevronDown className="h-3 w-3" />
+                              </>
+                            )}
                           </button>
-                        );
-                      })}
-                    </div>
-                  )}
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })}

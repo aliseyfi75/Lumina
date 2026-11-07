@@ -11,18 +11,26 @@ import {
   AlertCircle,
   ArrowLeft,
   Quote,
+  Layers,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import {
   GutenbergBook,
   BookExtractedWord,
+  BookSegmentationMode,
   ComplexityFilter,
   ComplexityLevel,
   searchPublicDomainBooks,
   fetchGutenbergBookText,
   extractTextFromBookFile,
   extractComplexWordsFromText,
+  reassignWordsToBookSections,
 } from '../services/bookService';
 import { compareChapterNames } from '../utils/tagUtils';
+
+const PAGE_SECTION_PRESETS = [5, 10, 20, 50] as const;
+const COLLAPSED_PREVIEW_CHAPTER_LIMIT = 6;
 
 interface BookPrepModalProps {
   isOpen: boolean;
@@ -52,7 +60,11 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
   const [extractionProgress, setExtractionProgress] = useState<{ completed: number; total: number } | null>(null);
   const [activeBookTitle, setActiveBookTitle] = useState('');
   const [complexityFilter, setComplexityFilter] = useState<ComplexityFilter>('all');
+  const [segmentationMode, setSegmentationMode] = useState<BookSegmentationMode>('chapters');
+  const [pagesPerSection, setPagesPerSection] = useState<number>(20);
+  const [extractedRawText, setExtractedRawText] = useState<string>('');
   const [chapterFilter, setChapterFilter] = useState<string>('all');
+  const [isPreviewChaptersExpanded, setIsPreviewChaptersExpanded] = useState(false);
   const [extractedWords, setExtractedWords] = useState<BookExtractedWord[]>([]);
   const [selectedWordSet, setSelectedWordSet] = useState<Set<string>>(new Set());
   const [extractionError, setExtractionError] = useState<string | null>(null);
@@ -74,7 +86,11 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
     setExtractionProgress(null);
     setActiveBookTitle('');
     setComplexityFilter('all');
+    setSegmentationMode('chapters');
+    setPagesPerSection(20);
+    setExtractedRawText('');
     setChapterFilter('all');
+    setIsPreviewChaptersExpanded(false);
     setExtractedWords([]);
     setSelectedWordSet(new Set());
     setExtractionError(null);
@@ -83,6 +99,20 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
   const handleClose = () => {
     resetModal();
     onClose();
+  };
+
+  const applySegmentationConfig = (nextMode: BookSegmentationMode, nextPages: number) => {
+    const safePages = Math.max(1, Math.min(500, Math.floor(nextPages || 20)));
+    setSegmentationMode(nextMode);
+    setPagesPerSection(safePages);
+    if (extractedWords.length > 0 && extractedRawText.trim()) {
+      const updated = reassignWordsToBookSections(extractedRawText, extractedWords, {
+        mode: nextMode,
+        pagesPerSection: safePages,
+      });
+      setExtractedWords(updated);
+      setChapterFilter('all');
+    }
   };
 
   const handleSearch = async (e: React.FormEvent) => {
@@ -116,11 +146,16 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
 
   const runExtraction = async (title: string, text: string) => {
     setActiveBookTitle(title);
+    setExtractedRawText(text);
+    setChapterFilter('all');
+    setIsPreviewChaptersExpanded(false);
     setExtractionStage('Analyzing book text and extracting all complex words...');
     setExtractionProgress(null);
     const words = await extractComplexWordsFromText(text, {
       complexityLevel: complexityFilter,
       existingWords,
+      segmentationMode,
+      pagesPerSection,
       onProgress: (stage, completed, total) => {
         setExtractionStage(stage);
         if (typeof completed === 'number' && typeof total === 'number' && total > 0) {
@@ -382,16 +417,129 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                   </div>
                 </div>
 
+                <div className="sm:col-span-2 space-y-2 p-3 rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200/80 dark:border-slate-700/80" data-testid="preview-segmentation-selector">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mr-1">
+                        <Layers className="h-3.5 w-3.5 text-brand-500" />
+                        Vocabulary Sections:
+                      </span>
+                      <button
+                        type="button"
+                        data-testid="segmentation-mode-chapters"
+                        onClick={() => applySegmentationConfig('chapters', pagesPerSection)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all border ${
+                          segmentationMode === 'chapters'
+                            ? 'bg-brand-600 text-white border-brand-600 shadow-sm'
+                            : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-brand-300'
+                        }`}
+                      >
+                        Chapter-based
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="segmentation-mode-pages"
+                        onClick={() => applySegmentationConfig('pages', pagesPerSection)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all border ${
+                          segmentationMode === 'pages'
+                            ? 'bg-brand-600 text-white border-brand-600 shadow-sm'
+                            : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-brand-300'
+                        }`}
+                      >
+                        Page-based
+                      </button>
+                    </div>
+
+                    {segmentationMode === 'pages' && (
+                      <div className="flex flex-wrap items-center gap-1.5" data-testid="pages-per-section-control">
+                        <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                          Pages / section:
+                        </span>
+                        {PAGE_SECTION_PRESETS.map(preset => (
+                          <button
+                            key={preset}
+                            type="button"
+                            data-testid={`pages-per-section-preset-${preset}`}
+                            onClick={() => applySegmentationConfig('pages', preset)}
+                            className={`px-2 py-0.5 rounded-md text-xs font-semibold transition-all border ${
+                              pagesPerSection === preset
+                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                                : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-300'
+                            }`}
+                          >
+                            {preset}p
+                          </button>
+                        ))}
+                        <input
+                          type="number"
+                          min={1}
+                          max={500}
+                          aria-label="Pages per section"
+                          data-testid="pages-per-section-input"
+                          value={pagesPerSection}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            if (!Number.isNaN(val) && val >= 1) {
+                              applySegmentationConfig('pages', val);
+                            }
+                          }}
+                          className="w-16 px-2 py-0.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md text-xs font-semibold text-slate-900 dark:text-slate-100 focus:outline-none focus:border-brand-500"
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
                 {(() => {
                   const chapters = Array.from(
                     new Set(extractedWords.map(w => w.chapter).filter((c): c is string => Boolean(c)))
                   ).sort(compareChapterNames);
                   if (chapters.length === 0) return null;
+
+                  const hasManyChapters = chapters.length > COLLAPSED_PREVIEW_CHAPTER_LIMIT;
+                  const visibleChapters =
+                    hasManyChapters && !isPreviewChaptersExpanded
+                      ? (() => {
+                          const sliced = chapters.slice(0, COLLAPSED_PREVIEW_CHAPTER_LIMIT);
+                          if (
+                            chapterFilter !== 'all' &&
+                            chapters.includes(chapterFilter) &&
+                            !sliced.includes(chapterFilter)
+                          ) {
+                            sliced.push(chapterFilter);
+                          }
+                          return sliced;
+                        })()
+                      : chapters;
+                  const hiddenCount = Math.max(0, chapters.length - visibleChapters.length);
+
                   return (
-                    <div className="space-y-1.5 pt-1" data-testid="preview-chapter-filter">
-                      <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                        Filter by Chapter / Section
-                      </label>
+                    <div className="sm:col-span-2 space-y-1.5 pt-1" data-testid="preview-chapter-filter">
+                      <div className="flex items-center justify-between gap-2">
+                        <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                          Filter by Chapter / Section ({chapters.length})
+                        </label>
+                        {hasManyChapters && (
+                          <button
+                            type="button"
+                            data-testid="preview-chapters-expand-button"
+                            onClick={() => setIsPreviewChaptersExpanded(prev => !prev)}
+                            className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline"
+                          >
+                            {isPreviewChaptersExpanded ? (
+                              <>
+                                <span>Show fewer sections</span>
+                                <ChevronUp className="h-3.5 w-3.5" />
+                              </>
+                            ) : (
+                              <>
+                                <span>+{hiddenCount} more sections</span>
+                                <ChevronDown className="h-3.5 w-3.5" />
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
                       <div className="flex flex-wrap gap-1.5">
                         <button
                           type="button"
@@ -410,7 +558,7 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                         >
                           All Sections ({extractedWords.length})
                         </button>
-                        {chapters.map(chap => {
+                        {visibleChapters.map(chap => {
                           const count = extractedWords.filter(w => w.chapter === chap).length;
                           const isActive = chapterFilter === chap;
                           return (
@@ -596,6 +744,104 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                   <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500">
                     Extracts all complex words found
                   </span>
+                </div>
+
+                {/* Vocabulary Organization (Chapter-based vs Page-based) Controls */}
+                <div
+                  className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200/80 dark:border-slate-700/80 space-y-2.5"
+                  data-testid="segmentation-selector"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mr-1">
+                        <Layers className="h-3.5 w-3.5 text-brand-500" />
+                        Vocab Organization:
+                      </span>
+                      <button
+                        type="button"
+                        data-testid="segmentation-mode-chapters"
+                        onClick={() => applySegmentationConfig('chapters', pagesPerSection)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all border ${
+                          segmentationMode === 'chapters'
+                            ? 'bg-brand-600 text-white border-brand-600 shadow-sm'
+                            : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-brand-300'
+                        }`}
+                      >
+                        Chapter-based
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="segmentation-mode-pages"
+                        onClick={() => applySegmentationConfig('pages', pagesPerSection)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all border ${
+                          segmentationMode === 'pages'
+                            ? 'bg-brand-600 text-white border-brand-600 shadow-sm'
+                            : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-brand-300'
+                        }`}
+                      >
+                        Page-based
+                      </button>
+                    </div>
+
+                    <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                      {segmentationMode === 'chapters'
+                        ? 'Groups by chapters (falls back to page sections if none)'
+                        : `Groups every ${pagesPerSection} ${pagesPerSection === 1 ? 'page' : 'pages'} per section`}
+                    </span>
+                  </div>
+
+                  {segmentationMode === 'pages' && (
+                    <div
+                      className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200/70 dark:border-slate-700/70"
+                      data-testid="pages-per-section-control"
+                    >
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mr-1">
+                          Pages per Section:
+                        </span>
+                        {PAGE_SECTION_PRESETS.map(preset => (
+                          <button
+                            key={preset}
+                            type="button"
+                            data-testid={`pages-per-section-preset-${preset}`}
+                            onClick={() => applySegmentationConfig('pages', preset)}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all border ${
+                              pagesPerSection === preset
+                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                                : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-300'
+                            }`}
+                          >
+                            {preset} pages
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <label
+                          htmlFor="book-prep-pages-per-section"
+                          className="text-[11px] font-medium text-slate-500 dark:text-slate-400"
+                        >
+                          Custom:
+                        </label>
+                        <input
+                          id="book-prep-pages-per-section"
+                          type="number"
+                          min={1}
+                          max={500}
+                          aria-label="Pages per section"
+                          data-testid="pages-per-section-input"
+                          value={pagesPerSection}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            if (!Number.isNaN(val) && val >= 1) {
+                              applySegmentationConfig('pages', val);
+                            }
+                          }}
+                          className="w-16 px-2 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-semibold text-slate-900 dark:text-slate-100 focus:outline-none focus:border-brand-500"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
               </form>
 

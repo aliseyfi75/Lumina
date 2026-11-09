@@ -1372,37 +1372,109 @@ const App: React.FC = () => {
   const handleImportBookWords = (bookTitle: string, words: BookExtractedWord[]) => {
     const cleanTitle = bookTitle.trim() || 'Untitled Book';
     const bookTag = `Book: ${cleanTitle}`;
+    const bookTagLower = bookTag.toLowerCase();
     const now = Date.now();
 
-    const newBookCards: Flashcard[] = words.map((w, idx) => {
-      const cleanChapter = w.chapter?.trim();
-      const cardTags = cleanChapter
-        ? [bookTag, `${bookTag} / ${cleanChapter}`]
-        : [bookTag];
-      return {
-        id: crypto.randomUUID(),
-        word: w.word.trim(),
-        partOfSpeech: w.partOfSpeech.trim() || 'noun',
-        phonetic: w.phonetic?.trim() || undefined,
-        audio: w.audio,
-        mainDefinition: w.mainDefinition.trim(),
-        example: w.bookSentence?.trim() || undefined,
-        synonyms: w.synonyms && w.synonyms.length > 0 ? w.synonyms : undefined,
-        antonyms: w.antonyms && w.antonyms.length > 0 ? w.antonyms : undefined,
-        complexityLevel: w.complexityLevel,
-        complexityScore: w.complexityScore,
-        bookChapter: cleanChapter || undefined,
-        tags: cardTags,
-        status: FlashcardStatus.New,
-        lastReviewed: 0,
-        createdAt: now + idx,
-        repetition: 0,
-        nextReviewDate: now,
-        updatedAt: now + idx,
-      };
+    // Map incoming words by normalized lowercase word
+    const incomingByWord = new Map<string, { wordObj: BookExtractedWord; idx: number }>();
+    words.forEach((w, idx) => {
+      const key = w.word.trim().toLowerCase();
+      if (key && !incomingByWord.has(key)) {
+        incomingByWord.set(key, { wordObj: w, idx });
+      }
     });
 
-    performMerge(newBookCards);
+    setCards(prev => {
+      const matchedKeys = new Set<string>();
+
+      const updatedExisting = prev.map(existing => {
+        const key = existing.word.trim().toLowerCase();
+        const match = incomingByWord.get(key);
+        if (!match || matchedKeys.has(key)) {
+          return existing;
+        }
+        matchedKeys.add(key);
+
+        const { wordObj: w, idx } = match;
+        const cleanChapter = w.chapter?.trim();
+        const newBookTags = cleanChapter
+          ? [bookTag, `${bookTag} / ${cleanChapter}`]
+          : [bookTag];
+
+        // Preserve all existing tags from other books or custom tags, replacing only tags for this same book
+        const retainedTags = (existing.tags || []).filter(t => {
+          const lower = t.trim().toLowerCase();
+          return lower !== bookTagLower && !lower.startsWith(`${bookTagLower} /`);
+        });
+        const mergedTags = [...retainedTags];
+        for (const nt of newBookTags) {
+          if (!mergedTags.some(t => t.trim().toLowerCase() === nt.toLowerCase())) {
+            mergedTags.push(nt);
+          }
+        }
+
+        return {
+          ...existing,
+          // Keep existing status, repetition, review schedule, and core definition intact;
+          // only fill in missing optional metadata and append the new book tags
+          phonetic: existing.phonetic || w.phonetic?.trim() || undefined,
+          audio: existing.audio || w.audio,
+          example: existing.example || w.bookSentence?.trim() || undefined,
+          synonyms:
+            existing.synonyms && existing.synonyms.length > 0
+              ? existing.synonyms
+              : w.synonyms && w.synonyms.length > 0
+              ? w.synonyms
+              : undefined,
+          antonyms:
+            existing.antonyms && existing.antonyms.length > 0
+              ? existing.antonyms
+              : w.antonyms && w.antonyms.length > 0
+              ? w.antonyms
+              : undefined,
+          complexityLevel: existing.complexityLevel ?? w.complexityLevel,
+          complexityScore: existing.complexityScore ?? w.complexityScore,
+          bookChapter: existing.bookChapter || cleanChapter || undefined,
+          tags: mergedTags,
+          updatedAt: now + idx,
+        };
+      });
+
+      const newBookCards: Flashcard[] = [];
+      for (const [key, { wordObj: w, idx }] of incomingByWord.entries()) {
+        if (matchedKeys.has(key)) continue;
+        const cleanChapter = w.chapter?.trim();
+        const cardTags = cleanChapter
+          ? [bookTag, `${bookTag} / ${cleanChapter}`]
+          : [bookTag];
+        newBookCards.push({
+          id: crypto.randomUUID(),
+          word: w.word.trim(),
+          partOfSpeech: w.partOfSpeech.trim() || 'noun',
+          phonetic: w.phonetic?.trim() || undefined,
+          audio: w.audio,
+          mainDefinition: w.mainDefinition.trim(),
+          example: w.bookSentence?.trim() || undefined,
+          synonyms: w.synonyms && w.synonyms.length > 0 ? w.synonyms : undefined,
+          antonyms: w.antonyms && w.antonyms.length > 0 ? w.antonyms : undefined,
+          complexityLevel: w.complexityLevel,
+          complexityScore: w.complexityScore,
+          bookChapter: cleanChapter || undefined,
+          tags: cardTags,
+          status: FlashcardStatus.New,
+          lastReviewed: 0,
+          createdAt: now + idx,
+          repetition: 0,
+          nextReviewDate: now,
+          updatedAt: now + idx,
+        });
+      }
+
+      const next = [...newBookCards, ...updatedExisting];
+      cardsRef.current = next;
+      return next;
+    });
+
     recordActivity();
     trackEvent(TRACKING_ACTION.ADD_CARD, TRACKING_CATEGORY.FLASHCARDS, `book_${cleanTitle}`);
   };
@@ -1501,17 +1573,33 @@ const App: React.FC = () => {
     const removedIds: string[] = [];
 
     const cleanTagLower = cleanTag.toLowerCase();
-    const nextCards = cardsRef.current.filter(c => {
+    const nextCards: Flashcard[] = [];
+
+    for (const c of cardsRef.current) {
       const belongsToBook = c.tags?.some(t => {
         const trimmed = t.trim().toLowerCase();
         return trimmed === cleanTagLower || trimmed.startsWith(`${cleanTagLower} /`);
       });
-      if (belongsToBook) {
-        removedIds.push(c.id);
-        return false;
+      if (!belongsToBook) {
+        nextCards.push(c);
+        continue;
       }
-      return true;
-    });
+
+      const remainingTags = (c.tags || []).filter(t => {
+        const trimmed = t.trim().toLowerCase();
+        return trimmed !== cleanTagLower && !trimmed.startsWith(`${cleanTagLower} /`);
+      });
+
+      if (remainingTags.length > 0) {
+        nextCards.push({
+          ...c,
+          tags: remainingTags,
+          updatedAt: now,
+        });
+      } else {
+        removedIds.push(c.id);
+      }
+    }
 
     const nextDeletedMap = new Map(deletedCardsRef.current);
     for (const id of removedIds) {

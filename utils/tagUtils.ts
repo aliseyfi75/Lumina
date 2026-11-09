@@ -68,32 +68,71 @@ export function compareChapterNames(a: string, b: string): number {
   return ordA.text.localeCompare(ordB.text);
 }
 
+export interface CardBookEntry {
+  bookTitle: string;
+  chapter?: string;
+  bookTag: string;
+  chapterTag?: string;
+}
+
 /**
- * Extracts book title and optional chapter/page-range folder from a Flashcard's tags & metadata.
+ * Extracts all book memberships (and each book's corresponding chapter/page-range folder)
+ * from a Flashcard's tags & metadata so a word shared across multiple books appears in every book.
  */
-export function getCardBookInfo(card: {
+export function getCardBookInfos(card: {
   tags?: string[];
   bookChapter?: string;
-}): { bookTitle: string; chapter?: string; bookTag: string; chapterTag?: string } | null {
-  let bookTitle: string | undefined;
-  let chapter: string | undefined = card.bookChapter?.trim() || undefined;
+}): CardBookEntry[] {
+  const byBookLower = new Map<string, { bookTitle: string; chapter?: string }>();
+  const fallbackChapter = card.bookChapter?.trim() || undefined;
 
   for (const rawTag of card.tags || []) {
     const parsed = parseTagHierarchy(rawTag);
     if (parsed.isBook && parsed.bookTitle) {
-      if (!bookTitle) {
-        bookTitle = parsed.bookTitle;
-      }
-      if (parsed.chapter && !chapter) {
-        chapter = parsed.chapter;
+      const key = parsed.bookTitle.toLowerCase();
+      const existing = byBookLower.get(key);
+      if (!existing) {
+        byBookLower.set(key, {
+          bookTitle: parsed.bookTitle,
+          chapter: parsed.chapter,
+        });
+      } else if (parsed.chapter && !existing.chapter) {
+        existing.chapter = parsed.chapter;
       }
     }
   }
 
-  if (!bookTitle) return null;
-  const bookTag = formatBookTag(bookTitle);
-  const chapterTag = chapter ? formatBookChapterTag(bookTitle, chapter) : undefined;
-  return { bookTitle, chapter, bookTag, chapterTag };
+  const entries = Array.from(byBookLower.values());
+  if (entries.length === 1 && !entries[0].chapter && fallbackChapter) {
+    entries[0].chapter = fallbackChapter;
+  }
+
+  return entries.map(({ bookTitle, chapter }) => {
+    const bookTag = formatBookTag(bookTitle);
+    const chapterTag = chapter ? formatBookChapterTag(bookTitle, chapter) : undefined;
+    return { bookTitle, chapter, bookTag, chapterTag };
+  });
+}
+
+export function getCardBookInfoForBook(
+  card: { tags?: string[]; bookChapter?: string },
+  targetBookTitle: string
+): CardBookEntry | null {
+  const targetLower = targetBookTitle.trim().toLowerCase();
+  if (!targetLower) return null;
+  const infos = getCardBookInfos(card);
+  return infos.find(info => info.bookTitle.toLowerCase() === targetLower) || null;
+}
+
+/**
+ * Extracts the primary book title and optional chapter/page-range folder from a Flashcard's tags & metadata.
+ */
+export function getCardBookInfo(card: {
+  tags?: string[];
+  bookChapter?: string;
+}): CardBookEntry | null {
+  const infos = getCardBookInfos(card);
+  return infos[0] || null;
 }
 
 /**

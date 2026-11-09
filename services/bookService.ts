@@ -1883,6 +1883,7 @@ export const extractComplexWordsFromText = async (
     maxWords?: number;
     complexityLevel?: ComplexityFilter;
     existingWords?: Set<string>;
+    excludeExistingWords?: boolean;
     segmentationMode?: BookSegmentationMode;
     pagesPerSection?: number;
     wordsPerPage?: number;
@@ -1892,6 +1893,7 @@ export const extractComplexWordsFromText = async (
   const maxWords = options?.maxWords;
   const complexityFilter: ComplexityFilter = options?.complexityLevel ?? 'all';
   const existingWords = options?.existingWords ?? new Set<string>();
+  const excludeExistingWords = options?.excludeExistingWords ?? false;
 
   options?.onProgress?.('Scanning sentences and tokenizing full book text...');
 
@@ -1956,7 +1958,7 @@ export const extractComplexWordsFromText = async (
         const lower = rawToken.toLowerCase();
         const index = match.index;
 
-        if (existingWords.has(lower)) continue;
+        if (excludeExistingWords && existingWords.has(lower)) continue;
         if (isSimpleCommonInflection(lower)) continue;
 
         const isLowercase = rawToken === lower;

@@ -973,6 +973,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     isOpen={isBookPrepOpen}
                     onClose={() => setIsBookPrepOpen(false)}
                     existingWords={existingWordsSet}
+                    existingCards={cards}
                     onImportBookWords={onImportBookWords}
                 />
             )}

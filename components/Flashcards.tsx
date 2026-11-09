@@ -6,7 +6,7 @@ import { playAudio } from '../utils/audio';
 import { getDueCards } from '../utils/studyUtils';
 import { BookPrepModal } from './BookPrepModal';
 import { BookExtractedWord } from '../services/bookService';
-import { parseTagHierarchy, BOOKS_FOLDER_FILTER, compareChapterNames, getCardBookInfo, formatBookTag, formatBookChapterTag } from '../utils/tagUtils';
+import { parseTagHierarchy, BOOKS_FOLDER_FILTER, compareChapterNames, getCardBookInfo, getCardBookInfos, getCardBookInfoForBook, formatBookTag, formatBookChapterTag } from '../utils/tagUtils';
 import { TagSelectorInput } from './TagSelectorInput';
 
 const PAGE_SIZE = 24;
@@ -514,29 +514,29 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
     >();
 
     for (const card of cards) {
-      const bookInfo = getCardBookInfo(card);
-      if (!bookInfo) continue;
-
-      const { bookTitle, chapter, bookTag } = bookInfo;
-      let group = groups.get(bookTag);
-      if (!group) {
-        group = {
-          tag: bookTag,
-          title: bookTitle,
-          cardMap: new Map<string, Flashcard>(),
-          chapterCardsMap: new Map<string, Map<string, Flashcard>>(),
-        };
-        groups.set(bookTag, group);
-      }
-      group.cardMap.set(card.id, card);
-
-      if (chapter) {
-        let chapMap = group.chapterCardsMap.get(chapter);
-        if (!chapMap) {
-          chapMap = new Map<string, Flashcard>();
-          group.chapterCardsMap.set(chapter, chapMap);
+      const bookInfos = getCardBookInfos(card);
+      for (const bookInfo of bookInfos) {
+        const { bookTitle, chapter, bookTag } = bookInfo;
+        let group = groups.get(bookTag);
+        if (!group) {
+          group = {
+            tag: bookTag,
+            title: bookTitle,
+            cardMap: new Map<string, Flashcard>(),
+            chapterCardsMap: new Map<string, Map<string, Flashcard>>(),
+          };
+          groups.set(bookTag, group);
         }
-        chapMap.set(card.id, card);
+        group.cardMap.set(card.id, card);
+
+        if (chapter) {
+          let chapMap = group.chapterCardsMap.get(chapter);
+          if (!chapMap) {
+            chapMap = new Map<string, Flashcard>();
+            group.chapterCardsMap.set(chapter, chapMap);
+          }
+          chapMap.set(card.id, card);
+        }
       }
     }
 
@@ -814,8 +814,8 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
             const inFolder = c.tags?.some(t => parseTagHierarchy(t).folder === folderName);
             if (!inFolder) return false;
           } else if (parsedSelected?.isBook && parsedSelected.bookTitle) {
-            const cardBook = getCardBookInfo(c);
-            if (!cardBook || cardBook.bookTitle.toLowerCase() !== parsedSelected.bookTitle.toLowerCase()) {
+            const cardBook = getCardBookInfoForBook(c, parsedSelected.bookTitle);
+            if (!cardBook) {
               return false;
             }
             if (parsedSelected.chapter) {
@@ -954,6 +954,7 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
           isOpen={isBookPrepOpen}
           onClose={() => setIsBookPrepOpen(false)}
           existingWords={existingWordsSet}
+          existingCards={cards}
           onImportBookWords={handleBookWordsImported}
         />
       </>
@@ -1044,6 +1045,7 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
                 return (
                   <div
                     key={book.tag}
+                    data-testid="book-dock-card"
                     onClick={() => setSelectedTag(isSelected ? 'all' : book.tag)}
                     className={`p-3.5 rounded-xl border transition-all cursor-pointer flex flex-col justify-between gap-3 ${
                       isSelected
@@ -1712,6 +1714,7 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
         isOpen={isBookPrepOpen}
         onClose={() => setIsBookPrepOpen(false)}
         existingWords={existingWordsSet}
+        existingCards={cards}
         onImportBookWords={handleBookWordsImported}
       />
 

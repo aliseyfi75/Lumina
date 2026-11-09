@@ -7,7 +7,7 @@ import { motion, useMotionValue, useTransform, PanInfo, AnimatePresence } from '
 import { useLocation } from 'react-router-dom';
 import { playAudio } from '../utils/audio';
 import { getDueCards, sortStudySessionCards, isBookFlashcard, getCardComplexityLevel } from '../utils/studyUtils';
-import { parseTagHierarchy, getCardBookInfo } from '../utils/tagUtils';
+import { parseTagHierarchy, getCardBookInfo, getCardBookInfoForBook } from '../utils/tagUtils';
 import { SessionMode } from './SessionConfigModal';
 
 const FALLBACK_DISTRACTORS = [
@@ -63,7 +63,6 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
     if (sessionConfig?.tag) {
       const parsed = parseTagHierarchy(sessionConfig.tag);
       if (parsed.folder === 'Books' && parsed.bookTitle) {
-        const targetBookLower = parsed.bookTitle.toLowerCase();
         const effectiveChapters =
           sessionConfig.chapters && sessionConfig.chapters.length > 0
             ? sessionConfig.chapters
@@ -71,8 +70,8 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
               ? [parsed.chapter]
               : [];
         dueCards = allDueCards.filter(c => {
-          const info = getCardBookInfo(c);
-          if (!info || info.bookTitle.toLowerCase() !== targetBookLower) return false;
+          const info = getCardBookInfoForBook(c, parsed.bookTitle!);
+          if (!info) return false;
           if (effectiveChapters.length > 0) {
             return Boolean(info.chapter && effectiveChapters.includes(info.chapter));
           }
@@ -102,10 +101,20 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
 
   const currentCard = queue[currentIndex];
 
+  const activeSessionBookTitle = useMemo(() => {
+    if (!sessionConfig?.tag) return null;
+    const parsed = parseTagHierarchy(sessionConfig.tag);
+    return parsed.folder === 'Books' && parsed.bookTitle ? parsed.bookTitle : null;
+  }, [sessionConfig]);
+
   const currentCardBookInfo = useMemo(() => {
     if (!currentCard) return null;
+    if (activeSessionBookTitle) {
+      const matched = getCardBookInfoForBook(currentCard, activeSessionBookTitle);
+      if (matched) return matched;
+    }
     return getCardBookInfo(currentCard);
-  }, [currentCard]);
+  }, [currentCard, activeSessionBookTitle]);
 
   // Determine if the current card comes from a Book dock and has a real sentence from the book
   const bookSourceTitle = useMemo(() => {

@@ -11,6 +11,8 @@ import {
   compareChapterNames,
   formatBookChapterTag,
   getCardBookInfo,
+  getCardBookInfos,
+  getCardBookInfoForBook,
 } from '../utils/tagUtils';
 import { Flashcard, FlashcardStatus } from '../types';
 
@@ -184,6 +186,32 @@ A cacophonous symphony reverberated across the subterranean amphitheater during 
       'Pages 21-40',
       'Pages 41-60',
     ]);
+
+    const sharedCard = {
+      tags: [
+        'Book: First Odyssey',
+        'Book: First Odyssey / Chapter 1',
+        'Book: Second Odyssey',
+        'Book: Second Odyssey / Chapter 3',
+      ],
+    };
+    const allInfos = getCardBookInfos(sharedCard);
+    expect(allInfos).toEqual([
+      {
+        bookTitle: 'First Odyssey',
+        chapter: 'Chapter 1',
+        bookTag: 'Book: First Odyssey',
+        chapterTag: 'Book: First Odyssey / Chapter 1',
+      },
+      {
+        bookTitle: 'Second Odyssey',
+        chapter: 'Chapter 3',
+        bookTag: 'Book: Second Odyssey',
+        chapterTag: 'Book: Second Odyssey / Chapter 3',
+      },
+    ]);
+    expect(getCardBookInfoForBook(sharedCard, 'Second Odyssey')?.chapter).toBe('Chapter 3');
+    expect(getCardBookInfoForBook(sharedCard, 'First Odyssey')?.chapter).toBe('Chapter 1');
   });
 });
 
@@ -570,5 +598,153 @@ test.describe('Book Nested Chapters & Page Sections E2E', () => {
     await page.screenshot({
       path: '/home/antigravity/.gemini/jetski/brain/v1/default/jetski_remote_agents_3p/a7fcfaec-b0d2-4bc2-b62c-d69cd223389f/scratch/feature3-session-expanded-sections.png',
     });
+  });
+
+  test('does not duplicate words already in the deck when adding a new book, updates them with the new book tag, and preserves their existing status', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const now = Date.now() - 60_000;
+
+    // Seed deck with 2 existing words from a previous book ("First Odyssey"):
+    // 1. 'ephemeral' -> already Mastered
+    // 2. 'labyrinthine' -> currently Learning (due today)
+    const initialCards: Flashcard[] = [
+      {
+        id: 'existing-mastered-ephemeral',
+        word: 'ephemeral',
+        phonetic: '/ɪˈfɛmərəl/',
+        partOfSpeech: 'adjective',
+        mainDefinition: 'Lasting for a very short time; fleeting.',
+        example: 'An ephemeral moment of serenity in the First Odyssey.',
+        tags: ['Book: First Odyssey', 'Book: First Odyssey / Chapter 1'],
+        bookChapter: 'Chapter 1',
+        status: FlashcardStatus.Mastered,
+        lastReviewed: now,
+        createdAt: now - 10_000,
+        repetition: 5,
+        nextReviewDate: now + 86_400_000 * 30,
+        complexityLevel: 'intermediate',
+        complexityScore: 60,
+      },
+      {
+        id: 'existing-learning-labyrinthine',
+        word: 'labyrinthine',
+        phonetic: '/ˌlæbəˈrɪnθaɪn/',
+        partOfSpeech: 'adjective',
+        mainDefinition: 'Irregular and twisting; like a labyrinth.',
+        example: 'The labyrinthine passages of the First Odyssey.',
+        tags: ['Book: First Odyssey', 'Book: First Odyssey / Chapter 1'],
+        bookChapter: 'Chapter 1',
+        status: FlashcardStatus.Learning,
+        lastReviewed: now - 86_400_000,
+        createdAt: now - 9_000,
+        repetition: 2,
+        nextReviewDate: now - 1_000, // due now
+        complexityLevel: 'advanced',
+        complexityScore: 78,
+      },
+    ];
+
+    await page.addInitScript((cardsData) => {
+      localStorage.setItem('lumina_cards_v1', JSON.stringify(cardsData));
+    }, initialCards);
+
+    // Mock Datamuse and Dictionary APIs so book extraction runs deterministically
+    await page.route('https://api.datamuse.com/words*', async (route) => {
+      const url = new URL(route.request().url());
+      const word = url.searchParams.get('sp') || 'ephemeral';
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            word,
+            tags: ['f:0.45', 'pron:ɪˈfɛmərəl'],
+            defs: [`adj\tLiterary definition for ${word} in Second Odyssey.`],
+          },
+        ]),
+      });
+    });
+
+    await page.route('https://api.dictionaryapi.dev/**', async (route) => {
+      await route.fulfill({ status: 404, body: 'Not found' });
+    });
+
+    await page.goto('/#/flashcards');
+
+    // Verify initial deck has 2 cards total
+    await expect(page.getByText('2 cards total')).toBeVisible();
+
+    // Open "Prepare for a Book" and upload a new book ("Second Odyssey") that contains:
+    // - 'ephemeral' (already Mastered in deck)
+    // - 'labyrinthine' (already Learning in deck)
+    // - 'magnanimous' (brand new word not yet in deck)
+    await page.getByRole('button', { name: /Prepare for a Book/i }).first().click();
+    await page.getByLabel('Search book title').fill('Second Odyssey');
+
+    const secondBookText = [
+      'Chapter 1',
+      'The ephemeral twilight settled over the labyrinthine fortress while the magnanimous commander watched.',
+    ].join('\n');
+
+    const fileInput = page.locator('input[type="file"][aria-label="Upload book file"]');
+    await fileInput.setInputFiles({
+      name: 'second-odyssey.txt',
+      mimeType: 'text/plain',
+      buffer: Buffer.from(secondBookText, 'utf-8'),
+    });
+
+    // In Step 3 Preview, verify that 'ephemeral' and 'labyrinthine' are extracted AND show their existing deck status badges!
+    const existingStatusBadges = page.getByTestId('word-existing-status-badge');
+    await expect(existingStatusBadges).toHaveCount(2);
+    await expect(page.getByText('In Deck • Mastered')).toBeVisible();
+    await expect(page.getByText('In Deck • Learning')).toBeVisible();
+
+    // Take screenshot of Preview showing "In Deck • Mastered" and "In Deck • Learning" badges
+    await page.screenshot({
+      path: '/home/antigravity/.gemini/jetski/brain/v1/default/jetski_remote_agents_3p/a7fcfaec-b0d2-4bc2-b62c-d69cd223389f/scratch/feature4-preview-existing-words-status.png',
+    });
+
+    // Ensure only our 3 target words ('ephemeral', 'labyrinthine', 'magnanimous') are selected before importing
+    // (deselect any other extracted words like 'fortress' or 'commander' if present)
+    const targetWords = new Set(['ephemeral', 'labyrinthine', 'magnanimous']);
+    const previewWordCards = page.locator('[data-testid="word-complexity-badge"]').locator('..');
+    const count = await previewWordCards.count();
+    for (let i = 0; i < count; i++) {
+      const wordText = (await previewWordCards.nth(i).locator('span').first().innerText()).trim().toLowerCase();
+      if (!targetWords.has(wordText)) {
+        await previewWordCards.nth(i).click();
+      }
+    }
+
+    await page.getByRole('button', { name: /Add 3 Words to Book Dock/i }).click();
+
+    // 1. Verify NO duplicate cards were added: 2 existing + 1 new ('magnanimous') = 3 cards total (NOT 5!)
+    await expect(page.getByText('3 cards total')).toBeVisible();
+
+    // 2. Verify Book Vocabulary Dock shows BOTH books ("Second Odyssey" and "First Odyssey"),
+    // and "Second Odyssey" immediately reflects 3 complex words • 1 mastered (50% Ready: 1 Mastered + 1 Learning + 1 New)!
+    const dock = page.getByTestId('book-vocabulary-dock');
+    await expect(dock).toBeVisible();
+    const secondOdysseyCard = dock.getByTestId('book-dock-card').filter({ hasText: 'Second Odyssey' });
+    await expect(secondOdysseyCard).toBeVisible();
+    await expect(secondOdysseyCard).toContainText('3 complex words • 1 mastered');
+    await expect(secondOdysseyCard).toContainText('50% Ready');
+    await expect(secondOdysseyCard).toContainText('Chapter 1');
+    await expect(secondOdysseyCard).toContainText('(1/3)');
+
+    // Also verify "First Odyssey" still has its 2 words and 1 mastered
+    const firstOdysseyCard = dock.getByTestId('book-dock-card').filter({ hasText: 'First Odyssey' });
+    await expect(firstOdysseyCard).toBeVisible();
+    await expect(firstOdysseyCard).toContainText('2 complex words • 1 mastered');
+
+    // Take screenshot of the Book Vocabulary Dock and Deck showing shared words across books with preserved status
+    await page.screenshot({
+      path: '/home/antigravity/.gemini/jetski/brain/v1/default/jetski_remote_agents_3p/a7fcfaec-b0d2-4bc2-b62c-d69cd223389f/scratch/feature4-dock-shared-book-words.png',
+    });
+
+    // 3. Verify clicking "Study Second Odyssey" only has 2 due cards ('magnanimous' [New] and 'labyrinthine' [Learning]),
+    // skipping 'ephemeral' because it kept its Mastered status!
+    await secondOdysseyCard.getByRole('button', { name: 'Study Second Odyssey', exact: true }).click();
+    await expect(page.getByText(/Review all 2 cards that are due today/i)).toBeVisible();
   });
 });

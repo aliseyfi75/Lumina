@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Play, Zap, BrainCircuit, ListChecks, Tag, BookOpen, Check, ChevronDown, ChevronUp } from 'lucide-react';
 import { Flashcard } from '../types';
 import { getDueCards } from '../utils/studyUtils';
-import { parseTagHierarchy, formatBookTag, getCardBookInfo, compareChapterNames } from '../utils/tagUtils';
+import { parseTagHierarchy, formatBookTag, getCardBookInfo, getCardBookInfoForBook, compareChapterNames } from '../utils/tagUtils';
 
 export type SessionMode = 'full' | 'short' | 'quiz';
 
@@ -91,8 +91,8 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
         if (!selectedBookTitle) return [];
         const chapterMap = new Map<string, { dueCount: number; totalCount: number }>();
         for (const card of cards) {
-            const info = getCardBookInfo(card);
-            if (!info || info.bookTitle.toLowerCase() !== selectedBookTitle.toLowerCase()) continue;
+            const info = getCardBookInfoForBook(card, selectedBookTitle);
+            if (!info) continue;
             if (!info.chapter) continue;
             const entry = chapterMap.get(info.chapter) || { dueCount: 0, totalCount: 0 };
             entry.totalCount += 1;
@@ -116,8 +116,8 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
         if (!selectedTag) return dueCount;
         if (selectedBookTitle) {
             return dueCards.filter(c => {
-                const info = getCardBookInfo(c);
-                if (!info || info.bookTitle.toLowerCase() !== selectedBookTitle.toLowerCase()) return false;
+                const info = getCardBookInfoForBook(c, selectedBookTitle);
+                if (!info) return false;
                 if (selectedChapters.length > 0) {
                     return Boolean(info.chapter && selectedChapters.includes(info.chapter));
                 }

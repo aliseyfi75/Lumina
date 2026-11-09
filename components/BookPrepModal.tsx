@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import {
   X,
   Search,
@@ -15,6 +15,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
+import { Flashcard, FlashcardStatus } from '../types';
 import {
   GutenbergBook,
   BookExtractedWord,
@@ -36,6 +37,7 @@ interface BookPrepModalProps {
   isOpen: boolean;
   onClose: () => void;
   existingWords: Set<string>;
+  existingCards?: Flashcard[];
   onImportBookWords: (bookTitle: string, words: BookExtractedWord[]) => void;
 }
 
@@ -43,8 +45,19 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
   isOpen,
   onClose,
   existingWords,
+  existingCards = [],
   onImportBookWords,
 }) => {
+  const existingCardsByWord = useMemo(() => {
+    const map = new Map<string, Flashcard>();
+    for (const card of existingCards) {
+      const key = card.word.trim().toLowerCase();
+      if (key && !map.has(key)) {
+        map.set(key, card);
+      }
+    }
+    return map;
+  }, [existingCards]);
   const [searchQuery, setSearchQuery] = useState('');
   const [submittedQuery, setSubmittedQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
@@ -628,6 +641,7 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                   .map((item) => {
                   const lower = item.word.toLowerCase();
                   const isChecked = selectedWordSet.has(lower);
+                  const existingCard = existingCardsByWord.get(lower);
                   const level = item.complexityLevel || 'intermediate';
                   const levelStyles =
                     level === 'advanced'
@@ -635,6 +649,12 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                       : level === 'intermediate'
                       ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/60'
                       : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/60';
+                  const existingStatusStyles =
+                    existingCard?.status === FlashcardStatus.Mastered
+                      ? 'bg-emerald-50 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/60'
+                      : existingCard?.status === FlashcardStatus.Learning
+                      ? 'bg-amber-50 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/60'
+                      : 'bg-sky-50 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800/60';
                   return (
                     <div
                       key={lower}
@@ -675,6 +695,14 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                               className="px-2 py-0.5 rounded-md text-[10px] font-bold tracking-wider bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60"
                             >
                               {item.chapter}
+                            </span>
+                          )}
+                          {existingCard && (
+                            <span
+                              data-testid="word-existing-status-badge"
+                              className={`px-2 py-0.5 rounded-md text-[10px] font-bold tracking-wider border ${existingStatusStyles}`}
+                            >
+                              In Deck • {existingCard.status}
                             </span>
                           )}
                           {item.phonetic && (

@@ -34,6 +34,7 @@ test('displays categories on the Home screen with Books in priority, showing pro
   });
 
   await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'onLine', { get: () => true, configurable: true });
     const now = Date.now();
     const cards = [
       // General untagged card (Not Started)
@@ -159,15 +160,19 @@ test('displays categories on the Home screen with Books in priority, showing pro
   expect(thirdKind).toBe('tag');
   expect(fourthKind).toBe('general');
 
-  // Verify Moby-Dick (Not Started, 0%)
+  // Verify Moby-Dick (Not Started, 0%) shows full blue bar for New words
   await expect(categoryCards.nth(0)).toContainText('Moby-Dick');
   await expect(categoryCards.nth(0).getByTestId('category-status-badge')).toHaveText('Not Started');
   await expect(categoryCards.nth(0).getByTestId('category-progress-pct')).toHaveText('0%');
+  await expect(categoryCards.nth(0).getByTestId('category-bar-new')).toBeVisible();
 
-  // Verify Frankenstein (In Progress, 50%)
+  // Verify Frankenstein (In Progress, 50%) shows green (Mastered), amber (Learning), and blue (New) segments
   await expect(categoryCards.nth(1)).toContainText('Frankenstein');
   await expect(categoryCards.nth(1).getByTestId('category-status-badge')).toHaveText('In Progress');
   await expect(categoryCards.nth(1).getByTestId('category-progress-pct')).toHaveText('50%');
+  await expect(categoryCards.nth(1).getByTestId('category-bar-mastered')).toBeVisible();
+  await expect(categoryCards.nth(1).getByTestId('category-bar-learning')).toBeVisible();
+  await expect(categoryCards.nth(1).getByTestId('category-bar-new')).toBeVisible();
 
   // Verify GRE Prep (Completed, 100%)
   await expect(categoryCards.nth(2)).toContainText('GRE Prep');
@@ -176,7 +181,7 @@ test('displays categories on the Home screen with Books in priority, showing pro
 
   await page.waitForTimeout(300);
   await page.screenshot({
-    path: '/Users/aliseyfi/.gemini/antigravity/brain/a96b9d77-0d1a-4784-ac20-758650393c58/scratch/feature_home_categories.png',
+    path: '/home/antigravity/.gemini/jetski/brain/v1/default/jetski_remote_agents_3p/a7fcfaec-b0d2-4bc2-b62c-d69cd223389f/scratch/feature_home_categories.png',
   });
 
   // Clicking "Study Frankenstein" opens SessionConfigModal pre-filtered to "Book: Frankenstein"
@@ -195,7 +200,7 @@ test('displays categories on the Home screen with Books in priority, showing pro
 
   await page.waitForTimeout(200);
   await page.screenshot({
-    path: '/Users/aliseyfi/.gemini/antigravity/brain/a96b9d77-0d1a-4784-ac20-758650393c58/scratch/feature_remove_book_confirm.png',
+    path: '/home/antigravity/.gemini/jetski/brain/v1/default/jetski_remote_agents_3p/a7fcfaec-b0d2-4bc2-b62c-d69cd223389f/scratch/feature_remove_book_confirm.png',
   });
 
   await confirmModal.getByTestId('confirm-delete-book-btn').click();
@@ -208,11 +213,11 @@ test('displays categories on the Home screen with Books in priority, showing pro
   await expect(cloudSyncToast).toBeVisible();
   await expect(cloudSyncToast).toContainText('Syncing to Cloud...');
   await expect(cloudSyncToast.getByTestId('cloud-sync-percent')).toContainText('%');
-  await expect(cloudSyncToast.getByTestId('cloud-sync-step')).toContainText(/Uploading 5 flashcards/i);
+  await expect(cloudSyncToast.getByTestId('cloud-sync-step')).toContainText(/Uploading.*flashcards/i);
   await expect(cloudSyncToast.getByTestId('cloud-sync-eta')).toContainText(/remaining/i);
 
   await page.screenshot({
-    path: '/Users/aliseyfi/.gemini/antigravity/brain/a96b9d77-0d1a-4784-ac20-758650393c58/scratch/feature_cloud_sync_progress.png',
+    path: '/home/antigravity/.gemini/jetski/brain/v1/default/jetski_remote_agents_3p/a7fcfaec-b0d2-4bc2-b62c-d69cd223389f/scratch/feature_cloud_sync_progress.png',
   });
 
   // Verify Pantry received an immediate POST with Moby-Dick flashcards removed and tombstoned

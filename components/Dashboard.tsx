@@ -607,6 +607,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                     const isTag = cat.kind === 'tag';
                                     const masteredWidth = cat.total > 0 ? (cat.masteredCount / cat.total) * 100 : 0;
                                     const learningWidth = cat.total > 0 ? (cat.learningCount / cat.total) * 100 : 0;
+                                    const newWidth = cat.total > 0 ? (cat.newCount / cat.total) * 100 : 0;
 
                                     const statusBadgeStyle =
                                         cat.statusLabel === 'Completed'
@@ -716,6 +717,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                                     <div className="h-2.5 w-full bg-slate-200/80 dark:bg-slate-700 rounded-full overflow-hidden flex">
                                                         {masteredWidth > 0 && (
                                                             <div
+                                                                data-testid="category-bar-mastered"
                                                                 className="h-full bg-emerald-500 transition-all duration-500"
                                                                 style={{ width: `${masteredWidth}%` }}
                                                                 title={`Mastered: ${cat.masteredCount}`}
@@ -723,9 +725,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                                         )}
                                                         {learningWidth > 0 && (
                                                             <div
+                                                                data-testid="category-bar-learning"
                                                                 className="h-full bg-amber-400 transition-all duration-500"
                                                                 style={{ width: `${learningWidth}%` }}
                                                                 title={`Learning: ${cat.learningCount}`}
+                                                            />
+                                                        )}
+                                                        {newWidth > 0 && (
+                                                            <div
+                                                                data-testid="category-bar-new"
+                                                                className="h-full bg-blue-400 dark:bg-blue-500 transition-all duration-500"
+                                                                style={{ width: `${newWidth}%` }}
+                                                                title={`New: ${cat.newCount}`}
                                                             />
                                                         )}
                                                     </div>

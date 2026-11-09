@@ -621,11 +621,14 @@ const App: React.FC = () => {
   }, [cards, studyHistory, longestStreak, deletedCards, fileHandle, isDataLoaded]);
 
   const beginCloudSyncProgress = useCallback(
-    (cardsToSyncCount: number, mode: 'push' | 'pull' = 'push') => {
+    (cardsToSyncCount: number, mode: 'push' | 'pull' = 'push', dirtyStepsOverride?: number) => {
       const knownChunks = cloudConfigRef.current
         ? getKnownChunkCount(cloudConfigRef.current.pantryId)
         : 1;
-      const estimatedChunks = Math.max(knownChunks, Math.ceil(cardsToSyncCount / 65), 1);
+      const estimatedChunks =
+        dirtyStepsOverride !== undefined && dirtyStepsOverride > 0
+          ? dirtyStepsOverride
+          : Math.max(knownChunks, Math.ceil(cardsToSyncCount / 65), 1);
       setCloudSyncProgress({
         percent: 12,
         step:
@@ -634,7 +637,7 @@ const App: React.FC = () => {
             : estimatedChunks > 1
               ? `Uploading chunk 1 of ${estimatedChunks}...`
               : cardsToSyncCount > 0
-                ? `Uploading ${cardsToSyncCount} flashcards...`
+                ? `Uploading flashcards...`
                 : 'Updating cloud storage...',
         estimatedRemainingSec: Math.max(2, estimatedChunks * 2),
         completedSteps: 0,
@@ -698,12 +701,25 @@ const App: React.FC = () => {
     return () => clearInterval(intervalId);
   }, [isCloudSaving, isSyncingOffline]);
 
-  // 4. Auto-Save to Cloud
+  // 4. Auto-Save to Cloud (Delta-aware: skips if no chunks/metadata changed, and only uploads modified chunks)
   useEffect(() => {
     if (!isDataLoaded || !cloudConfig || isMigratingCloudRef.current) return;
 
     if (skipNextCloudAutoSaveRef.current) {
       skipNextCloudAutoSaveRef.current = false;
+      return;
+    }
+
+    const currentDeleted = prunedDeletedCards();
+    const syncPlan = getPendingCloudSyncPlan(cloudConfig.pantryId, {
+      cards,
+      studyHistory,
+      longestStreak,
+      deletedCards: currentDeleted,
+    });
+
+    if (!syncPlan.hasChanges) {
+      setPendingCloudSync(false);
       return;
     }
 
@@ -715,12 +731,28 @@ const App: React.FC = () => {
 
     const timeoutId = setTimeout(async () => {
       if (isMigratingCloudRef.current) return;
-      beginCloudSyncProgress(cards.length, 'push');
+      const latestDeleted = prunedDeletedCards();
+      const latestPlan = getPendingCloudSyncPlan(cloudConfig.pantryId, {
+        cards,
+        studyHistory,
+        longestStreak,
+        deletedCards: latestDeleted,
+      });
+      if (!latestPlan.hasChanges) {
+        setPendingCloudSync(false);
+        return;
+      }
+
+      beginCloudSyncProgress(
+        cards.length,
+        'push',
+        latestPlan.isMetadataOnly ? 1 : Math.max(1, latestPlan.dirtyChunkCount)
+      );
       setIsCloudSaving(true);
       try {
         await updateDeck(
           cloudConfig.pantryId,
-          { cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() },
+          { cards, studyHistory, longestStreak, deletedCards: latestDeleted },
           { onProgress: handleBackgroundCloudProgress }
         );
         lastKeepAliveRef.current = Date.now();
@@ -768,12 +800,27 @@ const App: React.FC = () => {
     if (!isDataLoaded || !isOnline || !cloudConfig || !pendingCloudSync) return;
     let cancelled = false;
     const flush = async () => {
-      beginCloudSyncProgress(cards.length, 'push');
+      const latestDeleted = prunedDeletedCards();
+      const plan = getPendingCloudSyncPlan(cloudConfig.pantryId, {
+        cards,
+        studyHistory,
+        longestStreak,
+        deletedCards: latestDeleted,
+      });
+      if (!plan.hasChanges) {
+        if (!cancelled) setPendingCloudSync(false);
+        return;
+      }
+      beginCloudSyncProgress(
+        cards.length,
+        'push',
+        plan.isMetadataOnly ? 1 : Math.max(1, plan.dirtyChunkCount)
+      );
       setIsSyncingOffline(true);
       try {
         await updateDeck(
           cloudConfig.pantryId,
-          { cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() },
+          { cards, studyHistory, longestStreak, deletedCards: latestDeleted },
           { onProgress: handleBackgroundCloudProgress }
         );
       } catch (e) {

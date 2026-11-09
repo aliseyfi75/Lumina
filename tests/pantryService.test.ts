@@ -4,6 +4,7 @@ import {
   keepAlivePantry,
   updateDeck,
   getKnownChunkCount,
+  getPendingCloudSyncPlan,
   setPantryRateLimitDelayForTests,
   type ChunkProgressInfo,
 } from '../services/pantryService';
@@ -418,14 +419,82 @@ test('getDeck skips unchanged overflow chunks on subsequent loads and only downl
     expect(getBaskets).toEqual(['Lumina', 'Lumina_1', 'Lumina_2']);
     expect(firstPull.cards.length).toBe(140);
 
-    // 4. Right after loading from cloud, user clicks "Load from Cloud" again when nothing changed:
-    // Only checks main 'Lumina' manifest and skips downloading 'Lumina_1' and 'Lumina_2'!
+    // 4. Right after loading from cloud, getPendingCloudSyncPlan reports hasChanges: false (so auto-sync does not re-upload!),
+    // and clicking "Load from Cloud" again only checks 'Lumina' and skips 'Lumina_1' & 'Lumina_2'!
+    const postPullPlan = getPendingCloudSyncPlan(pantryId, {
+      cards: firstPull.cards,
+      studyHistory: firstPull.studyHistory,
+      longestStreak: firstPull.longestStreak,
+      deletedCards: firstPull.deletedCards,
+    });
+    expect(postPullPlan.hasChanges).toBe(false);
+    expect(postPullPlan.dirtyChunkCount).toBe(0);
+
     getBaskets.length = 0;
     const secondPull = await getDeck(pantryId, undefined, { strict: true });
     expect(getBaskets).toEqual(['Lumina']);
     expect(secondPull.cards.length).toBe(140);
 
-    // 5. Now simulate another device modifying ONLY chunk 3 ('Lumina_2') and updating its hash in 'Lumina'
+    // 5. Simulate auto-sync after studying 1 card in chunk 0 ('card-1' grows by ~150 bytes with review fields & tags):
+    // Stable chunk pinning prevents card-1's growth from cascading into Lumina_1 or Lumina_2, so ONLY 'Lumina' is uploaded!
+    postBaskets.length = 0;
+    const deckAfterChunk0Review = secondPull.cards.map(c =>
+      c.id === 'card-1'
+        ? {
+            ...c,
+            status: FlashcardStatus.Learning,
+            interval: 3,
+            repetition: 2,
+            nextReviewDate: 1700086400000,
+            lastReviewed: 1700000500000,
+            updatedAt: 1700000500000,
+            tags: ['Book: Atomic Habits', 'Chapter 1'],
+          }
+        : c
+    );
+    const chunk0Plan = getPendingCloudSyncPlan(pantryId, {
+      cards: deckAfterChunk0Review,
+      studyHistory: { '2026-11-09': 4 },
+      longestStreak: 4,
+      deletedCards: {},
+    });
+    expect(chunk0Plan.hasChanges).toBe(true);
+    expect(chunk0Plan.dirtyChunkCount).toBe(1);
+
+    await updateDeck(pantryId, {
+      cards: deckAfterChunk0Review,
+      studyHistory: { '2026-11-09': 4 },
+      longestStreak: 4,
+      deletedCards: {},
+    });
+    expect(postBaskets).toEqual(['Lumina']);
+
+    // 6. Simulate auto-sync after studying 1 card in chunk 2 ('Lumina_1') and incrementing studyHistory:
+    // Chunk 0 ('Lumina') cards did NOT change, so ONLY 'Lumina_1' is POSTed (metadata on 'Lumina' is updated via lightweight PUT)!
+    postBaskets.length = 0;
+    const chunk1CardId = cloudStore['Lumina_1'].cards[0].id;
+    const deckAfterChunk1Review = deckAfterChunk0Review.map(c =>
+      c.id === chunk1CardId
+        ? {
+            ...c,
+            status: FlashcardStatus.Mastered,
+            interval: 30,
+            repetition: 5,
+            nextReviewDate: 1702592000000,
+            lastReviewed: 1700000900000,
+            updatedAt: 1700000900000,
+          }
+        : c
+    );
+    await updateDeck(pantryId, {
+      cards: deckAfterChunk1Review,
+      studyHistory: { '2026-11-09': 5 },
+      longestStreak: 5,
+      deletedCards: {},
+    });
+    expect(postBaskets).toEqual(['Lumina_1']);
+
+    // 7. Now simulate another device modifying ONLY chunk 3 ('Lumina_2') and updating its hash in 'Lumina'
     cloudStore['Lumina_2'] = {
       ...cloudStore['Lumina_2'],
       cards: [...cloudStore['Lumina_2'].cards, makeCard(999, 200)],
@@ -447,5 +516,6 @@ test('getDeck skips unchanged overflow chunks on subsequent loads and only downl
     globalThis.fetch = originalFetch;
   }
 });
+
 
 

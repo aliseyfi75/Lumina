@@ -801,8 +801,7 @@ export const getDeck = async (
 
     const perChunkCardHashes: Record<number, string> = {};
     for (let i = 0; i < chunkCount; i++) {
-      perChunkCardHashes[i] =
-        remoteChunkHashes?.[i] || computeCardChunkHash(activeCheckpoint.chunks[i] || []);
+      perChunkCardHashes[i] = computeCardChunkHash(activeCheckpoint.chunks[i] || []);
     }
 
     const finalManifestSig = computeMainManifestSignature({
@@ -822,19 +821,16 @@ export const getDeck = async (
     });
 
     const uploadedHashesRecord: Record<string, string> = {};
-    const sanitizedChunk0 = sanitizeCardsForCloud(activeCheckpoint.chunks[0] || []);
-    uploadedHashesRecord[0] = computePayloadHash(
-      JSON.stringify({
-        cards: sanitizedChunk0,
-        studyHistory: activeCheckpoint.studyHistory || {},
-        longestStreak: activeCheckpoint.longestStreak || 0,
-        deletedCards: activeCheckpoint.deletedCards || {},
-        chunkCount,
-      })
-    );
-    for (let i = 1; i < chunkCount; i++) {
+    for (let i = 0; i < chunkCount; i++) {
       uploadedHashesRecord[i] = perChunkCardHashes[i];
     }
+    uploadedHashesRecord.meta = computeMetadataOnlyHash(
+      activeCheckpoint.studyHistory,
+      activeCheckpoint.longestStreak,
+      activeCheckpoint.deletedCards,
+      chunkCount,
+      perChunkCardHashes
+    );
     saveUploadedChunkHashes(cleanId, uploadedHashesRecord);
 
     const allCards = assembleCheckpointCards(activeCheckpoint);
@@ -944,6 +940,32 @@ const cleanupStaleOverflowChunks = async (
   }
 };
 
+const sortRecordKeys = (rec?: Record<string, number>): Record<string, number> => {
+  if (!rec) return {};
+  const sorted: Record<string, number> = {};
+  for (const key of Object.keys(rec).sort()) {
+    sorted[key] = rec[key];
+  }
+  return sorted;
+};
+
+const computeMetadataOnlyHash = (
+  studyHistory: Record<string, number> | undefined,
+  longestStreak: number | undefined,
+  deletedCards: Record<string, number> | undefined,
+  chunkCount: number,
+  chunkHashes: Record<number, string>
+): string =>
+  computePayloadHash(
+    JSON.stringify({
+      studyHistory: sortRecordKeys(studyHistory),
+      longestStreak: longestStreak || 0,
+      deletedCards: sortRecordKeys(deletedCards),
+      chunkCount,
+      chunkHashes,
+    })
+  );
+
 const splitCardsIntoChunks = (cards: Flashcard[], maxChunkBytes: number): Flashcard[][] => {
   if (cards.length === 0) return [[]];
   const chunks: Flashcard[][] = [];
@@ -965,6 +987,152 @@ const splitCardsIntoChunks = (cards: Flashcard[], maxChunkBytes: number): Flashc
     chunks.push(currentChunk);
   }
   return chunks;
+};
+
+const getChunkPayloadBytes = (cards: Flashcard[]): number =>
+  new Blob([JSON.stringify({ cards })]).size;
+
+// Preserve existing card-to-chunk assignments from SyncedChunkCache so editing/reviewing a card
+// in an earlier chunk never shifts chunk boundaries or forces unchanged later chunks to re-upload.
+const buildStableChunks = (
+  cleanId: string,
+  orderedCards: Flashcard[],
+  firstChunkMax: number,
+  overflowChunkMax: number,
+  forceFullUpload = false
+): Flashcard[][] => {
+  const cached = !forceFullUpload ? loadSyncedChunkCache(cleanId, orderedCards) : null;
+  if (!cached || !cached.chunkCardIds || Object.keys(cached.chunkCardIds).length === 0) {
+    const firstSplit = splitCardsIntoChunks(orderedCards, firstChunkMax);
+    const chunk0 = firstSplit[0] || [];
+    const remaining = orderedCards.slice(chunk0.length);
+    const rest = remaining.length > 0 ? splitCardsIntoChunks(remaining, overflowChunkMax) : [];
+    return [chunk0, ...rest];
+  }
+
+  const cardById = new Map<string, Flashcard>();
+  for (const card of orderedCards) {
+    cardById.set(card.id, card);
+  }
+
+  const assignedIds = new Set<string>();
+  const pinnedChunks: Flashcard[][] = [];
+  const maxIdx = Math.max(
+    cached.chunkCount - 1,
+    ...Object.keys(cached.chunkCardIds).map(Number)
+  );
+
+  for (let i = 0; i <= maxIdx; i++) {
+    const ids = cached.chunkCardIds[i] || [];
+    const chunkCards: Flashcard[] = [];
+    for (const id of ids) {
+      const card = cardById.get(id);
+      if (card && !assignedIds.has(id)) {
+        chunkCards.push(card);
+        assignedIds.add(id);
+      }
+    }
+    const hardLimit = i === 0 ? firstChunkMax + 1536 : overflowChunkMax + 1536;
+    const splitLimit = i === 0 ? firstChunkMax : overflowChunkMax;
+    if (chunkCards.length > 0 && getChunkPayloadBytes(chunkCards) > hardLimit) {
+      const subChunks = splitCardsIntoChunks(chunkCards, splitLimit);
+      pinnedChunks.push(...subChunks);
+    } else if (i === 0 || chunkCards.length > 0) {
+      pinnedChunks.push(chunkCards);
+    }
+  }
+
+  if (pinnedChunks.length === 0) {
+    pinnedChunks.push([]);
+  }
+
+  // Append any brand-new cards to the last chunk (or new overflow chunks if the last chunk fills up)
+  const newCards = orderedCards.filter(c => !assignedIds.has(c.id));
+  if (newCards.length > 0) {
+    const lastIdx = pinnedChunks.length - 1;
+    const lastChunk = pinnedChunks[lastIdx];
+    const lastLimit = lastIdx === 0 ? firstChunkMax : overflowChunkMax;
+    let currentBytes = getChunkPayloadBytes(lastChunk);
+
+    const remainingNewCards: Flashcard[] = [];
+    for (const card of newCards) {
+      const cardBytes = new Blob([JSON.stringify(card)]).size + 1;
+      if (
+        remainingNewCards.length === 0 &&
+        (lastChunk.length === 0 || currentBytes + cardBytes <= lastLimit)
+      ) {
+        lastChunk.push(card);
+        currentBytes += cardBytes;
+      } else {
+        remainingNewCards.push(card);
+      }
+    }
+
+    if (remainingNewCards.length > 0) {
+      const extraChunks = splitCardsIntoChunks(remainingNewCards, overflowChunkMax);
+      pinnedChunks.push(...extraChunks);
+    }
+  }
+
+  return pinnedChunks;
+};
+
+export const getPendingCloudSyncPlan = (
+  pantryId: string,
+  cloudData: CloudData
+): {
+  hasChanges: boolean;
+  dirtyChunkCount: number;
+  totalChunks: number;
+  isMetadataOnly: boolean;
+} => {
+  const cleanId = normalizePantryId(pantryId);
+  const sanitizedCards = sanitizeCardsForCloud(cloudData.cards || []);
+  const orderedCards = [...sanitizedCards].sort(
+    (a, b) => (a.createdAt || 0) - (b.createdAt || 0) || a.id.localeCompare(b.id)
+  );
+  const previousChunkCount = knownChunkCounts.get(cleanId) ?? cloudData.chunkCount ?? 1;
+  const knownHashes = loadUploadedChunkHashes(cleanId);
+
+  const metadataOverhead = new Blob([
+    JSON.stringify({
+      cards: [],
+      studyHistory: cloudData.studyHistory,
+      longestStreak: cloudData.longestStreak,
+      deletedCards: cloudData.deletedCards,
+      chunkCount: 99,
+      lastAccessedAt: Date.now(),
+    }),
+  ]).size;
+  const firstChunkMax = Math.max(8 * 1024, MAX_BASKET_BYTES - metadataOverhead);
+  const allChunks = buildStableChunks(cleanId, orderedCards, firstChunkMax, MAX_BASKET_BYTES - 512, false);
+  const staleChunksToDelete = Math.max(0, previousChunkCount - allChunks.length);
+
+  const cardChunkHashes: Record<number, string> = {};
+  let dirtyChunkCount = 0;
+  for (let i = 0; i < allChunks.length; i++) {
+    cardChunkHashes[i] = computeCardChunkHash(allChunks[i]);
+    if (knownHashes[i] !== cardChunkHashes[i]) {
+      dirtyChunkCount++;
+    }
+  }
+
+  const metaHash = computeMetadataOnlyHash(
+    cloudData.studyHistory,
+    cloudData.longestStreak,
+    cloudData.deletedCards,
+    allChunks.length,
+    cardChunkHashes
+  );
+  const metaChanged = knownHashes.meta !== metaHash;
+  const hasChanges = dirtyChunkCount > 0 || metaChanged || staleChunksToDelete > 0;
+
+  return {
+    hasChanges,
+    dirtyChunkCount: dirtyChunkCount + staleChunksToDelete,
+    totalChunks: allChunks.length,
+    isMetadataOnly: dirtyChunkCount === 0 && staleChunksToDelete === 0 && metaChanged,
+  };
 };
 
 const pushDeckWithChunkLimit = async (
@@ -1021,18 +1189,21 @@ const pushDeckWithChunkLimit = async (
   // Fast path: fits in a single basket under maxBasketBytes
   if (totalBytes <= maxBasketBytes) {
     const staleChunksToDelete = Math.max(0, previousChunkCount - 1);
-    const singleHash = computePayloadHash(
-      JSON.stringify({
-        cards: orderedCards,
-        studyHistory: cloudData.studyHistory || {},
-        longestStreak: cloudData.longestStreak || 0,
-        deletedCards: cloudData.deletedCards || {},
-        chunkCount: 1,
-      })
+    const singleMetaHash = computeMetadataOnlyHash(
+      cloudData.studyHistory,
+      cloudData.longestStreak,
+      cloudData.deletedCards,
+      1,
+      { 0: singleCardChunkHash }
     );
     const knownHashes = { ...loadUploadedChunkHashes(cleanId) };
 
-    if (!forceFullUpload && staleChunksToDelete === 0 && knownHashes[0] === singleHash) {
+    if (
+      !forceFullUpload &&
+      staleChunksToDelete === 0 &&
+      knownHashes[0] === singleCardChunkHash &&
+      knownHashes.meta === singleMetaHash
+    ) {
       onProgress?.({
         currentChunk: 1,
         totalChunks: 1,
@@ -1043,6 +1214,49 @@ const pushDeckWithChunkLimit = async (
         estimatedRemainingSec: 0,
       });
       return;
+    }
+
+    // If only metadata (studyHistory / longestStreak / deletedCards) changed and chunk 0 cards are already on Pantry,
+    // use a lightweight PUT instead of re-uploading all cards!
+    if (
+      !forceFullUpload &&
+      staleChunksToDelete === 0 &&
+      knownHashes[0] === singleCardChunkHash &&
+      knownHashes.meta !== singleMetaHash
+    ) {
+      onProgress?.({
+        currentChunk: 1,
+        totalChunks: 1,
+        completedSteps: 0,
+        totalSteps: 1,
+        percent: 50,
+        step: 'Syncing study progress to Cloud...',
+        estimatedRemainingSec: 1,
+      });
+      const putRes = await fetchWithRetry(
+        `${BASE_URL}/${cleanId}/basket/${BASKET_NAME}`,
+        {
+          ...FETCH_OPTIONS,
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            studyHistory: cloudData.studyHistory,
+            longestStreak: cloudData.longestStreak,
+            deletedCards: cloudData.deletedCards,
+            chunkCount: 1,
+            chunkHashes: { 0: singleCardChunkHash },
+            lastAccessedAt: now,
+          }),
+        },
+        3,
+        2200,
+        immediate
+      );
+      if (putRes.ok) {
+        knownHashes.meta = singleMetaHash;
+        saveUploadedChunkHashes(cleanId, knownHashes);
+        return;
+      }
     }
 
     const totalSteps = 1 + staleChunksToDelete;
@@ -1080,7 +1294,7 @@ const pushDeckWithChunkLimit = async (
       throw new Error(`Failed to update Pantry storage (${response.status}): ${errorText}`);
     }
 
-    saveUploadedChunkHashes(cleanId, { 0: singleHash });
+    saveUploadedChunkHashes(cleanId, { 0: singleCardChunkHash, meta: singleMetaHash });
     saveSyncedChunkCache(cleanId, {
       chunkCount: 1,
       manifestSignature: computeMainManifestSignature({
@@ -1122,43 +1336,40 @@ const pushDeckWithChunkLimit = async (
 
   const firstChunkMax = Math.max(8 * 1024, maxBasketBytes - metadataOverhead);
 
-  // Build chunk 0 with room for metadata, then chunk the remainder
-  const firstSplit = splitCardsIntoChunks(orderedCards, firstChunkMax);
-  const chunk0 = firstSplit[0] || [];
-  const remainingCards = orderedCards.slice(chunk0.length);
-  const restChunks =
-    remainingCards.length > 0 ? splitCardsIntoChunks(remainingCards, maxBasketBytes - 512) : [];
-  const allChunks = [chunk0, ...restChunks];
+  // Build chunks while pinning existing card-to-chunk assignments from SyncedChunkCache
+  const allChunks = buildStableChunks(
+    cleanId,
+    orderedCards,
+    firstChunkMax,
+    maxBasketBytes - 512,
+    forceFullUpload
+  );
   const staleChunksToDelete = Math.max(0, previousChunkCount - allChunks.length);
 
   // Compute deterministic content hashes per chunk so we can skip unchanged or already-uploaded chunks
   const knownHashes = { ...loadUploadedChunkHashes(cleanId) };
-  const targetHashes: Record<number, string> = {};
   const cardChunkHashes: Record<number, string> = {};
-  cardChunkHashes[0] = computeCardChunkHash(allChunks[0]);
-  targetHashes[0] = computePayloadHash(
-    JSON.stringify({
-      cards: allChunks[0],
-      studyHistory: cloudData.studyHistory || {},
-      longestStreak: cloudData.longestStreak || 0,
-      deletedCards: cloudData.deletedCards || {},
-      chunkCount: allChunks.length,
-    })
-  );
-  for (let i = 1; i < allChunks.length; i++) {
+  for (let i = 0; i < allChunks.length; i++) {
     cardChunkHashes[i] = computeCardChunkHash(allChunks[i]);
-    targetHashes[i] = cardChunkHashes[i];
   }
+  const metaHash = computeMetadataOnlyHash(
+    cloudData.studyHistory,
+    cloudData.longestStreak,
+    cloudData.deletedCards,
+    allChunks.length,
+    cardChunkHashes
+  );
 
   const dirtyChunkIndices: number[] = [];
   for (let i = 0; i < allChunks.length; i++) {
-    if (forceFullUpload || knownHashes[i] !== targetHashes[i]) {
+    if (forceFullUpload || knownHashes[i] !== cardChunkHashes[i]) {
       dirtyChunkIndices.push(i);
     }
   }
+  const metaChanged = forceFullUpload || knownHashes.meta !== metaHash;
 
-  // If every chunk is already up to date on Pantry and no stale chunks need deletion, skip uploading!
-  if (dirtyChunkIndices.length === 0 && staleChunksToDelete === 0) {
+  // If every chunk and metadata is already up to date on Pantry and no stale chunks need deletion, skip uploading!
+  if (dirtyChunkIndices.length === 0 && !metaChanged && staleChunksToDelete === 0) {
     onProgress?.({
       currentChunk: allChunks.length,
       totalChunks: allChunks.length,
@@ -1171,11 +1382,11 @@ const pushDeckWithChunkLimit = async (
     return;
   }
 
-  const totalSteps = dirtyChunkIndices.length + staleChunksToDelete;
+  const totalSteps = Math.max(1, dirtyChunkIndices.length + staleChunksToDelete);
   const skippedCount = allChunks.length - dirtyChunkIndices.length;
   let completedDirtySteps = 0;
 
-  // 1. Save main basket (chunk 0 + metadata + chunkCount + chunkHashes) if dirty
+  // 1. Save main basket (chunk 0 + metadata + chunkCount + chunkHashes) if chunk 0's cards changed
   if (dirtyChunkIndices.includes(0)) {
     onProgress?.({
       currentChunk: 1,
@@ -1226,7 +1437,8 @@ const pushDeckWithChunkLimit = async (
     }
 
     // Immediately checkpoint chunk 0 so if a later chunk fails, chunk 0 won't need re-uploading
-    knownHashes[0] = targetHashes[0];
+    knownHashes[0] = cardChunkHashes[0];
+    knownHashes.meta = metaHash;
     saveUploadedChunkHashes(cleanId, knownHashes);
     completedDirtySteps += 1;
   }
@@ -1278,20 +1490,24 @@ const pushDeckWithChunkLimit = async (
     }
 
     // Immediately checkpoint chunk i so an interruption never loses progress on already-uploaded chunks
-    knownHashes[i] = targetHashes[i];
+    knownHashes[i] = cardChunkHashes[i];
     saveUploadedChunkHashes(cleanId, knownHashes);
     completedDirtySteps += 1;
   }
 
-  // If only overflow chunks were uploaded (chunk 0 wasn't re-POSTed), update chunkHashes manifest on Lumina via lightweight PUT
-  if (!dirtyChunkIndices.includes(0) && dirtyChunkIndices.length > 0) {
-    await fetchWithRetry(
+  // If chunk 0's cards didn't change, update metadata (studyHistory, longestStreak, deletedCards, chunkCount, chunkHashes)
+  // on Lumina via a lightweight ~200-byte PUT instead of re-uploading 30 KB of chunk 0 cards!
+  if (!dirtyChunkIndices.includes(0) && (dirtyChunkIndices.length > 0 || metaChanged)) {
+    const putRes = await fetchWithRetry(
       `${BASE_URL}/${cleanId}/basket/${BASKET_NAME}`,
       {
         ...FETCH_OPTIONS,
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          studyHistory: cloudData.studyHistory,
+          longestStreak: cloudData.longestStreak,
+          deletedCards: cloudData.deletedCards,
           chunkCount: allChunks.length,
           chunkHashes: cardChunkHashes,
           lastAccessedAt: now,
@@ -1300,7 +1516,11 @@ const pushDeckWithChunkLimit = async (
       2,
       2000,
       false
-    ).catch(() => {});
+    ).catch(() => null);
+    if (putRes && putRes.ok) {
+      knownHashes.meta = metaHash;
+      saveUploadedChunkHashes(cleanId, knownHashes);
+    }
   }
 
   const chunksRecord: Record<number, Flashcard[]> = {};

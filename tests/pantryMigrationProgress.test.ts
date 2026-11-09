@@ -108,7 +108,7 @@ test('displays step-by-step progress bar when connecting and migrating Pantry ID
 
   await page.waitForTimeout(250);
   await page.screenshot({
-    path: '/Users/aliseyfi/.gemini/antigravity/brain/a96b9d77-0d1a-4784-ac20-758650393c58/scratch/pantry_connect_progress.png',
+    path: '/home/antigravity/.gemini/jetski/brain/v1/default/jetski_remote_agents_3p/a7fcfaec-b0d2-4bc2-b62c-d69cd223389f/scratch/pantry_connect_progress.png',
   });
 
   // Release upload and verify completion
@@ -127,4 +127,116 @@ test('displays step-by-step progress bar when connecting and migrating Pantry ID
 
   await page.getByTitle('Manage Data').click();
   await expect(page.getByText('11111111-2222-3333-4444-555555555555')).toBeVisible();
+});
+
+test('Load from Cloud preserves already-downloaded chunks when interrupted mid-load and resumes from the remaining chunk on retry', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  const requestedGetBaskets: string[] = [];
+  let failChunk1 = false;
+
+  await page.route('https://getpantry.cloud/apiv1/pantry/**', async (route) => {
+    const url = route.request().url();
+    const method = route.request().method();
+
+    if (method === 'GET' && url.includes('/basket/')) {
+      const match = url.match(/\/basket\/([^?]+)/);
+      const basketName = match ? match[1] : url;
+      requestedGetBaskets.push(basketName);
+
+      if (basketName === 'Lumina') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            cards: [
+              {
+                id: 'chunk0-card',
+                word: 'Ephemeral',
+                partOfSpeech: 'adjective',
+                mainDefinition: 'Lasting for a very short time.',
+                status: 'New',
+                lastReviewed: 0,
+                createdAt: Date.now() - 30000,
+              },
+            ],
+            chunkCount: 2,
+          }),
+        });
+        return;
+      }
+
+      if (basketName === 'Lumina_1') {
+        if (failChunk1) {
+          await route.fulfill({
+            status: 400,
+            contentType: 'text/plain',
+            body: 'Simulated interruption on chunk 2',
+          });
+          return;
+        }
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            cards: [
+              {
+                id: 'chunk1-card',
+                word: 'Magnanimous',
+                partOfSpeech: 'adjective',
+                mainDefinition: 'Generous or forgiving.',
+                status: 'New',
+                lastReviewed: 0,
+                createdAt: Date.now() - 20000,
+              },
+            ],
+          }),
+        });
+        return;
+      }
+    }
+
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+  });
+
+  // Seed connected Pantry config; failChunk1 = true during initial load so chunk 1 succeeds and chunk 2 is interrupted
+  failChunk1 = true;
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'lumina_cloud_config',
+      JSON.stringify({ pantryId: '22222222-3333-4444-5555-666666666666' })
+    );
+    localStorage.setItem('lumina_cards_v1', JSON.stringify([]));
+  });
+
+  await page.goto('/#/flashcards');
+
+  // Wait for the initial startup pull to fetch Lumina (chunk 1) and fail on Lumina_1 (chunk 2)
+  await expect.poll(() => requestedGetBaskets.includes('Lumina_1'), { timeout: 5000 }).toBe(true);
+  // Even though chunk 2 failed during startup, chunk 1 ('Ephemeral') was already progressively merged!
+  await expect(page.getByText('Ephemeral')).toBeVisible();
+
+  // Open Data Manager and click "Load from Cloud" to resume from chunk 2 (Lumina_1)
+  await page.getByTitle('Manage Data').click();
+  await expect(page.getByRole('heading', { name: 'Data Manager' })).toBeVisible();
+
+  // Clear tracked baskets, allow chunk 2 (Lumina_1) to succeed now, and click "Load from Cloud"
+  requestedGetBaskets.length = 0;
+  failChunk1 = false;
+  await page.getByRole('button', { name: /Load from Cloud/i }).click();
+
+  await expect(page.getByText('Flashcards loaded from Cloud!')).toBeVisible({ timeout: 8000 });
+
+  // Verify it resumed directly at Lumina_1 without re-fetching Lumina!
+  expect(requestedGetBaskets).toEqual(['Lumina_1']);
+
+  await page.screenshot({
+    path: '/home/antigravity/.gemini/jetski/brain/v1/default/jetski_remote_agents_3p/a7fcfaec-b0d2-4bc2-b62c-d69cd223389f/scratch/pantry_resumed_cloud_pull.png',
+  });
+
+  // Close modal and verify both chunks' cards ('Ephemeral' and 'Magnanimous') are in the deck
+  await page.locator('button').filter({ has: page.locator('svg.lucide-x') }).first().click();
+  await expect(page.getByText('2 cards total')).toBeVisible();
+  await expect(page.getByText('Ephemeral')).toBeVisible();
+  await expect(page.getByText('Magnanimous')).toBeVisible();
 });

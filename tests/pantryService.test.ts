@@ -135,3 +135,157 @@ test('updateDeck deletes stale overflow chunks when a multi-chunk deck shrinks t
     globalThis.fetch = originalFetch;
   }
 });
+
+test('updateDeck resumes from the failed chunk when interrupted mid-save and skips unchanged chunks when new cards are added', async () => {
+  setPantryRateLimitDelayForTests(0);
+  const postBaskets: string[] = [];
+  let shouldFailChunk2 = true;
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method ?? 'GET';
+    if (method === 'POST') {
+      const basketMatch = url.match(/\/basket\/([^?]+)/);
+      const basketName = basketMatch ? basketMatch[1] : url;
+      postBaskets.push(basketName);
+      if (shouldFailChunk2 && basketName === 'Lumina_2') {
+        return new Response('Bad Gateway', { status: 400 }); // non-retryable failure on chunk 3 (Lumina_2)
+      }
+    }
+    return new Response('{}', { status: 200 });
+  }) as typeof fetch;
+
+  try {
+    // Build a deck large enough to require 3 chunks (Lumina, Lumina_1, Lumina_2)
+    const threeChunkDeck = Array.from({ length: 140 }, (_, i) => makeCard(i + 1, 450));
+
+    // Attempt 1: Lumina (chunk 1) and Lumina_1 (chunk 2) succeed, Lumina_2 (chunk 3) fails
+    await expect(
+      updateDeck(TEST_PANTRY_ID, {
+        cards: threeChunkDeck,
+        studyHistory: { '2026-11-08': 5 },
+        longestStreak: 3,
+        deletedCards: {},
+      })
+    ).rejects.toThrow(/Failed to update Pantry chunk 2/);
+
+    expect(postBaskets).toEqual(['Lumina', 'Lumina_1', 'Lumina_2']);
+
+    // Attempt 2: Retry the interrupted save -> must skip Lumina and Lumina_1 and ONLY upload Lumina_2!
+    postBaskets.length = 0;
+    shouldFailChunk2 = false;
+    const resumeProgress: ChunkProgressInfo[] = [];
+
+    await updateDeck(
+      TEST_PANTRY_ID,
+      {
+        cards: threeChunkDeck,
+        studyHistory: { '2026-11-08': 5 },
+        longestStreak: 3,
+        deletedCards: {},
+      },
+      {
+        onProgress: info => resumeProgress.push(info),
+      }
+    );
+
+    expect(postBaskets).toEqual(['Lumina_2']);
+    expect(resumeProgress[0].step).toContain('Resuming upload at chunk 3 of 3');
+
+    // Attempt 3: Add 2 brand-new flashcards -> older chunks (Lumina and Lumina_1) are unchanged and skipped,
+    // so only the last chunk (Lumina_2) is uploaded!
+    postBaskets.length = 0;
+    const expandedDeck = [
+      makeCard(200, 450),
+      makeCard(201, 450),
+      ...threeChunkDeck,
+    ];
+
+    await updateDeck(TEST_PANTRY_ID, {
+      cards: expandedDeck,
+      studyHistory: { '2026-11-08': 5 },
+      longestStreak: 3,
+      deletedCards: {},
+    });
+
+    expect(postBaskets).toEqual(['Lumina_2']);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('getDeck delivers partial chunks progressively and resumes from the interrupted chunk without re-downloading earlier chunks', async () => {
+  setPantryRateLimitDelayForTests(0);
+  const getBaskets: string[] = [];
+  let shouldFailChunk2 = true;
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method ?? 'GET';
+    if (method === 'GET') {
+      const basketMatch = url.match(/\/basket\/([^?]+)/);
+      const basketName = basketMatch ? basketMatch[1] : url;
+      getBaskets.push(basketName);
+
+      if (basketName === 'Lumina') {
+        return new Response(
+          JSON.stringify({
+            cards: [makeCard(1, 20)],
+            chunkCount: 3,
+            studyHistory: { '2026-11-08': 4 },
+            longestStreak: 2,
+          }),
+          { status: 200 }
+        );
+      }
+      if (basketName === 'Lumina_1') {
+        return new Response(JSON.stringify({ cards: [makeCard(2, 20)] }), { status: 200 });
+      }
+      if (basketName === 'Lumina_2') {
+        if (shouldFailChunk2) {
+          return new Response('Gateway Timeout', { status: 400 });
+        }
+        return new Response(JSON.stringify({ cards: [makeCard(3, 20)] }), { status: 200 });
+      }
+    }
+    return new Response('{}', { status: 200 });
+  }) as typeof fetch;
+
+  try {
+    const partialCardCounts: number[] = [];
+
+    // Attempt 1: Lumina (chunk 1) and Lumina_1 (chunk 2) download, Lumina_2 (chunk 3) fails
+    await expect(
+      getDeck(TEST_PANTRY_ID, undefined, {
+        strict: true,
+        retries: 0,
+        onPartialCards: partial => partialCardCounts.push(partial.cards.length),
+      })
+    ).rejects.toThrow(/Failed to load deck chunk 2/);
+
+    expect(getBaskets).toEqual(['Lumina', 'Lumina_1', 'Lumina_2']);
+    // Partial cards from chunk 1 (1 card) and chunk 2 (2 cards) were already emitted progressively!
+    expect(partialCardCounts).toEqual([1, 2]);
+
+    // Attempt 2: User clicks "Load from Cloud" again -> skips Lumina and Lumina_1, fetches ONLY Lumina_2!
+    getBaskets.length = 0;
+    shouldFailChunk2 = false;
+    const resumeSteps: string[] = [];
+
+    const fullDeck = await getDeck(TEST_PANTRY_ID, undefined, {
+      strict: true,
+      retries: 0,
+      onProgress: info => {
+        if (info.step) resumeSteps.push(info.step);
+      },
+    });
+
+    expect(getBaskets).toEqual(['Lumina_2']);
+    expect(resumeSteps[0]).toContain('Resuming cloud load at chunk 3 of 3');
+    expect(fullDeck.cards.map(c => c.id)).toEqual(['card-1', 'card-2', 'card-3']);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

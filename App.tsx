@@ -481,7 +481,17 @@ const App: React.FC = () => {
         initializeTracking(resolvedCloudConfig.pantryId);
 
         try {
-          const cloudData = await getDeck(resolvedCloudConfig.pantryId);
+          const cloudData = await getDeck(resolvedCloudConfig.pantryId, undefined, {
+            onPartialCards: (partial) => {
+              if (
+                (partial.cards && partial.cards.length > 0) ||
+                (partial.deletedCards && Object.keys(partial.deletedCards).length > 0)
+              ) {
+                skipNextCloudAutoSaveRef.current = true;
+                performMerge(partial.cards ?? [], partial.deletedCards ?? {});
+              }
+            },
+          });
           const cloudHadDeletedCards = (cloudData.cards ?? []).some(c => {
             const delAt = deletedCardsRef.current.get(c.id) ?? 0;
             const cardTs = Math.max(c.updatedAt ?? 0, c.lastReviewed ?? 0, c.createdAt ?? 0);
@@ -512,11 +522,23 @@ const App: React.FC = () => {
           // Only skip auto-save if Pantry did NOT still hold locally-deleted cards
           skipNextCloudAutoSaveRef.current = !cloudHadDeletedCards;
 
-          // Always send a keep-alive write to Pantry when the user opens the app
-          // so the Pantry ID and baskets refresh their 30-day TTL even if no card status changes.
+          // Schedule the keep-alive write 20 seconds after startup so it does not
+          // burst-collide if the user immediately clicks "Load from Cloud" or edits cards.
           if (navigator.onLine && !cloudHadDeletedCards) {
-            lastKeepAliveRef.current = Date.now();
-            void keepAlivePantry(resolvedCloudConfig.pantryId, cloudData.chunkCount ?? 1);
+            const startupKeepAliveTargetId = resolvedCloudConfig.pantryId;
+            const startupChunkCount = cloudData.chunkCount ?? 1;
+            const scheduledAt = Date.now();
+            setTimeout(() => {
+              if (
+                navigator.onLine &&
+                !isMigratingCloudRef.current &&
+                cloudConfigRef.current?.pantryId === startupKeepAliveTargetId &&
+                lastKeepAliveRef.current < scheduledAt
+              ) {
+                lastKeepAliveRef.current = Date.now();
+                void keepAlivePantry(startupKeepAliveTargetId, startupChunkCount);
+              }
+            }, 20_000);
           }
         } catch (e) {
           console.error('Failed to load cloud backup on init', e);
@@ -1115,8 +1137,32 @@ const App: React.FC = () => {
     beginCloudSyncProgress(cards.length, 'pull');
     setIsCloudSaving(true);
     try {
+      const applyPulledCloudData = (partialOrFull: {
+        cards?: Flashcard[];
+        deletedCards?: Record<string, number>;
+        studyHistory?: Record<string, number>;
+        longestStreak?: number;
+      }) => {
+        skipNextCloudAutoSaveRef.current = true;
+        if (
+          (partialOrFull.cards && partialOrFull.cards.length > 0) ||
+          (partialOrFull.deletedCards && Object.keys(partialOrFull.deletedCards).length > 0)
+        ) {
+          performMerge(partialOrFull.cards ?? [], partialOrFull.deletedCards ?? {});
+        }
+        if (partialOrFull.studyHistory) {
+          setStudyHistory(prev => mergeHistoryRecords(prev, partialOrFull.studyHistory));
+        }
+        if (partialOrFull.longestStreak) {
+          setLongestStreak(prev => Math.max(prev, partialOrFull.longestStreak!));
+        }
+      };
+
       const cloudData = await getDeck(cloudConfig.pantryId, undefined, {
         strict: true,
+        onPartialCards: (partial) => {
+          applyPulledCloudData(partial);
+        },
         onProgress: (info) => {
           handleBackgroundCloudProgress(info);
           onProgress?.({
@@ -1126,16 +1172,8 @@ const App: React.FC = () => {
           });
         },
       });
-      if (
-        (cloudData.cards && cloudData.cards.length > 0) ||
-        (cloudData.deletedCards && Object.keys(cloudData.deletedCards).length > 0)
-      ) {
-        performMerge(cloudData.cards ?? [], cloudData.deletedCards ?? {});
-      }
-      if (cloudData.studyHistory) {
-        setStudyHistory(prev => mergeHistoryRecords(prev, cloudData.studyHistory));
-      }
-      if (cloudData.longestStreak) setLongestStreak(prev => Math.max(prev, cloudData.longestStreak!));
+      applyPulledCloudData(cloudData);
+      lastKeepAliveRef.current = Date.now();
       trackEvent(TRACKING_ACTION.CLOUD_PULL, TRACKING_CATEGORY.CLOUD);
       // Immediately flush to local file so both are in sync
       if (fileHandle) {

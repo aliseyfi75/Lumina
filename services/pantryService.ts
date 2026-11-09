@@ -11,7 +11,8 @@ const FALLBACK_BASKET_BYTES = 14 * 1024;
 // Pantry's total storage quota per Pantry ID is 1.44 MB.
 const MAX_PANTRY_BYTES = Math.floor(1.4 * 1024 * 1024);
 // True quiet time AFTER one Pantry request finishes before the next one starts.
-let rateLimitDelayMs = 1400;
+let rateLimitDelayMs = 1800;
+let adaptiveExtraDelayMs = 0;
 const knownChunkCounts = new Map<string, number>();
 
 interface PullCheckpoint {
@@ -145,6 +146,7 @@ export const clearPantryCheckpointsForTests = () => {
 
 export const setPantryRateLimitDelayForTests = (ms: number) => {
   rateLimitDelayMs = ms;
+  adaptiveExtraDelayMs = 0;
   lastRequestCompletedAt = 0;
   clearPantryCheckpointsForTests();
 };
@@ -166,14 +168,15 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 let lastRequestCompletedAt = 0;
 let requestQueue: Promise<unknown> = Promise.resolve();
 
-// Strictly serialize all Pantry requests and enforce rateLimitDelayMs
+// Strictly serialize all Pantry requests and enforce (rateLimitDelayMs + adaptiveExtraDelayMs)
 // between the COMPLETION of one request and the START of the next.
 const enqueuePantryRequest = <T>(fn: () => Promise<T>, immediate = false): Promise<T> => {
   const run = async (): Promise<T> => {
+    const effectiveDelay = rateLimitDelayMs > 0 ? rateLimitDelayMs + adaptiveExtraDelayMs : 0;
     const now = Date.now();
     const elapsed = now - lastRequestCompletedAt;
-    if (!immediate && lastRequestCompletedAt > 0 && elapsed < rateLimitDelayMs) {
-      await sleep(rateLimitDelayMs - elapsed);
+    if (!immediate && lastRequestCompletedAt > 0 && elapsed < effectiveDelay) {
+      await sleep(effectiveDelay - elapsed);
     }
     try {
       return await fn();
@@ -213,46 +216,74 @@ const fetchWithTimeout = async (
   }
 };
 
+const COOLDOWN_SCHEDULE_MS = [3500, 6000, 10000, 15000, 20000, 25000, 30000];
+
+const computeCooldownWaitMs = (attempt: number, baseDelayMs: number): number => {
+  if (rateLimitDelayMs === 0) {
+    return 5;
+  }
+  const scheduled = COOLDOWN_SCHEDULE_MS[Math.min(attempt, COOLDOWN_SCHEDULE_MS.length - 1)];
+  return Math.max(scheduled, baseDelayMs * (attempt + 1));
+};
+
 const fetchWithRetry = async (
   url: string,
   options: RequestInit,
-  retries = 3,
-  baseDelayMs = 2200,
-  immediate = false
+  retries = 6,
+  baseDelayMs = 3500,
+  immediate = false,
+  onCooldownWait?: (waitSec: number, attempt: number, maxRetries: number) => void
 ): Promise<Response> => {
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const response = await enqueuePantryRequest(
-        () => fetchWithTimeout(url, options),
-        immediate && attempt === 0
-      );
-      // Retry on rate-limit (429) or transient gateway/server errors (500, 502, 503, 504)
-      if ((response.status === 429 || response.status >= 500) && attempt < retries) {
-        const waitTime = baseDelayMs * Math.pow(2, attempt);
-        await sleep(waitTime);
-        continue;
+  // Run the entire retry + cooldown loop inside enqueuePantryRequest so no other Pantry request
+  // can cut in line and reset Pantry's rate-limit window while we are sleeping!
+  return enqueuePantryRequest(async () => {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        // Append a fresh timestamp on retries to bypass any cached 502/CORS error response
+        const attemptUrl =
+          attempt > 0 && url.includes('?t=')
+            ? url.replace(/\?t=\d+/, `?t=${Date.now()}_${attempt}`)
+            : url;
+        const response = await fetchWithTimeout(attemptUrl, options);
+        // Retry on rate-limit (429) or transient gateway/server errors (500, 502, 503, 504)
+        if ((response.status === 429 || response.status >= 500) && attempt < retries) {
+          if (rateLimitDelayMs > 0) {
+            adaptiveExtraDelayMs = Math.min(2200, adaptiveExtraDelayMs + 800);
+          }
+          const waitTime = computeCooldownWaitMs(attempt, baseDelayMs);
+          onCooldownWait?.(Math.max(1, Math.ceil(waitTime / 1000)), attempt + 1, retries);
+          await sleep(waitTime);
+          continue;
+        }
+        if (response.ok && adaptiveExtraDelayMs > 0) {
+          adaptiveExtraDelayMs = Math.max(0, adaptiveExtraDelayMs - 200);
+        }
+        return response;
+      } catch (err: any) {
+        // In browsers, Cloudflare 502s or 429 rate-limit drops without CORS headers throw TypeError("Failed to fetch" / "Load failed")
+        if (attempt < retries) {
+          if (rateLimitDelayMs > 0) {
+            adaptiveExtraDelayMs = Math.min(2200, adaptiveExtraDelayMs + 800);
+          }
+          const waitTime = computeCooldownWaitMs(attempt, baseDelayMs);
+          onCooldownWait?.(Math.max(1, Math.ceil(waitTime / 1000)), attempt + 1, retries);
+          await sleep(waitTime);
+          continue;
+        }
+        const isGenericNetworkErr =
+          err instanceof TypeError ||
+          err?.name === 'AbortError' ||
+          /load failed|failed to fetch|networkerror/i.test(err?.message || '');
+        if (isGenericNetworkErr) {
+          throw new Error(
+            'Unable to reach Pantry (getpantry.cloud returned a 502/CORS error or is rate-limiting requests). Please wait a few seconds and try again.'
+          );
+        }
+        throw err;
       }
-      return response;
-    } catch (err: any) {
-      // In browsers, Cloudflare 502s or 429 rate-limit drops without CORS headers throw TypeError("Failed to fetch" / "Load failed")
-      if (attempt < retries) {
-        const waitTime = baseDelayMs * Math.pow(2, attempt);
-        await sleep(waitTime);
-        continue;
-      }
-      const isGenericNetworkErr =
-        err instanceof TypeError ||
-        err?.name === 'AbortError' ||
-        /load failed|failed to fetch|networkerror/i.test(err?.message || '');
-      if (isGenericNetworkErr) {
-        throw new Error(
-          'Unable to reach Pantry (getpantry.cloud returned a 502/CORS error or is rate-limiting requests). Please wait a few seconds and try again.'
-        );
-      }
-      throw err;
     }
-  }
-  throw new Error('Unable to reach Pantry after multiple attempts.');
+    throw new Error('Unable to reach Pantry after multiple attempts.');
+  }, immediate);
 };
 
 // Strip empty/default fields and any inline data: URIs so the JSON payload is compact
@@ -371,7 +402,7 @@ export const getDeck = async (
   }
 ): Promise<CloudData> => {
   const cleanId = normalizePantryId(pantryId);
-  const retries = options?.retries ?? 3;
+  const retries = options?.retries ?? 6;
   const strict = options?.strict ?? false;
 
   const basketNames = Array.isArray(existingBaskets)
@@ -386,7 +417,7 @@ export const getDeck = async (
     return { cards: [], chunkCount: 1, basketExists: false };
   }
 
-  const defaultGetStepMs = Math.max(1200, rateLimitDelayMs + 700);
+  const defaultGetStepMs = Math.max(1200, rateLimitDelayMs + adaptiveExtraDelayMs + 700);
   const estimateDownloadRemainingSec = (completedChunks: number, totalChunksCount: number): number => {
     const remaining = Math.max(0, totalChunksCount - completedChunks);
     if (remaining === 0) return 0;
@@ -409,7 +440,20 @@ export const getDeck = async (
           ...FETCH_OPTIONS,
           method: 'GET',
         },
-        retries
+        retries,
+        3500,
+        false,
+        (waitSec) => {
+          options?.onProgress?.({
+            currentChunk: 1,
+            totalChunks: 1,
+            completedSteps: 0,
+            totalSteps: 1,
+            percent: 15,
+            step: `Pantry rate-limit cooldown — waiting ${waitSec}s and retrying automatically...`,
+            estimatedRemainingSec: waitSec + 2,
+          });
+        }
       );
 
       if (!response.ok) {
@@ -505,7 +549,20 @@ export const getDeck = async (
           ...FETCH_OPTIONS,
           method: 'GET',
         },
-        retries
+        retries,
+        3500,
+        false,
+        (waitSec) => {
+          options?.onProgress?.({
+            currentChunk: i + 1,
+            totalChunks: chunkCount,
+            completedSteps: i,
+            totalSteps: chunkCount,
+            percent: Math.min(95, Math.round(((i + 0.4) / chunkCount) * 100)),
+            step: `Pantry rate-limit cooldown — waiting ${waitSec}s before resuming chunk ${i + 1} of ${chunkCount}...`,
+            estimatedRemainingSec: waitSec + estimateDownloadRemainingSec(i, chunkCount),
+          });
+        }
       );
       if (!chunkRes.ok) {
         if (strict || hasKnownMainBasket || chunkCount > 1) {
@@ -873,9 +930,20 @@ const pushDeckWithChunkLimit = async (
         headers: { 'Content-Type': 'application/json' },
         body: mainBody,
       },
-      3,
-      2200,
-      immediate
+      6,
+      3500,
+      immediate,
+      (waitSec) => {
+        onProgress?.({
+          currentChunk: 1,
+          totalChunks: allChunks.length,
+          completedSteps: 0,
+          totalSteps,
+          percent: Math.max(8, Math.round((0.4 / Math.max(1, totalSteps)) * 100)),
+          step: `Pantry rate-limit cooldown — waiting ${waitSec}s before resuming chunk 1 of ${allChunks.length}...`,
+          estimatedRemainingSec: waitSec + computeRemainingSec(0, totalSteps),
+        });
+      }
     );
 
     if (!mainRes.ok) {
@@ -914,9 +982,20 @@ const pushDeckWithChunkLimit = async (
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ cards: allChunks[i], lastAccessedAt: now }),
       },
-      3,
-      2200,
-      immediate && completedDirtySteps === 0
+      6,
+      3500,
+      immediate && completedDirtySteps === 0,
+      (waitSec) => {
+        onProgress?.({
+          currentChunk: i + 1,
+          totalChunks: allChunks.length,
+          completedSteps: completedDirtySteps,
+          totalSteps,
+          percent: Math.min(95, Math.round(((completedDirtySteps + 0.4) / Math.max(1, totalSteps)) * 100)),
+          step: `Pantry rate-limit cooldown — waiting ${waitSec}s before resuming chunk ${i + 1} of ${allChunks.length}...`,
+          estimatedRemainingSec: waitSec + computeRemainingSec(completedDirtySteps, totalSteps),
+        });
+      }
     );
 
     if (!chunkRes.ok) {

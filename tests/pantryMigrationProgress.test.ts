@@ -240,3 +240,100 @@ test('Load from Cloud preserves already-downloaded chunks when interrupted mid-l
   await expect(page.getByText('Ephemeral')).toBeVisible();
   await expect(page.getByText('Magnanimous')).toBeVisible();
 });
+
+test('Load from Cloud automatically sleeps and retries when Pantry returns 502 mid-load without showing an error', async ({ page }) => {
+  let chunk1Calls = 0;
+
+  await page.route('https://getpantry.cloud/apiv1/pantry/**', async route => {
+    const req = route.request();
+    const method = req.method();
+    const url = req.url();
+    const basketMatch = url.match(/\/basket\/([^?]+)/);
+    const basketName = basketMatch ? basketMatch[1] : null;
+
+    if (method === 'GET') {
+      if (!basketName) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            name: 'Lumina',
+            baskets: [{ name: 'Lumina' }, { name: 'Lumina_1' }],
+          }),
+        });
+        return;
+      }
+
+      if (basketName === 'Lumina') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            cards: [
+              {
+                id: 'c0',
+                word: 'Serendipity',
+                partOfSpeech: 'noun',
+                mainDefinition: 'Happy accident.',
+                status: 'New',
+                lastReviewed: 0,
+                createdAt: Date.now() - 30000,
+              },
+            ],
+            chunkCount: 2,
+          }),
+        });
+        return;
+      }
+
+      if (basketName === 'Lumina_1') {
+        chunk1Calls++;
+        if (chunk1Calls === 1) {
+          // Simulate a transient 502 error mid-load on the first try
+          await route.fulfill({
+            status: 502,
+            contentType: 'text/plain',
+            body: 'Bad Gateway',
+          });
+          return;
+        }
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            cards: [
+              {
+                id: 'c1',
+                word: 'Perspicacious',
+                partOfSpeech: 'adjective',
+                mainDefinition: 'Having a ready insight into things.',
+                status: 'New',
+                lastReviewed: 0,
+                createdAt: Date.now() - 20000,
+              },
+            ],
+          }),
+        });
+        return;
+      }
+    }
+
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+  });
+
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'lumina_cloud_config',
+      JSON.stringify({ pantryId: '77777777-3333-4444-5555-666666666666' })
+    );
+    localStorage.setItem('lumina_cards_v1', JSON.stringify([]));
+  });
+
+  await page.goto('/#/flashcards');
+
+  // Wait for automatic sleep + retry to finish loading both chunks without error
+  await expect(page.getByText('Serendipity')).toBeVisible({ timeout: 12000 });
+  await expect(page.getByText('Perspicacious')).toBeVisible({ timeout: 12000 });
+  expect(chunk1Calls).toBeGreaterThanOrEqual(2);
+});
+

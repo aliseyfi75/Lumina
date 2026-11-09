@@ -289,3 +289,68 @@ test('getDeck delivers partial chunks progressively and resumes from the interru
     globalThis.fetch = originalFetch;
   }
 });
+
+test('getDeck automatically sleeps and retries through mid-load 502/429/CORS failures without failing', async () => {
+  setPantryRateLimitDelayForTests(0);
+  let lumina1Attempts = 0;
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method ?? 'GET';
+    if (method === 'GET') {
+      const basketMatch = url.match(/\/basket\/([^?]+)/);
+      const basketName = basketMatch ? basketMatch[1] : url;
+
+      if (basketName === 'Lumina') {
+        return new Response(
+          JSON.stringify({
+            cards: [makeCard(10, 20)],
+            chunkCount: 3,
+          }),
+          { status: 200 }
+        );
+      }
+      if (basketName === 'Lumina_1') {
+        lumina1Attempts++;
+        // Fail the first 4 attempts with simulated CORS/502/429 rate-limit drops, succeed on attempt 5
+        if (lumina1Attempts === 1 || lumina1Attempts === 2) {
+          throw new TypeError('Failed to fetch');
+        }
+        if (lumina1Attempts === 3) {
+          return new Response('Bad Gateway', { status: 502 });
+        }
+        if (lumina1Attempts === 4) {
+          return new Response('Too Many Requests', { status: 429 });
+        }
+        return new Response(JSON.stringify({ cards: [makeCard(11, 20)] }), { status: 200 });
+      }
+      if (basketName === 'Lumina_2') {
+        return new Response(JSON.stringify({ cards: [makeCard(12, 20)] }), { status: 200 });
+      }
+    }
+    return new Response('{}', { status: 200 });
+  }) as typeof fetch;
+
+  try {
+    const progressSteps: string[] = [];
+    const deck = await getDeck('99999999-8888-7777-6666-555555555555', undefined, {
+      strict: true,
+      onProgress: info => {
+        if (info.step) progressSteps.push(info.step);
+      },
+    });
+
+    expect(lumina1Attempts).toBe(5);
+    expect(
+      progressSteps.some(step =>
+        step.includes('Pantry rate-limit cooldown — waiting') &&
+        step.includes('before resuming chunk 2 of 3')
+      )
+    ).toBe(true);
+    expect(deck.cards.map(c => c.id)).toEqual(['card-10', 'card-11', 'card-12']);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+

@@ -157,7 +157,7 @@ test('Load from Cloud preserves already-downloaded chunks when interrupted mid-l
                 mainDefinition: 'Lasting for a very short time.',
                 status: 'New',
                 lastReviewed: 0,
-                createdAt: Date.now() - 30000,
+                createdAt: 1700000000000,
               },
             ],
             chunkCount: 2,
@@ -187,7 +187,7 @@ test('Load from Cloud preserves already-downloaded chunks when interrupted mid-l
                 mainDefinition: 'Generous or forgiving.',
                 status: 'New',
                 lastReviewed: 0,
-                createdAt: Date.now() - 20000,
+                createdAt: 1700000010000,
               },
             ],
           }),
@@ -229,6 +229,13 @@ test('Load from Cloud preserves already-downloaded chunks when interrupted mid-l
 
   // Verify it resumed directly at Lumina_1 without re-fetching Lumina!
   expect(requestedGetBaskets).toEqual(['Lumina_1']);
+
+  // Now click "Load from Cloud" a second time right away when nothing has changed in the cloud:
+  // It should only check the main 'Lumina' manifest and skip re-downloading 'Lumina_1'!
+  requestedGetBaskets.length = 0;
+  await page.getByRole('button', { name: /Load from Cloud/i }).click();
+  await expect(page.getByRole('button', { name: /Load from Cloud/i })).toBeEnabled({ timeout: 8000 });
+  expect(requestedGetBaskets).toEqual(['Lumina']);
 
   await page.screenshot({
     path: '/home/antigravity/.gemini/jetski/brain/v1/default/jetski_remote_agents_3p/a7fcfaec-b0d2-4bc2-b62c-d69cd223389f/scratch/pantry_resumed_cloud_pull.png',

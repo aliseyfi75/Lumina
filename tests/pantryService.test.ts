@@ -354,3 +354,98 @@ test('getDeck automatically sleeps and retries through mid-load 502/429/CORS fai
   }
 });
 
+test('getDeck skips unchanged overflow chunks on subsequent loads and only downloads modified chunks', async () => {
+  setPantryRateLimitDelayForTests(0);
+  const getBaskets: string[] = [];
+  const postBaskets: string[] = [];
+  const cloudStore: Record<string, any> = {};
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method ?? 'GET';
+    const basketMatch = url.match(/\/basket\/([^?]+)/);
+    const basketName = basketMatch ? basketMatch[1] : url;
+
+    if (method === 'POST') {
+      postBaskets.push(basketName);
+      cloudStore[basketName] = JSON.parse(String(init?.body || '{}'));
+      return new Response(JSON.stringify(cloudStore[basketName]), { status: 200 });
+    }
+    if (method === 'PUT') {
+      const existing = cloudStore[basketName] || {};
+      const patch = JSON.parse(String(init?.body || '{}'));
+      cloudStore[basketName] = { ...existing, ...patch };
+      return new Response(JSON.stringify(cloudStore[basketName]), { status: 200 });
+    }
+    if (method === 'GET') {
+      getBaskets.push(basketName);
+      if (cloudStore[basketName]) {
+        return new Response(JSON.stringify(cloudStore[basketName]), { status: 200 });
+      }
+      return new Response('Not found', { status: 404 });
+    }
+    return new Response('{}', { status: 200 });
+  }) as typeof fetch;
+
+  try {
+    const pantryId = '88888888-7777-6666-5555-444444444444';
+    const initialDeck = Array.from({ length: 140 }, (_, i) => makeCard(i + 1, 450));
+
+    // 1. Save 3-chunk deck to cloud
+    await updateDeck(pantryId, {
+      cards: initialDeck,
+      studyHistory: { '2026-11-09': 3 },
+      longestStreak: 4,
+      deletedCards: {},
+    });
+    expect(postBaskets).toEqual(['Lumina', 'Lumina_1', 'Lumina_2']);
+
+    // 2. Clicking "Save to Cloud" again immediately when nothing changed makes 0 POST requests!
+    postBaskets.length = 0;
+    await updateDeck(pantryId, {
+      cards: initialDeck,
+      studyHistory: { '2026-11-09': 3 },
+      longestStreak: 4,
+      deletedCards: {},
+    });
+    expect(postBaskets).toEqual([]);
+
+    // 3. Simulate a fresh device loading from cloud for the first time -> downloads all 3 chunks
+    setPantryRateLimitDelayForTests(0);
+    getBaskets.length = 0;
+    const firstPull = await getDeck(pantryId, undefined, { strict: true });
+    expect(getBaskets).toEqual(['Lumina', 'Lumina_1', 'Lumina_2']);
+    expect(firstPull.cards.length).toBe(140);
+
+    // 4. Right after loading from cloud, user clicks "Load from Cloud" again when nothing changed:
+    // Only checks main 'Lumina' manifest and skips downloading 'Lumina_1' and 'Lumina_2'!
+    getBaskets.length = 0;
+    const secondPull = await getDeck(pantryId, undefined, { strict: true });
+    expect(getBaskets).toEqual(['Lumina']);
+    expect(secondPull.cards.length).toBe(140);
+
+    // 5. Now simulate another device modifying ONLY chunk 3 ('Lumina_2') and updating its hash in 'Lumina'
+    cloudStore['Lumina_2'] = {
+      ...cloudStore['Lumina_2'],
+      cards: [...cloudStore['Lumina_2'].cards, makeCard(999, 200)],
+    };
+    cloudStore['Lumina'] = {
+      ...cloudStore['Lumina'],
+      chunkHashes: {
+        ...cloudStore['Lumina'].chunkHashes,
+        2: 'updated-hash-for-chunk-2',
+      },
+    };
+
+    // Clicking "Load from Cloud" skips unchanged 'Lumina_1' and downloads ONLY 'Lumina' + 'Lumina_2'!
+    getBaskets.length = 0;
+    const thirdPull = await getDeck(pantryId, undefined, { strict: true });
+    expect(getBaskets).toEqual(['Lumina', 'Lumina_2']);
+    expect(thirdPull.cards.length).toBe(141);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+

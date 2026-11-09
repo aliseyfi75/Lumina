@@ -274,12 +274,10 @@ const App: React.FC = () => {
           inc.createdAt || Date.now()
         ),
         lastReviewed: Math.max(existing.lastReviewed || 0, inc.lastReviewed || 0),
-        updatedAt: Math.max(
-          incTs,
-          extTs,
-          existing.createdAt || 0,
-          inc.createdAt || 0
-        ),
+        updatedAt:
+          existing.updatedAt !== undefined || inc.updatedAt !== undefined
+            ? Math.max(existing.updatedAt ?? 0, inc.updatedAt ?? 0)
+            : undefined,
       };
     };
 
@@ -312,13 +310,7 @@ const App: React.FC = () => {
         }
       });
 
-    const now = Date.now();
-    return Array.from(cardMap.values()).map(c => {
-      if (c.status === FlashcardStatus.Learning && c.nextReviewDate && c.nextReviewDate < now) {
-        return { ...c, nextReviewDate: now };
-      }
-      return c;
-    }).sort((a, b) => b.createdAt - a.createdAt);
+    return Array.from(cardMap.values()).sort((a, b) => b.createdAt - a.createdAt);
   };
 
   const mergeHistoryRecords = (
@@ -444,14 +436,6 @@ const App: React.FC = () => {
         }
       }
 
-      const now = Date.now();
-      initialCards = initialCards.map(c => {
-        if (c.status === FlashcardStatus.Learning && c.nextReviewDate && c.nextReviewDate < now) {
-          return { ...c, nextReviewDate: now };
-        }
-        return c;
-      });
-
       cardsRef.current = initialCards;
       setCards(initialCards);
 
@@ -482,6 +466,7 @@ const App: React.FC = () => {
 
         try {
           const cloudData = await getDeck(resolvedCloudConfig.pantryId, undefined, {
+            localCards: initialCards,
             onPartialCards: (partial) => {
               if (
                 (partial.cards && partial.cards.length > 0) ||
@@ -1160,6 +1145,7 @@ const App: React.FC = () => {
 
       const cloudData = await getDeck(cloudConfig.pantryId, undefined, {
         strict: true,
+        localCards: cardsRef.current,
         onPartialCards: (partial) => {
           applyPulledCloudData(partial);
         },

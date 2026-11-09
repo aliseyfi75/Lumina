@@ -1086,53 +1086,63 @@ export const getPendingCloudSyncPlan = (
   totalChunks: number;
   isMetadataOnly: boolean;
 } => {
-  const cleanId = normalizePantryId(pantryId);
-  const sanitizedCards = sanitizeCardsForCloud(cloudData.cards || []);
-  const orderedCards = [...sanitizedCards].sort(
-    (a, b) => (a.createdAt || 0) - (b.createdAt || 0) || a.id.localeCompare(b.id)
-  );
-  const previousChunkCount = knownChunkCounts.get(cleanId) ?? cloudData.chunkCount ?? 1;
-  const knownHashes = loadUploadedChunkHashes(cleanId);
+  try {
+    const cleanId = normalizePantryId(pantryId);
+    const sanitizedCards = sanitizeCardsForCloud(cloudData.cards || []);
+    const orderedCards = [...sanitizedCards].sort(
+      (a, b) => (a.createdAt || 0) - (b.createdAt || 0) || (a.id || '').localeCompare(b.id || '')
+    );
+    const previousChunkCount = knownChunkCounts.get(cleanId) ?? cloudData.chunkCount ?? 1;
+    const knownHashes = loadUploadedChunkHashes(cleanId);
 
-  const metadataOverhead = new Blob([
-    JSON.stringify({
-      cards: [],
-      studyHistory: cloudData.studyHistory,
-      longestStreak: cloudData.longestStreak,
-      deletedCards: cloudData.deletedCards,
-      chunkCount: 99,
-      lastAccessedAt: Date.now(),
-    }),
-  ]).size;
-  const firstChunkMax = Math.max(8 * 1024, MAX_BASKET_BYTES - metadataOverhead);
-  const allChunks = buildStableChunks(cleanId, orderedCards, firstChunkMax, MAX_BASKET_BYTES - 512, false);
-  const staleChunksToDelete = Math.max(0, previousChunkCount - allChunks.length);
+    const metadataOverhead = new Blob([
+      JSON.stringify({
+        cards: [],
+        studyHistory: cloudData.studyHistory,
+        longestStreak: cloudData.longestStreak,
+        deletedCards: cloudData.deletedCards,
+        chunkCount: 99,
+        lastAccessedAt: Date.now(),
+      }),
+    ]).size;
+    const firstChunkMax = Math.max(8 * 1024, MAX_BASKET_BYTES - metadataOverhead);
+    const allChunks = buildStableChunks(cleanId, orderedCards, firstChunkMax, MAX_BASKET_BYTES - 512, false);
+    const staleChunksToDelete = Math.max(0, previousChunkCount - allChunks.length);
 
-  const cardChunkHashes: Record<number, string> = {};
-  let dirtyChunkCount = 0;
-  for (let i = 0; i < allChunks.length; i++) {
-    cardChunkHashes[i] = computeCardChunkHash(allChunks[i]);
-    if (knownHashes[i] !== cardChunkHashes[i]) {
-      dirtyChunkCount++;
+    const cardChunkHashes: Record<number, string> = {};
+    let dirtyChunkCount = 0;
+    for (let i = 0; i < allChunks.length; i++) {
+      cardChunkHashes[i] = computeCardChunkHash(allChunks[i]);
+      if (knownHashes[i] !== cardChunkHashes[i]) {
+        dirtyChunkCount++;
+      }
     }
+
+    const metaHash = computeMetadataOnlyHash(
+      cloudData.studyHistory,
+      cloudData.longestStreak,
+      cloudData.deletedCards,
+      allChunks.length,
+      cardChunkHashes
+    );
+    const metaChanged = knownHashes.meta !== metaHash;
+    const hasChanges = dirtyChunkCount > 0 || metaChanged || staleChunksToDelete > 0;
+
+    return {
+      hasChanges,
+      dirtyChunkCount: dirtyChunkCount + staleChunksToDelete,
+      totalChunks: allChunks.length,
+      isMetadataOnly: dirtyChunkCount === 0 && staleChunksToDelete === 0 && metaChanged,
+    };
+  } catch (err) {
+    console.warn('Failed to compute cloud sync plan, falling back to full sync check:', err);
+    return {
+      hasChanges: true,
+      dirtyChunkCount: 1,
+      totalChunks: 1,
+      isMetadataOnly: false,
+    };
   }
-
-  const metaHash = computeMetadataOnlyHash(
-    cloudData.studyHistory,
-    cloudData.longestStreak,
-    cloudData.deletedCards,
-    allChunks.length,
-    cardChunkHashes
-  );
-  const metaChanged = knownHashes.meta !== metaHash;
-  const hasChanges = dirtyChunkCount > 0 || metaChanged || staleChunksToDelete > 0;
-
-  return {
-    hasChanges,
-    dirtyChunkCount: dirtyChunkCount + staleChunksToDelete,
-    totalChunks: allChunks.length,
-    isMetadataOnly: dirtyChunkCount === 0 && staleChunksToDelete === 0 && metaChanged,
-  };
 };
 
 const pushDeckWithChunkLimit = async (

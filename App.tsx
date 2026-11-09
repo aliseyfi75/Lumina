@@ -10,7 +10,7 @@ import { DataManagerModal } from './components/DataManagerModal';
 import { AnkiImportModal } from './components/AnkiImportModal';
 import { PwaInstallBanner } from './components/PwaInstallBanner';
 import { generateJSON, parseFileContent, downloadJSON, saveToLocalFile } from './services/fileService';
-import { getDetails, getDeck, updateDeck, keepAlivePantry, getKnownChunkCount, CloudSyncProgress, ChunkProgressInfo } from './services/pantryService';
+import { getDetails, getDeck, updateDeck, keepAlivePantry, getKnownChunkCount, getPendingCloudSyncPlan, CloudSyncProgress, ChunkProgressInfo } from './services/pantryService';
 import { saveFileHandleToIDB, loadFileHandleFromIDB, clearFileHandleFromIDB, saveAppDataToIDB, loadAppDataFromIDB, requestPersistentStorage, checkPersistentStorage, getStorageEstimate } from './services/idbService';
 import { initializeTracking, trackEvent, setTrackingUserId, trackPageView, PAGE_TITLES, TRACKING_CATEGORY, TRACKING_ACTION } from './services/trackingService';
 import { getLocalDateString, calculateCurrentStreak, getDueCards } from './utils/studyUtils';

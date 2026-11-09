@@ -714,7 +714,11 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
             {/* Front of Card - Minimal Design (Word Only) */}
             <div
               className="absolute inset-0 backface-hidden bg-white dark:bg-slate-800 rounded-3xl shadow-xl shadow-slate-200/50 dark:shadow-none border border-slate-100 dark:border-slate-700 flex flex-col items-center justify-center p-8 text-center hover:shadow-2xl transition-shadow"
-              style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}
+              style={{
+                backfaceVisibility: 'hidden',
+                WebkitBackfaceVisibility: 'hidden',
+                pointerEvents: isFlipped ? 'none' : 'auto',
+              }}
             >
               {/* Drag Overlays */}
               <motion.div style={{ opacity: swipeRightOpacity }} className="absolute inset-0 rounded-3xl pointer-events-none bg-green-500/10 dark:bg-green-500/20" />
@@ -822,7 +826,12 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
             {/* Back of Card - Definition & Controls */}
             <div
               className="absolute inset-0 backface-hidden rotate-y-180 bg-slate-900 rounded-3xl shadow-xl flex flex-col p-8 text-center overflow-hidden"
-              style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
+              style={{
+                backfaceVisibility: 'hidden',
+                WebkitBackfaceVisibility: 'hidden',
+                transform: 'rotateY(180deg)',
+                pointerEvents: isFlipped ? 'auto' : 'none',
+              }}
             >
               {/* Drag Overlays */}
               <motion.div style={{ opacity: swipeRightOpacity }} className="absolute inset-0 rounded-3xl pointer-events-none bg-green-500/10" />

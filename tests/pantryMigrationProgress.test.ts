@@ -344,3 +344,157 @@ test('Load from Cloud automatically sleeps and retries when Pantry returns 502 m
   expect(chunk1Calls).toBeGreaterThanOrEqual(2);
 });
 
+test('Study session grading buttons (Again / Learned / Mastered) advance cards smoothly without crashing to a white screen', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', err => {
+    pageErrors.push(err.message);
+  });
+
+  await page.route('https://getpantry.cloud/apiv1/pantry/**', async route => {
+    const req = route.request();
+    if (req.method() === 'GET') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          cards: [
+            {
+              id: 'study-1',
+              word: 'Ephemeral',
+              phonetic: '/ɪˈfem.ər.əl/',
+              partOfSpeech: 'adjective',
+              mainDefinition: 'Lasting for a very short time.',
+              example: 'Fashions are ephemeral, changing with every season.',
+              status: 'New',
+              lastReviewed: 0,
+              createdAt: Date.now() - 20000,
+            },
+            {
+              id: 'study-2',
+              word: 'Ubiquitous',
+              phonetic: '/juːˈbɪk.wɪ.təs/',
+              partOfSpeech: 'adjective',
+              mainDefinition: 'Present, appearing, or found everywhere.',
+              example: 'Smartphones have become ubiquitous in daily life.',
+              status: 'New',
+              lastReviewed: 0,
+              createdAt: Date.now() - 10000,
+            },
+            {
+              id: 'study-3',
+              word: 'Meticulous',
+              phonetic: '/məˈtɪk.jə.ləs/',
+              partOfSpeech: 'adjective',
+              mainDefinition: 'Showing great attention to detail; very careful and precise.',
+              example: 'She was meticulous in keeping her financial records.',
+              status: 'New',
+              lastReviewed: 0,
+              createdAt: Date.now() - 5000,
+            },
+          ],
+          chunkCount: 1,
+        }),
+      });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+  });
+
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'lumina_cloud_config',
+      JSON.stringify({ pantryId: '88888888-3333-4444-5555-666666666666' })
+    );
+    localStorage.setItem(
+      'lumina_cards_v1',
+      JSON.stringify([
+        {
+          id: 'study-1',
+          word: 'Ephemeral',
+          phonetic: '/ɪˈfem.ər.əl/',
+          partOfSpeech: 'adjective',
+          mainDefinition: 'Lasting for a very short time.',
+          example: 'Fashions are ephemeral, changing with every season.',
+          status: 'New',
+          lastReviewed: 0,
+          createdAt: Date.now() - 20000,
+        },
+        {
+          id: 'study-2',
+          word: 'Ubiquitous',
+          phonetic: '/juːˈbɪk.wɪ.təs/',
+          partOfSpeech: 'adjective',
+          mainDefinition: 'Present, appearing, or found everywhere.',
+          example: 'Smartphones have become ubiquitous in daily life.',
+          status: 'New',
+          lastReviewed: 0,
+          createdAt: Date.now() - 10000,
+        },
+        {
+          id: 'study-3',
+          word: 'Meticulous',
+          phonetic: '/məˈtɪk.jə.ləs/',
+          partOfSpeech: 'adjective',
+          mainDefinition: 'Showing great attention to detail; very careful and precise.',
+          example: 'She was meticulous in keeping her financial records.',
+          status: 'New',
+          lastReviewed: 0,
+          createdAt: Date.now() - 5000,
+        },
+      ])
+    );
+  });
+
+  await page.goto('/#/study');
+
+  // Card 1: Ephemeral -> flip and click "Again"
+  await expect(page.getByText('1 / 3')).toBeVisible({ timeout: 8000 });
+  await expect(page.getByRole('heading', { name: 'Ephemeral' })).toBeVisible();
+
+  await page.getByRole('heading', { name: 'Ephemeral' }).click();
+  await expect(page.getByText('Lasting for a very short time.')).toBeVisible();
+  await page.waitForTimeout(350);
+
+  await page.screenshot({
+    path: '/home/antigravity/.gemini/jetski/brain/v1/default/jetski_remote_agents_3p/a7fcfaec-b0d2-4bc2-b62c-d69cd223389f/scratch/study_card1_flipped_back.png',
+  });
+
+  await page.getByRole('button', { name: /Again/i }).click();
+  await page.waitForTimeout(450);
+
+  await page.screenshot({
+    path: '/home/antigravity/.gemini/jetski/brain/v1/default/jetski_remote_agents_3p/a7fcfaec-b0d2-4bc2-b62c-d69cd223389f/scratch/study_after_clicking_button.png',
+  });
+
+  expect(pageErrors).toEqual([]);
+  await expect(page.getByText('2 / 3')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Ubiquitous' })).toBeVisible();
+
+  // Card 2: Ubiquitous -> flip and click "Learned"
+  await page.getByRole('heading', { name: 'Ubiquitous' }).click();
+  await expect(page.getByText('Present, appearing, or found everywhere.')).toBeVisible();
+  await page.waitForTimeout(350);
+  await page.getByRole('button', { name: /Learned/i }).click();
+  await page.waitForTimeout(450);
+
+  expect(pageErrors).toEqual([]);
+  await expect(page.getByText('3 / 3')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Meticulous' })).toBeVisible();
+
+  // Card 3: Meticulous -> flip and click "Mastered"
+  await page.getByRole('heading', { name: 'Meticulous' }).click();
+  await expect(page.getByText('Showing great attention to detail; very careful and precise.')).toBeVisible();
+  await page.waitForTimeout(350);
+  await page.getByRole('button', { name: /Mastered/i }).click();
+  await page.waitForTimeout(500);
+
+  expect(pageErrors).toEqual([]);
+  await expect(page.getByRole('heading', { name: 'Session Complete!' })).toBeVisible();
+  await expect(page.getByText('You reviewed 3 cards with 67% accuracy.')).toBeVisible();
+
+  await page.screenshot({
+    path: '/home/antigravity/.gemini/jetski/brain/v1/default/jetski_remote_agents_3p/a7fcfaec-b0d2-4bc2-b62c-d69cd223389f/scratch/study_session_complete_after_buttons.png',
+  });
+});
+
+

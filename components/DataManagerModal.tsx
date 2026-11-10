@@ -34,6 +34,20 @@ interface DataManagerModalProps {
     oldPantryId?: string,
     onProgress?: (progress: CloudSyncProgress) => void
   ) => Promise<{ cardCount: number; localCount: number; cloudCount: number; historyDays: number }>;
+  onConnectGist?: (
+    gistToken: string,
+    gistId?: string,
+    oldPantryId?: string,
+    onProgress?: (progress: CloudSyncProgress) => void
+  ) => Promise<{
+    gistId: string;
+    createdNewGist: boolean;
+    cardCount: number;
+    localCount: number;
+    pantryCount: number;
+    gistCount: number;
+    historyDays: number;
+  }>;
   onDisconnectCloud: () => void;
   onCloudPull: (onProgress?: (progress: CloudSyncProgress) => void) => Promise<void>;
   onCloudPush: (onProgress?: (progress: CloudSyncProgress) => void) => Promise<void>;
@@ -59,6 +73,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
   cloudConfig,
   onConnectCloud,
   onMigrateCloud,
+  onConnectGist,
   onDisconnectCloud,
   onCloudPull,
   onCloudPush
@@ -91,17 +106,37 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
   const [oldPantryIdInput, setOldPantryIdInput] = useState('');
   const [cloudProgress, setCloudProgress] = useState<CloudSyncProgress | null>(null);
 
+  // GitHub Gist Form State
+  const [gistTokenInput, setGistTokenInput] = useState('');
+  const [gistIdInput, setGistIdInput] = useState('');
+  const [gistOldPantryIdInput, setGistOldPantryIdInput] = useState('');
+  const [showGistMigrateFromPantry, setShowGistMigrateFromPantry] = useState(false);
+  const [isMigratingPantryToGist, setIsMigratingPantryToGist] = useState(false);
+
+  const isGistConnected = cloudConfig?.provider === 'gist' && !!cloudConfig?.gistId;
+
   useEffect(() => {
     setIsIframe(window.self !== window.top);
     if (isOpen && cloudConfig) {
-      setPantryIdInput(cloudConfig.pantryId);
+      if (cloudConfig.provider === 'gist') {
+        setGistTokenInput(cloudConfig.gistToken || '');
+        setGistIdInput(cloudConfig.gistId || cloudConfig.pantryId || '');
+      } else {
+        setPantryIdInput(cloudConfig.pantryId);
+        setGistOldPantryIdInput(cloudConfig.pantryId);
+      }
     }
     if (!cloudConfig) {
       setPantryIdInput('');
       setOldPantryIdInput('');
+      setGistTokenInput('');
+      setGistIdInput('');
+      setGistOldPantryIdInput('');
     }
     if (!isOpen) {
       setIsMigratingCloud(false);
+      setIsMigratingPantryToGist(false);
+      setShowGistMigrateFromPantry(false);
       setNewPantryIdInput('');
       setOldPantryIdInput('');
       setCloudProgress(null);
@@ -117,7 +152,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
   const showMessage = (type: 'success' | 'error', msg: string) => {
     setStatus({ type, msg });
     if (type === 'success') {
-      setTimeout(() => setStatus({ type: 'idle', msg: '' }), 3000);
+      setTimeout(() => setStatus({ type: 'idle', msg: '' }), 4000);
     }
   };
 
@@ -181,6 +216,58 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
       } finally {
         setIsProcessing(false);
       }
+    }
+  };
+
+  const handleGistConnectSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const token = gistTokenInput.trim();
+    if (!token) {
+      return showMessage('error', 'GitHub Personal Access Token is required');
+    }
+    if (!onConnectGist) {
+      return showMessage('error', 'GitHub Gist sync is not available');
+    }
+
+    const sourcePantryId =
+      cloudConfig && cloudConfig.provider !== 'gist'
+        ? (gistOldPantryIdInput.trim() || cloudConfig.pantryId)
+        : showGistMigrateFromPantry
+          ? gistOldPantryIdInput.trim() || undefined
+          : undefined;
+
+    setIsProcessing(true);
+    setCloudProgress({
+      percent: 10,
+      step: sourcePantryId
+        ? 'Migrating data from Pantry & connecting to GitHub Gist...'
+        : 'Connecting to GitHub Gist...',
+      estimatedRemainingSec: sourcePantryId ? 4 : 1,
+    });
+    try {
+      const res = await onConnectGist(
+        token,
+        gistIdInput.trim() || undefined,
+        sourcePantryId,
+        setCloudProgress
+      );
+      let summary: string;
+      if (res.pantryCount > 0) {
+        summary = `Migrated to GitHub Gist! Merged ${res.localCount} local + ${res.pantryCount} Pantry${res.gistCount > 0 ? ` + ${res.gistCount} Gist` : ''} cards → ${res.cardCount} total (${res.historyDays} study days).`;
+      } else if (res.gistCount > 0) {
+        summary = `Connected to GitHub Gist! Merged ${res.localCount} local + ${res.gistCount} Gist cards → ${res.cardCount} total (${res.historyDays} study days).`;
+      } else {
+        summary = `Connected to GitHub Gist & synced ${res.cardCount} cards (${res.historyDays} study days) in 1 request!`;
+      }
+      showMessage('success', summary);
+      setIsMigratingCloud(false);
+      setIsMigratingPantryToGist(false);
+      setShowGistMigrateFromPantry(false);
+    } catch (error: any) {
+      showMessage('error', error.message || 'Failed to connect to GitHub Gist');
+    } finally {
+      setIsProcessing(false);
+      setCloudProgress(null);
     }
   };
 
@@ -251,8 +338,15 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
     setIsProcessing(true);
     setCloudProgress({
       percent: 12,
-      step: action === 'pull' ? 'Loading flashcards from Cloud...' : `Uploading ${cardCount} flashcards to Cloud...`,
-      estimatedRemainingSec: Math.max(2, Math.ceil(cardCount / 65) * 2),
+      step:
+        action === 'pull'
+          ? isGistConnected
+            ? 'Loading flashcards from GitHub Gist...'
+            : 'Loading flashcards from Cloud...'
+          : isGistConnected
+            ? `Uploading ${cardCount} flashcards to GitHub Gist...`
+            : `Uploading ${cardCount} flashcards to Cloud...`,
+      estimatedRemainingSec: isGistConnected ? 1 : Math.max(2, Math.ceil(cardCount / 65) * 2),
     });
     try {
       if (action === 'pull') {
@@ -483,278 +577,610 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
           </div>
 
 
-          <div className={`p-5 rounded-xl border transition-colors ${cloudConfig ? 'bg-sky-50/50 dark:bg-sky-900/10 border-sky-100 dark:border-sky-800/40' : 'bg-slate-50 dark:bg-slate-900/30 border-slate-200 dark:border-slate-700'}`}>
-            <div className="flex items-start justify-between mb-4">
-              <div>
-                <h3 className="text-slate-900 dark:text-white font-semibold flex items-center gap-2">
-                  <Cloud className={`h-5 w-5 ${cloudConfig ? 'text-sky-500' : 'text-slate-400'}`} />
-                  Cloud Sync (Pantry)
-                </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                  Free unlimited storage for your flashcards.
-                </p>
-              </div>
-              {cloudConfig && (
-                <span className="px-2 py-1 bg-sky-100 text-sky-700 text-xs font-bold rounded-md uppercase tracking-wider">
-                  Active
-                </span>
-              )}
-            </div>
-
-            {!cloudConfig ? (
-              <form onSubmit={handleCloudConnectSubmit} className="space-y-3">
+          {/* ── Cloud Sync (GitHub Gist — Instant 1-Request Sync) ───────── */}
+          {(!cloudConfig || isGistConnected) && (
+            <div
+              data-testid="gist-cloud-section"
+              className={`p-5 rounded-xl border transition-colors ${
+                isGistConnected
+                  ? 'bg-emerald-50/50 dark:bg-emerald-900/10 border-emerald-200 dark:border-emerald-800/50'
+                  : 'bg-indigo-50/40 dark:bg-indigo-900/15 border-indigo-200/80 dark:border-indigo-800/50'
+              }`}
+            >
+              <div className="flex items-start justify-between mb-4 gap-2">
                 <div>
-                  <input
-                    type="text"
-                    placeholder="New or Existing Pantry ID"
-                    value={pantryIdInput}
-                    onChange={(e) => setPantryIdInput(e.target.value)}
-                    className="w-full text-sm px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent"
-                  />
-                  <div className="mt-2 flex items-center justify-between text-[10px] text-slate-500 flex-wrap gap-1">
-                    <div className="flex items-center gap-1">
-                      <span>Don't have one?</span>
-                      <a href="https://getpantry.cloud/" target="_blank" rel="noreferrer" className="text-sky-600 hover:underline flex items-center gap-1 font-medium">
-                        Create Pantry ID <ExternalLink className="h-3 w-3" />
-                      </a>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setIsMigratingCloud((v) => !v)}
-                      className="text-sky-600 dark:text-sky-400 hover:underline font-medium"
-                    >
-                      {isMigratingCloud ? 'Hide migration options' : 'Migrating from an old ID?'}
-                    </button>
-                  </div>
+                  <h3 className="text-slate-900 dark:text-white font-semibold flex items-center gap-2">
+                    <Cloud className={`h-5 w-5 ${isGistConnected ? 'text-emerald-600 dark:text-emerald-400' : 'text-indigo-600 dark:text-indigo-400'}`} />
+                    Cloud Sync (GitHub Gist)
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    Instant 1-request sync (&lt;1s) to a private Secret Gist on your GitHub account. Never expires.
+                  </p>
                 </div>
+                {isGistConnected ? (
+                  <span
+                    data-testid="gist-active-badge"
+                    className="px-2 py-1 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 text-xs font-bold rounded-md uppercase tracking-wider shrink-0"
+                  >
+                    Active · Instant
+                  </span>
+                ) : (
+                  <span className="px-2 py-1 bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 text-[10px] font-bold rounded-md uppercase tracking-wider shrink-0">
+                    Recommended
+                  </span>
+                )}
+              </div>
 
-                {isMigratingCloud && (
-                  <div className="p-3 rounded-lg bg-sky-50/80 dark:bg-sky-900/20 border border-sky-200 dark:border-sky-800/50 space-y-2">
-                    <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
-                      All local flashcards ({cardCount}), study history, and streaks are automatically migrated to your new Pantry ID. If your previous Pantry ID is still active, enter it below to also merge its cloud data:
-                    </p>
+              {!isGistConnected ? (
+                <form onSubmit={handleGistConnectSubmit} className="space-y-3" data-testid="gist-connect-form">
+                  <div className="space-y-2">
+                    <input
+                      type="password"
+                      data-testid="gist-token-input"
+                      placeholder="GitHub Personal Access Token (ghp_...)"
+                      value={gistTokenInput}
+                      onChange={(e) => setGistTokenInput(e.target.value)}
+                      className="w-full text-sm px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    />
                     <input
                       type="text"
-                      placeholder="Previous Pantry ID (optional)"
-                      value={oldPantryIdInput}
-                      onChange={(e) => setOldPantryIdInput(e.target.value)}
-                      className="w-full text-xs px-2.5 py-1.5 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-sky-500"
+                      data-testid="gist-id-input"
+                      placeholder="Existing Gist ID (optional — blank to auto-detect/create)"
+                      value={gistIdInput}
+                      onChange={(e) => setGistIdInput(e.target.value)}
+                      className="w-full text-xs px-3 py-1.5 border border-slate-200 dark:border-slate-600 bg-white/80 dark:bg-slate-700/80 text-slate-900 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-mono"
                     />
-                  </div>
-                )}
-
-                {cloudProgress && (
-                  <div
-                    data-testid="pantry-progress-bar"
-                    className="p-3 rounded-xl bg-sky-50 dark:bg-sky-900/20 border border-sky-200 dark:border-sky-800/60 space-y-2"
-                  >
-                    <div className="flex items-center justify-between text-xs font-medium text-sky-900 dark:text-sky-200">
-                      <span className="flex items-center gap-1.5">
-                        <RefreshCw className="h-3.5 w-3.5 animate-spin text-sky-600 dark:text-sky-400 shrink-0" />
-                        <span>{cloudProgress.step}</span>
-                      </span>
-                      <span className="flex items-center gap-2 shrink-0">
-                        {typeof cloudProgress.estimatedRemainingSec === 'number' && cloudProgress.estimatedRemainingSec > 0 && (
-                          <span className="font-mono text-[10px] text-sky-600/80 dark:text-sky-400/80">
-                            ~{cloudProgress.estimatedRemainingSec}s remaining
-                          </span>
-                        )}
-                        <span className="font-mono font-bold text-sky-700 dark:text-sky-300">
-                          {cloudProgress.percent}%
-                        </span>
-                      </span>
-                    </div>
-                    <div
-                      role="progressbar"
-                      aria-label="Pantry sync progress"
-                      aria-valuenow={cloudProgress.percent}
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                      className="w-full h-2 bg-sky-200/70 dark:bg-slate-700 rounded-full overflow-hidden"
-                    >
-                      <div
-                        className="h-full bg-sky-600 dark:bg-sky-400 rounded-full transition-all duration-300 ease-out"
-                        style={{ width: `${Math.max(5, Math.min(100, cloudProgress.percent))}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={isProcessing}
-                  className="w-full py-2 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 text-sm font-medium rounded-lg hover:bg-slate-800 dark:hover:bg-white disabled:opacity-50 transition-colors"
-                >
-                  {isProcessing ? 'Migrating & Connecting...' : isMigratingCloud ? 'Migrate All Data & Connect' : 'Connect & Sync Storage'}
-                </button>
-              </form>
-            ) : (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between text-xs bg-white/80 dark:bg-slate-800/80 px-3 py-2 rounded-lg border border-sky-100 dark:border-sky-800/40">
-                  <span className="text-slate-500 dark:text-slate-400">Connected ID:</span>
-                  <span className="font-mono text-slate-700 dark:text-slate-200 truncate max-w-[220px]" title={cloudConfig.pantryId}>
-                    {cloudConfig.pantryId}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    onClick={() => handleCloudAction('pull')}
-                    disabled={isProcessing}
-                    className="flex flex-col items-center justify-center gap-1 p-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg hover:border-sky-300 hover:text-sky-600 dark:text-slate-200 dark:hover:text-sky-400 transition-colors"
-                  >
-                    <Download className="h-4 w-4" />
-                    <span className="text-xs font-medium">Load from Cloud</span>
-                  </button>
-                  <button
-                    onClick={() => handleCloudAction('push')}
-                    disabled={isProcessing}
-                    className="flex flex-col items-center justify-center gap-1 p-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg hover:border-sky-300 hover:text-sky-600 dark:text-slate-200 dark:hover:text-sky-400 transition-colors"
-                  >
-                    <Upload className="h-4 w-4" />
-                    <span className="text-xs font-medium">Save to Cloud</span>
-                  </button>
-                </div>
-
-                {cloudProgress && !isMigratingCloud && (
-                  <div
-                    data-testid="pantry-progress-bar"
-                    className="p-3 rounded-xl bg-sky-50 dark:bg-sky-900/20 border border-sky-200 dark:border-sky-800/60 space-y-2"
-                  >
-                    <div className="flex items-center justify-between text-xs font-medium text-sky-900 dark:text-sky-200">
-                      <span className="flex items-center gap-1.5">
-                        <RefreshCw className="h-3.5 w-3.5 animate-spin text-sky-600 dark:text-sky-400 shrink-0" />
-                        <span>{cloudProgress.step}</span>
-                      </span>
-                      <span className="flex items-center gap-2 shrink-0">
-                        {typeof cloudProgress.estimatedRemainingSec === 'number' && cloudProgress.estimatedRemainingSec > 0 && (
-                          <span className="font-mono text-[10px] text-sky-600/80 dark:text-sky-400/80">
-                            ~{cloudProgress.estimatedRemainingSec}s remaining
-                          </span>
-                        )}
-                        <span className="font-mono font-bold text-sky-700 dark:text-sky-300">
-                          {cloudProgress.percent}%
-                        </span>
-                      </span>
-                    </div>
-                    <div
-                      role="progressbar"
-                      aria-label="Pantry sync progress"
-                      aria-valuenow={cloudProgress.percent}
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                      className="w-full h-2 bg-sky-200/70 dark:bg-slate-700 rounded-full overflow-hidden"
-                    >
-                      <div
-                        className="h-full bg-sky-600 dark:bg-sky-400 rounded-full transition-all duration-300 ease-out"
-                        style={{ width: `${Math.max(5, Math.min(100, cloudProgress.percent))}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {isMigratingCloud && (
-                  <form onSubmit={handleCloudMigrateSubmit} className="p-3.5 rounded-xl bg-white dark:bg-slate-800 border border-sky-200 dark:border-sky-700 space-y-3 animate-in fade-in duration-200">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-slate-800 dark:text-slate-100">
-                        Migrate to New Pantry ID
-                      </span>
+                    <div className="flex items-center justify-between text-[10px] text-slate-500 flex-wrap gap-1 pt-0.5">
+                      <div className="flex items-center gap-1">
+                        <span>Need a token?</span>
+                        <a
+                          href="https://github.com/settings/tokens/new?description=Lumina+Flashcards+Sync&scopes=gist"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 font-medium"
+                        >
+                          Generate Token (&apos;gist&apos; scope) <ExternalLink className="h-3 w-3" />
+                        </a>
+                      </div>
                       <button
                         type="button"
-                        onClick={() => setIsMigratingCloud(false)}
-                        className="text-[11px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                        data-testid="toggle-gist-pantry-migration"
+                        onClick={() => setShowGistMigrateFromPantry((v) => !v)}
+                        className="text-indigo-600 dark:text-indigo-400 hover:underline font-medium"
                       >
-                        Cancel
+                        {showGistMigrateFromPantry ? 'Hide Pantry migration' : 'Migrating from Pantry?'}
                       </button>
                     </div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
-                      Enter a new or existing Pantry ID below. All {cardCount} local flashcards, study history, and streaks will be merged with any cards already in that Pantry so nothing is lost.
-                    </p>
-                    <input
-                      type="text"
-                      placeholder="Paste new Pantry ID"
-                      value={newPantryIdInput}
-                      onChange={(e) => setNewPantryIdInput(e.target.value)}
-                      className="w-full text-sm px-3 py-2 border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
-                    />
-                    {cloudProgress && (
-                      <div
-                        data-testid="pantry-progress-bar"
-                        className="p-3 rounded-xl bg-sky-50 dark:bg-sky-900/20 border border-sky-200 dark:border-sky-800/60 space-y-2"
-                      >
-                        <div className="flex items-center justify-between text-xs font-medium text-sky-900 dark:text-sky-200">
-                          <span className="flex items-center gap-1.5">
-                            <RefreshCw className="h-3.5 w-3.5 animate-spin text-sky-600 dark:text-sky-400 shrink-0" />
-                            <span>{cloudProgress.step}</span>
-                          </span>
-                          <span className="flex items-center gap-2 shrink-0">
-                            {typeof cloudProgress.estimatedRemainingSec === 'number' && cloudProgress.estimatedRemainingSec > 0 && (
-                              <span className="font-mono text-[10px] text-sky-600/80 dark:text-sky-400/80">
-                                ~{cloudProgress.estimatedRemainingSec}s remaining
-                              </span>
-                            )}
-                            <span className="font-mono font-bold text-sky-700 dark:text-sky-300">
-                              {cloudProgress.percent}%
-                            </span>
-                          </span>
-                        </div>
-                        <div
-                          role="progressbar"
-                          aria-label="Pantry sync progress"
-                          aria-valuenow={cloudProgress.percent}
-                          aria-valuemin={0}
-                          aria-valuemax={100}
-                          className="w-full h-2 bg-sky-200/70 dark:bg-slate-700 rounded-full overflow-hidden"
-                        >
-                          <div
-                            className="h-full bg-sky-600 dark:bg-sky-400 rounded-full transition-all duration-300 ease-out"
-                            style={{ width: `${Math.max(5, Math.min(100, cloudProgress.percent))}%` }}
-                          />
-                        </div>
-                      </div>
-                    )}
-                    <div className="flex items-center justify-between gap-2">
-                      <a
-                        href="https://getpantry.cloud/"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-[11px] text-sky-600 hover:underline flex items-center gap-1 font-medium"
-                      >
-                        Create New Pantry ID <ExternalLink className="h-3 w-3" />
-                      </a>
-                      <button
-                        type="submit"
-                        disabled={isProcessing || !newPantryIdInput.trim()}
-                        className="px-3.5 py-1.5 bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold rounded-lg disabled:opacity-50 transition-colors"
-                      >
-                        {isProcessing ? 'Migrating...' : 'Migrate All Data'}
-                      </button>
-                    </div>
-                  </form>
-                )}
-
-                <div className="flex items-center justify-between pt-3 border-t border-sky-200/50">
-                  <div className="text-xs text-sky-700 dark:text-sky-400 flex items-center gap-1.5">
-                    <RefreshCw className="h-3 w-3 animate-spin" style={{ animationDuration: '3s' }} />
-                    Auto-sync enabled
                   </div>
-                  <div className="flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setIsMigratingCloud((v) => !v)}
-                      className="text-xs text-sky-600 dark:text-sky-400 font-medium hover:underline"
+
+                  {showGistMigrateFromPantry && (
+                    <div className="p-3 rounded-lg bg-indigo-50/90 dark:bg-indigo-900/25 border border-indigo-200 dark:border-indigo-800/60 space-y-2">
+                      <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
+                        All {cardCount} local flashcards, study history, and streaks are automatically synced. Enter your previous Pantry ID below to also pull and merge all flashcards from Pantry into your new GitHub Gist without losing any data:
+                      </p>
+                      <input
+                        type="text"
+                        data-testid="gist-migrate-pantry-input"
+                        placeholder="Paste Pantry ID to migrate from (optional)"
+                        value={gistOldPantryIdInput}
+                        onChange={(e) => setGistOldPantryIdInput(e.target.value)}
+                        className="w-full text-xs px-2.5 py-1.5 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
+                      />
+                    </div>
+                  )}
+
+                  {cloudProgress && (
+                    <div
+                      data-testid="gist-progress-bar"
+                      className="p-3 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800/60 space-y-2"
                     >
-                      {isMigratingCloud ? 'Close Migrate' : 'Migrate / Change ID'}
+                      <div className="flex items-center justify-between text-xs font-medium text-indigo-900 dark:text-indigo-200">
+                        <span className="flex items-center gap-1.5">
+                          <RefreshCw className="h-3.5 w-3.5 animate-spin text-indigo-600 dark:text-indigo-400 shrink-0" />
+                          <span>{cloudProgress.step}</span>
+                        </span>
+                        <span className="font-mono font-bold text-indigo-700 dark:text-indigo-300">
+                          {cloudProgress.percent}%
+                        </span>
+                      </div>
+                      <div
+                        role="progressbar"
+                        aria-label="GitHub Gist sync progress"
+                        aria-valuenow={cloudProgress.percent}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        className="w-full h-2 bg-indigo-200/70 dark:bg-slate-700 rounded-full overflow-hidden"
+                      >
+                        <div
+                          className="h-full bg-indigo-600 dark:bg-indigo-400 rounded-full transition-all duration-300 ease-out"
+                          style={{ width: `${Math.max(5, Math.min(100, cloudProgress.percent))}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    data-testid="connect-gist-btn"
+                    disabled={isProcessing}
+                    className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg disabled:opacity-50 transition-colors shadow-sm shadow-indigo-500/20"
+                  >
+                    {isProcessing
+                      ? 'Syncing with GitHub Gist...'
+                      : showGistMigrateFromPantry && gistOldPantryIdInput.trim()
+                        ? 'Migrate from Pantry & Connect GitHub Gist'
+                        : 'Connect & Sync with GitHub Gist'}
+                  </button>
+                </form>
+              ) : (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between text-xs bg-white/80 dark:bg-slate-800/80 px-3 py-2 rounded-lg border border-emerald-200/70 dark:border-emerald-800/40">
+                    <span className="text-slate-500 dark:text-slate-400">Secret Gist ID:</span>
+                    <a
+                      href={`https://gist.github.com/${cloudConfig?.gistId || cloudConfig?.pantryId}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      data-testid="connected-gist-id"
+                      className="font-mono text-emerald-700 dark:text-emerald-300 hover:underline flex items-center gap-1 truncate max-w-[230px]"
+                      title={cloudConfig?.gistId || cloudConfig?.pantryId}
+                    >
+                      <span>{cloudConfig?.gistId || cloudConfig?.pantryId}</span>
+                      <ExternalLink className="h-3 w-3 shrink-0" />
+                    </a>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      onClick={() => handleCloudAction('pull')}
+                      disabled={isProcessing}
+                      className="flex flex-col items-center justify-center gap-1 p-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg hover:border-emerald-400 hover:text-emerald-600 dark:text-slate-200 dark:hover:text-emerald-400 transition-colors"
+                    >
+                      <Download className="h-4 w-4" />
+                      <span className="text-xs font-medium">Load from Cloud</span>
                     </button>
-                    <span className="text-slate-300 dark:text-slate-600">·</span>
-                    <button onClick={onDisconnectCloud} className="text-xs text-red-500 hover:underline">
-                      Disconnect
+                    <button
+                      onClick={() => handleCloudAction('push')}
+                      disabled={isProcessing}
+                      className="flex flex-col items-center justify-center gap-1 p-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg hover:border-emerald-400 hover:text-emerald-600 dark:text-slate-200 dark:hover:text-emerald-400 transition-colors"
+                    >
+                      <Upload className="h-4 w-4" />
+                      <span className="text-xs font-medium">Save to Cloud</span>
                     </button>
+                  </div>
+
+                  {cloudProgress && !isMigratingCloud && (
+                    <div
+                      data-testid="pantry-progress-bar"
+                      className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/60 space-y-2"
+                    >
+                      <div className="flex items-center justify-between text-xs font-medium text-emerald-900 dark:text-emerald-200">
+                        <span className="flex items-center gap-1.5">
+                          <RefreshCw className="h-3.5 w-3.5 animate-spin text-emerald-600 dark:text-emerald-400 shrink-0" />
+                          <span>{cloudProgress.step}</span>
+                        </span>
+                        <span className="font-mono font-bold text-emerald-700 dark:text-emerald-300">
+                          {cloudProgress.percent}%
+                        </span>
+                      </div>
+                      <div
+                        role="progressbar"
+                        aria-label="Pantry sync progress"
+                        aria-valuenow={cloudProgress.percent}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        className="w-full h-2 bg-emerald-200/70 dark:bg-slate-700 rounded-full overflow-hidden"
+                      >
+                        <div
+                          className="h-full bg-emerald-600 dark:bg-emerald-400 rounded-full transition-all duration-300 ease-out"
+                          style={{ width: `${Math.max(5, Math.min(100, cloudProgress.percent))}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {isMigratingCloud && (
+                    <form onSubmit={handleGistConnectSubmit} className="p-3.5 rounded-xl bg-white dark:bg-slate-800 border border-emerald-200 dark:border-emerald-700 space-y-3 animate-in fade-in duration-200">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+                          Update GitHub Token / Gist ID
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setIsMigratingCloud(false)}
+                          className="text-[11px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                      <input
+                        type="password"
+                        placeholder="GitHub Personal Access Token (ghp_...)"
+                        value={gistTokenInput}
+                        onChange={(e) => setGistTokenInput(e.target.value)}
+                        className="w-full text-xs px-3 py-2 border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Gist ID (leave blank to auto-detect/create)"
+                        value={gistIdInput}
+                        onChange={(e) => setGistIdInput(e.target.value)}
+                        className="w-full text-xs px-3 py-1.5 border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
+                      />
+                      <div className="flex items-center justify-end">
+                        <button
+                          type="submit"
+                          disabled={isProcessing || !gistTokenInput.trim()}
+                          className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg disabled:opacity-50 transition-colors"
+                        >
+                          {isProcessing ? 'Syncing...' : 'Save & Sync Gist'}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+
+                  <div className="flex items-center justify-between pt-3 border-t border-emerald-200/50 dark:border-emerald-800/40">
+                    <div className="text-xs text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
+                      <RefreshCw className="h-3 w-3 animate-spin" style={{ animationDuration: '3s' }} />
+                      Auto-sync enabled (1-request Gist)
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setIsMigratingCloud((v) => !v)}
+                        className="text-xs text-emerald-700 dark:text-emerald-400 font-medium hover:underline"
+                      >
+                        {isMigratingCloud ? 'Close' : 'Change Token / Gist'}
+                      </button>
+                      <span className="text-slate-300 dark:text-slate-600">·</span>
+                      <button onClick={onDisconnectCloud} className="text-xs text-red-500 hover:underline">
+                        Disconnect
+                      </button>
+                    </div>
                   </div>
                 </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Cloud Sync (Pantry) — Shown when disconnected or connected to Pantry ── */}
+          {!isGistConnected && (
+            <div className={`p-5 rounded-xl border transition-colors ${cloudConfig ? 'bg-sky-50/50 dark:bg-sky-900/10 border-sky-100 dark:border-sky-800/40' : 'bg-slate-50 dark:bg-slate-900/30 border-slate-200 dark:border-slate-700'}`}>
+              <div className="flex items-start justify-between mb-4">
+                <div>
+                  <h3 className="text-slate-900 dark:text-white font-semibold flex items-center gap-2">
+                    <Cloud className={`h-5 w-5 ${cloudConfig ? 'text-sky-500' : 'text-slate-400'}`} />
+                    Cloud Sync (Pantry)
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    Free unlimited storage for your flashcards.
+                  </p>
+                </div>
+                {cloudConfig && (
+                  <span className="px-2 py-1 bg-sky-100 text-sky-700 text-xs font-bold rounded-md uppercase tracking-wider">
+                    Active
+                  </span>
+                )}
               </div>
-            )}
-          </div>
+
+              {!cloudConfig ? (
+                <form onSubmit={handleCloudConnectSubmit} className="space-y-3">
+                  <div>
+                    <input
+                      type="text"
+                      placeholder="New or Existing Pantry ID"
+                      value={pantryIdInput}
+                      onChange={(e) => setPantryIdInput(e.target.value)}
+                      className="w-full text-sm px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent"
+                    />
+                    <div className="mt-2 flex items-center justify-between text-[10px] text-slate-500 flex-wrap gap-1">
+                      <div className="flex items-center gap-1">
+                        <span>Don't have one?</span>
+                        <a href="https://getpantry.cloud/" target="_blank" rel="noreferrer" className="text-sky-600 hover:underline flex items-center gap-1 font-medium">
+                          Create Pantry ID <ExternalLink className="h-3 w-3" />
+                        </a>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsMigratingCloud((v) => !v)}
+                        className="text-sky-600 dark:text-sky-400 hover:underline font-medium"
+                      >
+                        {isMigratingCloud ? 'Hide migration options' : 'Migrating from an old ID?'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {isMigratingCloud && (
+                    <div className="p-3 rounded-lg bg-sky-50/80 dark:bg-sky-900/20 border border-sky-200 dark:border-sky-800/50 space-y-2">
+                      <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
+                        All local flashcards ({cardCount}), study history, and streaks are automatically migrated to your new Pantry ID. If your previous Pantry ID is still active, enter it below to also merge its cloud data:
+                      </p>
+                      <input
+                        type="text"
+                        placeholder="Previous Pantry ID (optional)"
+                        value={oldPantryIdInput}
+                        onChange={(e) => setOldPantryIdInput(e.target.value)}
+                        className="w-full text-xs px-2.5 py-1.5 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-sky-500"
+                      />
+                    </div>
+                  )}
+
+                  {cloudProgress && (
+                    <div
+                      data-testid="pantry-progress-bar"
+                      className="p-3 rounded-xl bg-sky-50 dark:bg-sky-900/20 border border-sky-200 dark:border-sky-800/60 space-y-2"
+                    >
+                      <div className="flex items-center justify-between text-xs font-medium text-sky-900 dark:text-sky-200">
+                        <span className="flex items-center gap-1.5">
+                          <RefreshCw className="h-3.5 w-3.5 animate-spin text-sky-600 dark:text-sky-400 shrink-0" />
+                          <span>{cloudProgress.step}</span>
+                        </span>
+                        <span className="flex items-center gap-2 shrink-0">
+                          {typeof cloudProgress.estimatedRemainingSec === 'number' && cloudProgress.estimatedRemainingSec > 0 && (
+                            <span className="font-mono text-[10px] text-sky-600/80 dark:text-sky-400/80">
+                              ~{cloudProgress.estimatedRemainingSec}s remaining
+                            </span>
+                          )}
+                          <span className="font-mono font-bold text-sky-700 dark:text-sky-300">
+                            {cloudProgress.percent}%
+                          </span>
+                        </span>
+                      </div>
+                      <div
+                        role="progressbar"
+                        aria-label="Pantry sync progress"
+                        aria-valuenow={cloudProgress.percent}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        className="w-full h-2 bg-sky-200/70 dark:bg-slate-700 rounded-full overflow-hidden"
+                      >
+                        <div
+                          className="h-full bg-sky-600 dark:bg-sky-400 rounded-full transition-all duration-300 ease-out"
+                          style={{ width: `${Math.max(5, Math.min(100, cloudProgress.percent))}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={isProcessing}
+                    className="w-full py-2 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 text-sm font-medium rounded-lg hover:bg-slate-800 dark:hover:bg-white disabled:opacity-50 transition-colors"
+                  >
+                    {isProcessing ? 'Migrating & Connecting...' : isMigratingCloud ? 'Migrate All Data & Connect' : 'Connect & Sync Storage'}
+                  </button>
+                </form>
+              ) : (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between text-xs bg-white/80 dark:bg-slate-800/80 px-3 py-2 rounded-lg border border-sky-100 dark:border-sky-800/40">
+                    <span className="text-slate-500 dark:text-slate-400">Connected ID:</span>
+                    <span className="font-mono text-slate-700 dark:text-slate-200 truncate max-w-[220px]" title={cloudConfig.pantryId}>
+                      {cloudConfig.pantryId}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      onClick={() => handleCloudAction('pull')}
+                      disabled={isProcessing}
+                      className="flex flex-col items-center justify-center gap-1 p-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg hover:border-sky-300 hover:text-sky-600 dark:text-slate-200 dark:hover:text-sky-400 transition-colors"
+                    >
+                      <Download className="h-4 w-4" />
+                      <span className="text-xs font-medium">Load from Cloud</span>
+                    </button>
+                    <button
+                      onClick={() => handleCloudAction('push')}
+                      disabled={isProcessing}
+                      className="flex flex-col items-center justify-center gap-1 p-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg hover:border-sky-300 hover:text-sky-600 dark:text-slate-200 dark:hover:text-sky-400 transition-colors"
+                    >
+                      <Upload className="h-4 w-4" />
+                      <span className="text-xs font-medium">Save to Cloud</span>
+                    </button>
+                  </div>
+
+                  {/* One-click Pantry -> GitHub Gist Migration Callout & Form */}
+                  <div className="p-3 rounded-xl bg-indigo-50/80 dark:bg-indigo-900/20 border border-indigo-200/80 dark:border-indigo-800/50 space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="text-xs font-semibold text-indigo-950 dark:text-indigo-200">
+                          Switch to GitHub Gist (Instant &lt;1s Sync)
+                        </p>
+                        <p className="text-[11px] text-indigo-800/80 dark:text-indigo-300/80">
+                          Migrate all local &amp; Pantry flashcards to a private Secret Gist with zero data loss.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        data-testid="open-pantry-to-gist-migration"
+                        onClick={() => {
+                          setIsMigratingPantryToGist((v) => !v);
+                          setIsMigratingCloud(false);
+                        }}
+                        className="shrink-0 px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg transition-colors"
+                      >
+                        {isMigratingPantryToGist ? 'Close' : 'Migrate to Gist'}
+                      </button>
+                    </div>
+
+                    {isMigratingPantryToGist && (
+                      <form onSubmit={handleGistConnectSubmit} className="pt-2 border-t border-indigo-200/60 dark:border-indigo-800/50 space-y-2.5 animate-in fade-in duration-200">
+                        <input
+                          type="password"
+                          data-testid="pantry-to-gist-token-input"
+                          placeholder="Paste GitHub Personal Access Token (ghp_...)"
+                          value={gistTokenInput}
+                          onChange={(e) => setGistTokenInput(e.target.value)}
+                          className="w-full text-xs px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                        <input
+                          type="text"
+                          data-testid="pantry-to-gist-id-input"
+                          placeholder="Existing Gist ID (optional — blank to auto-create Secret Gist)"
+                          value={gistIdInput}
+                          onChange={(e) => setGistIdInput(e.target.value)}
+                          className="w-full text-xs px-3 py-1.5 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
+                        />
+                        <div className="flex items-center justify-between gap-2 pt-0.5">
+                          <a
+                            href="https://github.com/settings/tokens/new?description=Lumina+Flashcards+Sync&scopes=gist"
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 font-medium"
+                          >
+                            Generate Token (&apos;gist&apos; scope) <ExternalLink className="h-3 w-3" />
+                          </a>
+                          <button
+                            type="submit"
+                            data-testid="confirm-pantry-to-gist-btn"
+                            disabled={isProcessing || !gistTokenInput.trim()}
+                            className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg disabled:opacity-50 transition-colors"
+                          >
+                            {isProcessing ? 'Migrating...' : 'Migrate Pantry to GitHub Gist'}
+                          </button>
+                        </div>
+                      </form>
+                    )}
+                  </div>
+
+                  {cloudProgress && !isMigratingCloud && (
+                    <div
+                      data-testid="pantry-progress-bar"
+                      className="p-3 rounded-xl bg-sky-50 dark:bg-sky-900/20 border border-sky-200 dark:border-sky-800/60 space-y-2"
+                    >
+                      <div className="flex items-center justify-between text-xs font-medium text-sky-900 dark:text-sky-200">
+                        <span className="flex items-center gap-1.5">
+                          <RefreshCw className="h-3.5 w-3.5 animate-spin text-sky-600 dark:text-sky-400 shrink-0" />
+                          <span>{cloudProgress.step}</span>
+                        </span>
+                        <span className="flex items-center gap-2 shrink-0">
+                          {typeof cloudProgress.estimatedRemainingSec === 'number' && cloudProgress.estimatedRemainingSec > 0 && (
+                            <span className="font-mono text-[10px] text-sky-600/80 dark:text-sky-400/80">
+                              ~{cloudProgress.estimatedRemainingSec}s remaining
+                            </span>
+                          )}
+                          <span className="font-mono font-bold text-sky-700 dark:text-sky-300">
+                            {cloudProgress.percent}%
+                          </span>
+                        </span>
+                      </div>
+                      <div
+                        role="progressbar"
+                        aria-label="Pantry sync progress"
+                        aria-valuenow={cloudProgress.percent}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        className="w-full h-2 bg-sky-200/70 dark:bg-slate-700 rounded-full overflow-hidden"
+                      >
+                        <div
+                          className="h-full bg-sky-600 dark:bg-sky-400 rounded-full transition-all duration-300 ease-out"
+                          style={{ width: `${Math.max(5, Math.min(100, cloudProgress.percent))}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {isMigratingCloud && (
+                    <form onSubmit={handleCloudMigrateSubmit} className="p-3.5 rounded-xl bg-white dark:bg-slate-800 border border-sky-200 dark:border-sky-700 space-y-3 animate-in fade-in duration-200">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+                          Migrate to New Pantry ID
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setIsMigratingCloud(false)}
+                          className="text-[11px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                        Enter a new or existing Pantry ID below. All {cardCount} local flashcards, study history, and streaks will be merged with any cards already in that Pantry so nothing is lost.
+                      </p>
+                      <input
+                        type="text"
+                        placeholder="Paste new Pantry ID"
+                        value={newPantryIdInput}
+                        onChange={(e) => setNewPantryIdInput(e.target.value)}
+                        className="w-full text-sm px-3 py-2 border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
+                      />
+                      {cloudProgress && (
+                        <div
+                          data-testid="pantry-progress-bar"
+                          className="p-3 rounded-xl bg-sky-50 dark:bg-sky-900/20 border border-sky-200 dark:border-sky-800/60 space-y-2"
+                        >
+                          <div className="flex items-center justify-between text-xs font-medium text-sky-900 dark:text-sky-200">
+                            <span className="flex items-center gap-1.5">
+                              <RefreshCw className="h-3.5 w-3.5 animate-spin text-sky-600 dark:text-sky-400 shrink-0" />
+                              <span>{cloudProgress.step}</span>
+                            </span>
+                            <span className="flex items-center gap-2 shrink-0">
+                              {typeof cloudProgress.estimatedRemainingSec === 'number' && cloudProgress.estimatedRemainingSec > 0 && (
+                                <span className="font-mono text-[10px] text-sky-600/80 dark:text-sky-400/80">
+                                  ~{cloudProgress.estimatedRemainingSec}s remaining
+                                </span>
+                              )}
+                              <span className="font-mono font-bold text-sky-700 dark:text-sky-300">
+                                {cloudProgress.percent}%
+                              </span>
+                            </span>
+                          </div>
+                          <div
+                            role="progressbar"
+                            aria-label="Pantry sync progress"
+                            aria-valuenow={cloudProgress.percent}
+                            aria-valuemin={0}
+                            aria-valuemax={100}
+                            className="w-full h-2 bg-sky-200/70 dark:bg-slate-700 rounded-full overflow-hidden"
+                          >
+                            <div
+                              className="h-full bg-sky-600 dark:bg-sky-400 rounded-full transition-all duration-300 ease-out"
+                              style={{ width: `${Math.max(5, Math.min(100, cloudProgress.percent))}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between gap-2">
+                        <a
+                          href="https://getpantry.cloud/"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[11px] text-sky-600 hover:underline flex items-center gap-1 font-medium"
+                        >
+                          Create New Pantry ID <ExternalLink className="h-3 w-3" />
+                        </a>
+                        <button
+                          type="submit"
+                          disabled={isProcessing || !newPantryIdInput.trim()}
+                          className="px-3.5 py-1.5 bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold rounded-lg disabled:opacity-50 transition-colors"
+                        >
+                          {isProcessing ? 'Migrating...' : 'Migrate All Data'}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+
+                  <div className="flex items-center justify-between pt-3 border-t border-sky-200/50">
+                    <div className="text-xs text-sky-700 dark:text-sky-400 flex items-center gap-1.5">
+                      <RefreshCw className="h-3 w-3 animate-spin" style={{ animationDuration: '3s' }} />
+                      Auto-sync enabled
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setIsMigratingCloud((v) => !v)}
+                        className="text-xs text-sky-600 dark:text-sky-400 font-medium hover:underline"
+                      >
+                        {isMigratingCloud ? 'Close Migrate' : 'Migrate / Change ID'}
+                      </button>
+                      <span className="text-slate-300 dark:text-slate-600">·</span>
+                      <button onClick={onDisconnectCloud} className="text-xs text-red-500 hover:underline">
+                        Disconnect
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
 
           {/* Hidden file input for Import — triggered by inline Import button above */}

@@ -11,6 +11,7 @@ import { AnkiImportModal } from './components/AnkiImportModal';
 import { PwaInstallBanner } from './components/PwaInstallBanner';
 import { generateJSON, parseFileContent, downloadJSON, saveToLocalFile } from './services/fileService';
 import { getDetails, getDeck, updateDeck, keepAlivePantry, getKnownChunkCount, getPendingCloudSyncPlan, CloudSyncProgress, ChunkProgressInfo } from './services/pantryService';
+import { findOrCreateLuminaGist, getGistDeck, updateGistDeck, hasPendingGistSyncChanges, normalizeGistId } from './services/gistService';
 import { saveFileHandleToIDB, loadFileHandleFromIDB, clearFileHandleFromIDB, saveAppDataToIDB, loadAppDataFromIDB, requestPersistentStorage, checkPersistentStorage, getStorageEstimate } from './services/idbService';
 import { initializeTracking, trackEvent, setTrackingUserId, trackPageView, PAGE_TITLES, TRACKING_CATEGORY, TRACKING_ACTION } from './services/trackingService';
 import { getLocalDateString, calculateCurrentStreak, getDueCards } from './utils/studyUtils';
@@ -23,6 +24,35 @@ import { BookExtractedWord } from './services/bookService';
 const LOCAL_STORAGE_KEY = 'lumina_cards_v1';
 const CLOUD_CONFIG_KEY = 'lumina_cloud_config';
 const THEME_STORAGE_KEY = 'lumina_theme';
+
+const isGistCloud = (cfg?: CloudConfig | null): boolean =>
+  Boolean(cfg && (cfg.provider === 'gist' || (cfg.gistToken && cfg.gistId)));
+
+const parseSavedCloudConfig = (raw: any): CloudConfig | null => {
+  if (!raw || typeof raw !== 'object') return null;
+  if (
+    (raw.provider === 'gist' || raw.gistToken) &&
+    typeof raw.gistToken === 'string' &&
+    raw.gistToken.trim() &&
+    typeof raw.gistId === 'string' &&
+    raw.gistId.trim()
+  ) {
+    const cleanGistId = normalizeGistId(raw.gistId);
+    return {
+      provider: 'gist',
+      gistToken: raw.gistToken.trim(),
+      gistId: cleanGistId,
+      pantryId: cleanGistId,
+    };
+  }
+  if (typeof raw.pantryId === 'string' && raw.pantryId.trim()) {
+    return {
+      provider: 'pantry',
+      pantryId: raw.pantryId.trim(),
+    };
+  }
+  return null;
+};
 
 // ── RouteTracker ────────────────────────────────────────────────────────────
 // Fires a GA page_view event every time the hash route changes.
@@ -107,10 +137,7 @@ const App: React.FC = () => {
     try {
       const saved = localStorage.getItem(CLOUD_CONFIG_KEY);
       if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed && typeof parsed.pantryId === 'string' && parsed.pantryId.trim()) {
-          return { pantryId: parsed.pantryId.trim() };
-        }
+        return parseSavedCloudConfig(JSON.parse(saved));
       }
     } catch {
       // ignore parse errors
@@ -380,6 +407,22 @@ const App: React.FC = () => {
       } else {
         // Step A-fallback: migrate from localStorage (existing users)
         const savedCards = localStorage.getItem(LOCAL_STORAGE_KEY);
+        const savedHistoryRaw = localStorage.getItem('lumina_study_history');
+        const savedStreakRaw = localStorage.getItem('lumina_longest_streak');
+        if (savedHistoryRaw) {
+          try {
+            const parsedHistory = JSON.parse(savedHistoryRaw);
+            if (parsedHistory && typeof parsedHistory === 'object') {
+              initialStudyHistory = parsedHistory;
+            }
+          } catch { /* ignore */ }
+        }
+        if (savedStreakRaw) {
+          const parsedStreak = Number(savedStreakRaw);
+          if (Number.isFinite(parsedStreak) && parsedStreak > 0) {
+            initialLongestStreak = parsedStreak;
+          }
+        }
         if (savedCards) {
           try {
             const parsed = JSON.parse(savedCards);
@@ -388,7 +431,12 @@ const App: React.FC = () => {
               hasExistingUserStore = true;
               // Migrate immediately so next load hits IDB
               try {
-                await saveAppDataToIDB({ cards: parsed, studyHistory: {}, longestStreak: 0, deletedCards: {} });
+                await saveAppDataToIDB({
+                  cards: parsed,
+                  studyHistory: initialStudyHistory,
+                  longestStreak: initialLongestStreak,
+                  deletedCards: {},
+                });
                 localStorage.removeItem(LOCAL_STORAGE_KEY);
               } catch { /* migration best-effort */ }
             }
@@ -444,39 +492,40 @@ const App: React.FC = () => {
       const savedCloudConfig = localStorage.getItem(CLOUD_CONFIG_KEY);
       if (savedCloudConfig) {
         try {
-          const parsed = JSON.parse(savedCloudConfig);
-          if (parsed?.pantryId && String(parsed.pantryId).trim()) {
-            resolvedCloudConfig = { pantryId: String(parsed.pantryId).trim() };
-          }
+          resolvedCloudConfig = parseSavedCloudConfig(JSON.parse(savedCloudConfig));
         } catch {
           // ignore
         }
       }
-      if (!resolvedCloudConfig && idbData?.cloudConfig?.pantryId) {
-        resolvedCloudConfig = { pantryId: idbData.cloudConfig.pantryId.trim() };
-        persistCloudConfigToLocalStorage(resolvedCloudConfig);
+      if (!resolvedCloudConfig && idbData?.cloudConfig) {
+        resolvedCloudConfig = parseSavedCloudConfig(idbData.cloudConfig);
+        if (resolvedCloudConfig) {
+          persistCloudConfigToLocalStorage(resolvedCloudConfig);
+        }
       }
 
       if (resolvedCloudConfig && !hasInitializedCloudRef.current) {
         hasInitializedCloudRef.current = true;
-        // Set cloudConfig immediately BEFORE awaiting getDeck so refreshing never shows as disconnected
+        // Set cloudConfig immediately BEFORE awaiting getDeck/getGistDeck so refreshing never shows as disconnected
         cloudConfigRef.current = resolvedCloudConfig;
         setCloudConfig(resolvedCloudConfig);
         initializeTracking(resolvedCloudConfig.pantryId);
 
         try {
-          const cloudData = await getDeck(resolvedCloudConfig.pantryId, undefined, {
-            localCards: initialCards,
-            onPartialCards: (partial) => {
-              if (
-                (partial.cards && partial.cards.length > 0) ||
-                (partial.deletedCards && Object.keys(partial.deletedCards).length > 0)
-              ) {
-                skipNextCloudAutoSaveRef.current = true;
-                performMerge(partial.cards ?? [], partial.deletedCards ?? {});
-              }
-            },
-          });
+          const cloudData = isGistCloud(resolvedCloudConfig)
+            ? await getGistDeck(resolvedCloudConfig.gistToken!, resolvedCloudConfig.gistId!)
+            : await getDeck(resolvedCloudConfig.pantryId, undefined, {
+                localCards: initialCards,
+                onPartialCards: (partial) => {
+                  if (
+                    (partial.cards && partial.cards.length > 0) ||
+                    (partial.deletedCards && Object.keys(partial.deletedCards).length > 0)
+                  ) {
+                    skipNextCloudAutoSaveRef.current = true;
+                    performMerge(partial.cards ?? [], partial.deletedCards ?? {});
+                  }
+                },
+              });
           const cloudHadDeletedCards = (cloudData.cards ?? []).some(c => {
             const delAt = deletedCardsRef.current.get(c.id) ?? 0;
             const cardTs = Math.max(c.updatedAt ?? 0, c.lastReviewed ?? 0, c.createdAt ?? 0);
@@ -504,12 +553,11 @@ const App: React.FC = () => {
             setLongestStreak(prev => Math.max(prev, cloudData.longestStreak!));
           }
 
-          // Only skip auto-save if Pantry did NOT still hold locally-deleted cards
+          // Only skip auto-save if cloud did NOT still hold locally-deleted cards
           skipNextCloudAutoSaveRef.current = !cloudHadDeletedCards;
 
-          // Schedule the keep-alive write 20 seconds after startup so it does not
-          // burst-collide if the user immediately clicks "Load from Cloud" or edits cards.
-          if (navigator.onLine && !cloudHadDeletedCards) {
+          // Schedule the Pantry keep-alive write 20 seconds after startup (GitHub Gist never expires)
+          if (!isGistCloud(resolvedCloudConfig) && navigator.onLine && !cloudHadDeletedCards) {
             const startupKeepAliveTargetId = resolvedCloudConfig.pantryId;
             const startupChunkCount = cloudData.chunkCount ?? 1;
             const scheduledAt = Date.now();
@@ -517,6 +565,7 @@ const App: React.FC = () => {
               if (
                 navigator.onLine &&
                 !isMigratingCloudRef.current &&
+                !isGistCloud(cloudConfigRef.current) &&
                 cloudConfigRef.current?.pantryId === startupKeepAliveTargetId &&
                 lastKeepAliveRef.current < scheduledAt
               ) {
@@ -622,24 +671,32 @@ const App: React.FC = () => {
 
   const beginCloudSyncProgress = useCallback(
     (cardsToSyncCount: number, mode: 'push' | 'pull' = 'push', dirtyStepsOverride?: number) => {
-      const knownChunks = cloudConfigRef.current
-        ? getKnownChunkCount(cloudConfigRef.current.pantryId)
-        : 1;
-      const estimatedChunks =
-        dirtyStepsOverride !== undefined && dirtyStepsOverride > 0
+      const usingGist = isGistCloud(cloudConfigRef.current);
+      const knownChunks = usingGist
+        ? 1
+        : cloudConfigRef.current
+          ? getKnownChunkCount(cloudConfigRef.current.pantryId)
+          : 1;
+      const estimatedChunks = usingGist
+        ? 1
+        : dirtyStepsOverride !== undefined && dirtyStepsOverride > 0
           ? dirtyStepsOverride
           : Math.max(knownChunks, Math.ceil(cardsToSyncCount / 65), 1);
       setCloudSyncProgress({
-        percent: 12,
+        percent: usingGist ? 30 : 12,
         step:
           mode === 'pull'
-            ? 'Loading flashcards from Cloud...'
-            : estimatedChunks > 1
-              ? `Uploading chunk 1 of ${estimatedChunks}...`
-              : cardsToSyncCount > 0
-                ? `Uploading flashcards...`
-                : 'Updating cloud storage...',
-        estimatedRemainingSec: Math.max(2, estimatedChunks * 2),
+            ? usingGist
+              ? 'Loading flashcards from GitHub Gist...'
+              : 'Loading flashcards from Cloud...'
+            : usingGist
+              ? `Uploading ${cardsToSyncCount} flashcards to GitHub Gist...`
+              : estimatedChunks > 1
+                ? `Uploading chunk 1 of ${estimatedChunks}...`
+                : cardsToSyncCount > 0
+                  ? `Uploading ${cardsToSyncCount} flashcards...`
+                  : 'Updating cloud storage...',
+        estimatedRemainingSec: usingGist ? 1 : Math.max(2, estimatedChunks * 2),
         completedSteps: 0,
         totalSteps: estimatedChunks,
         stepStartedAt: Date.now(),
@@ -701,7 +758,7 @@ const App: React.FC = () => {
     return () => clearInterval(intervalId);
   }, [isCloudSaving, isSyncingOffline]);
 
-  // 4. Auto-Save to Cloud (Delta-aware: skips if no chunks/metadata changed, and only uploads modified chunks)
+  // 4. Auto-Save to Cloud (Delta-aware for both GitHub Gist and Pantry)
   useEffect(() => {
     if (!isDataLoaded || !cloudConfig || isMigratingCloudRef.current) return;
 
@@ -711,14 +768,22 @@ const App: React.FC = () => {
     }
 
     const currentDeleted = prunedDeletedCards();
-    const syncPlan = getPendingCloudSyncPlan(cloudConfig.pantryId, {
-      cards,
-      studyHistory,
-      longestStreak,
-      deletedCards: currentDeleted,
-    });
+    const usingGist = isGistCloud(cloudConfig);
+    const hasChanges = usingGist
+      ? hasPendingGistSyncChanges(cloudConfig.gistId!, {
+          cards,
+          studyHistory,
+          longestStreak,
+          deletedCards: currentDeleted,
+        })
+      : getPendingCloudSyncPlan(cloudConfig.pantryId, {
+          cards,
+          studyHistory,
+          longestStreak,
+          deletedCards: currentDeleted,
+        }).hasChanges;
 
-    if (!syncPlan.hasChanges) {
+    if (!hasChanges) {
       setPendingCloudSync(false);
       return;
     }
@@ -729,9 +794,44 @@ const App: React.FC = () => {
       return;
     }
 
+    const debounceMs = usingGist ? 1000 : 2000;
     const timeoutId = setTimeout(async () => {
       if (isMigratingCloudRef.current) return;
       const latestDeleted = prunedDeletedCards();
+      if (usingGist) {
+        if (
+          !hasPendingGistSyncChanges(cloudConfig.gistId!, {
+            cards,
+            studyHistory,
+            longestStreak,
+            deletedCards: latestDeleted,
+          })
+        ) {
+          setPendingCloudSync(false);
+          return;
+        }
+        beginCloudSyncProgress(cards.length, 'push', 1);
+        setIsCloudSaving(true);
+        try {
+          await updateGistDeck(
+            cloudConfig.gistToken!,
+            cloudConfig.gistId!,
+            { cards, studyHistory, longestStreak, deletedCards: latestDeleted },
+            { onProgress: handleBackgroundCloudProgress }
+          );
+          setPendingCloudSync(false);
+        } catch (error) {
+          console.error('Auto-save Gist failed:', error);
+          if (!navigator.onLine) {
+            setPendingCloudSync(true);
+          }
+        } finally {
+          setIsCloudSaving(false);
+          setCloudSyncProgress(null);
+        }
+        return;
+      }
+
       const latestPlan = getPendingCloudSyncPlan(cloudConfig.pantryId, {
         cards,
         studyHistory,
@@ -766,14 +866,14 @@ const App: React.FC = () => {
         setIsCloudSaving(false);
         setCloudSyncProgress(null);
       }
-    }, 2000);
+    }, debounceMs);
     return () => clearTimeout(timeoutId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cards, studyHistory, longestStreak, deletedCards, cloudConfig, isDataLoaded]);
 
-  // 4b. Keep Pantry alive when user re-opens / focuses an already-open tab or PWA window
+  // 4b. Keep Pantry alive when user re-opens / focuses an already-open tab or PWA window (not needed for GitHub Gist)
   useEffect(() => {
-    if (!cloudConfig?.pantryId) return;
+    if (!cloudConfig?.pantryId || isGistCloud(cloudConfig)) return;
     const KEEP_ALIVE_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 
     const handleVisibilityOrFocus = () => {
@@ -801,6 +901,40 @@ const App: React.FC = () => {
     let cancelled = false;
     const flush = async () => {
       const latestDeleted = prunedDeletedCards();
+      const usingGist = isGistCloud(cloudConfig);
+      if (usingGist) {
+        if (
+          !hasPendingGistSyncChanges(cloudConfig.gistId!, {
+            cards,
+            studyHistory,
+            longestStreak,
+            deletedCards: latestDeleted,
+          })
+        ) {
+          if (!cancelled) setPendingCloudSync(false);
+          return;
+        }
+        beginCloudSyncProgress(cards.length, 'push', 1);
+        setIsSyncingOffline(true);
+        try {
+          await updateGistDeck(
+            cloudConfig.gistToken!,
+            cloudConfig.gistId!,
+            { cards, studyHistory, longestStreak, deletedCards: latestDeleted },
+            { onProgress: handleBackgroundCloudProgress }
+          );
+        } catch (e) {
+          console.error('Pending Gist sync flush failed:', e);
+        } finally {
+          if (!cancelled) {
+            setPendingCloudSync(false);
+            setIsSyncingOffline(false);
+            setCloudSyncProgress(null);
+          }
+        }
+        return;
+      }
+
       const plan = getPendingCloudSyncPlan(cloudConfig.pantryId, {
         cards,
         studyHistory,
@@ -1129,6 +1263,227 @@ const App: React.FC = () => {
     }
   };
 
+  const handleConnectGist = async (
+    token: string,
+    options?: {
+      gistId?: string;
+      migrateFromPantryId?: string;
+      onProgress?: (progress: CloudSyncProgress) => void;
+    }
+  ): Promise<{
+    gistId: string;
+    cardCount: number;
+    localCount: number;
+    cloudCount: number;
+    pantryMigratedCount: number;
+    historyDays: number;
+  }> => {
+    const cleanToken = token.trim();
+    const cleanGistIdInput = normalizeGistId(options?.gistId);
+    const cleanPantryId = (
+      options?.migrateFromPantryId?.trim() ||
+      (!isGistCloud(cloudConfig) && cloudConfig?.pantryId ? cloudConfig.pantryId.trim() : '')
+    );
+
+    isMigratingCloudRef.current = true;
+    try {
+      const onProgress = options?.onProgress;
+
+      // 1. Best-effort pull from Pantry if migrating from an existing or specified Pantry ID
+      let pantryCloudData = {
+        cards: [] as Flashcard[],
+        studyHistory: {} as Record<string, number>,
+        longestStreak: 0,
+        deletedCards: {} as Record<string, number>,
+      };
+
+      if (cleanPantryId) {
+        onProgress?.({
+          percent: 14,
+          step: 'Fetching flashcards from Pantry before migrating to GitHub Gist...',
+          estimatedRemainingSec: 2,
+        });
+        try {
+          const fetchedPantry = await getDeck(cleanPantryId, undefined, {
+            retries: 1,
+            localCards: cardsRef.current,
+            onProgress: ({ currentChunk, totalChunks }) => {
+              const pct = Math.min(35, 14 + Math.round((currentChunk / Math.max(1, totalChunks)) * 20));
+              onProgress?.({
+                percent: pct,
+                step:
+                  totalChunks > 1
+                    ? `Loading Pantry chunk ${currentChunk} of ${totalChunks} for migration...`
+                    : 'Fetching flashcards from Pantry...',
+                estimatedRemainingSec: Math.max(1, totalChunks - currentChunk + 1),
+              });
+            },
+          });
+          pantryCloudData = {
+            cards: fetchedPantry.cards ?? [],
+            studyHistory: fetchedPantry.studyHistory ?? {},
+            longestStreak: fetchedPantry.longestStreak ?? 0,
+            deletedCards: fetchedPantry.deletedCards ?? {},
+          };
+        } catch (err) {
+          console.warn('Best-effort Pantry pull during Gist migration failed (using local deck):', err);
+        }
+      }
+
+      // 2. Find or create the target GitHub Secret Gist and fetch any flashcards already stored in it
+      onProgress?.({
+        percent: 40,
+        step: cleanGistIdInput
+          ? 'Verifying GitHub Gist...'
+          : 'Finding or creating Secret Gist on GitHub...',
+        estimatedRemainingSec: 1,
+      });
+      const { gistId, createdNewGist, existingData: gistCloudData } = await findOrCreateLuminaGist(
+        cleanToken,
+        cleanGistIdInput || undefined,
+        (info) => {
+          onProgress?.({
+            percent: info.percent ?? 48,
+            step: info.step || 'Connecting to GitHub Gist...',
+            estimatedRemainingSec: info.estimatedRemainingSec ?? 1,
+          });
+        }
+      );
+
+      // 3. Lossless 3-way merge: Local cards + Pantry cards + Existing Gist cards
+      onProgress?.({
+        percent: 65,
+        step: 'Merging local, Pantry, and GitHub Gist flashcards & study history...',
+        estimatedRemainingSec: 1,
+      });
+      const localSnapshot = cardsRef.current;
+      const afterPantryCards = mergeCardArrays(
+        localSnapshot,
+        pantryCloudData.cards,
+        {},
+        { ignoreTombstones: true }
+      );
+      const mergedCards = mergeCardArrays(
+        afterPantryCards,
+        gistCloudData?.cards ?? [],
+        {},
+        { ignoreTombstones: true }
+      );
+      const mergedHistory = mergeHistoryRecords(
+        studyHistory,
+        pantryCloudData.studyHistory,
+        gistCloudData?.studyHistory
+      );
+      const mergedStreak = Math.max(
+        longestStreak,
+        pantryCloudData.longestStreak || 0,
+        gistCloudData?.longestStreak || 0,
+        calculateCurrentStreak(mergedHistory)
+      );
+
+      const activeIds = new Set(mergedCards.map(c => c.id));
+      const cutoff = Date.now() - TOMBSTONE_TTL;
+      const mergedDeletedRecord: Record<string, number> = {};
+      for (const src of [
+        prunedDeletedCards(),
+        pantryCloudData.deletedCards,
+        gistCloudData?.deletedCards ?? {},
+      ]) {
+        for (const [id, deletedAt] of Object.entries(src)) {
+          if (deletedAt >= cutoff && !activeIds.has(id)) {
+            mergedDeletedRecord[id] = Math.max(mergedDeletedRecord[id] || 0, deletedAt);
+          }
+        }
+      }
+
+      // 4. Upload the complete merged deck to GitHub Gist in a single PATCH request
+      onProgress?.({
+        percent: 80,
+        step: `Saving ${mergedCards.length} flashcards to GitHub Gist...`,
+        estimatedRemainingSec: 1,
+      });
+      await updateGistDeck(
+        cleanToken,
+        gistId,
+        {
+          cards: mergedCards,
+          studyHistory: mergedHistory,
+          longestStreak: mergedStreak,
+          deletedCards: mergedDeletedRecord,
+        },
+        {
+          force: true,
+          onProgress: (info) => {
+            onProgress?.({
+              percent: info.percent ?? 90,
+              step: info.step || `Saving ${mergedCards.length} flashcards to GitHub Gist...`,
+              estimatedRemainingSec: info.estimatedRemainingSec ?? 1,
+            });
+          },
+        }
+      );
+
+      const localCount = localSnapshot.length;
+      const pantryMigratedCount = pantryCloudData.cards.length;
+      const gistCount = gistCloudData?.cards?.length ?? 0;
+      const cloudCount = gistCount + pantryMigratedCount;
+
+      // 5. Update local state & persistence to use GitHub Gist
+      onProgress?.({ percent: 100, step: 'Synced to GitHub Gist!' });
+      const nextDeletedMap = new Map(Object.entries(mergedDeletedRecord));
+      deletedCardsRef.current = nextDeletedMap;
+      cardsRef.current = mergedCards;
+      setDeletedCards(nextDeletedMap);
+      setCards(mergedCards);
+      setStudyHistory(mergedHistory);
+      setLongestStreak(mergedStreak);
+      setPendingCloudSync(false);
+
+      skipNextCloudAutoSaveRef.current = true;
+      const config: CloudConfig = {
+        provider: 'gist',
+        gistToken: cleanToken,
+        gistId,
+        pantryId: gistId,
+      };
+      cloudConfigRef.current = config;
+      setCloudConfig(config);
+      persistCloudConfigToLocalStorage(config);
+      saveAppDataToIDB({
+        cards: mergedCards,
+        studyHistory: mergedHistory,
+        longestStreak: mergedStreak,
+        deletedCards: mergedDeletedRecord,
+        cloudConfig: config,
+      }).catch(console.error);
+      setTrackingUserId(gistId);
+      trackEvent(TRACKING_ACTION.CONNECT_CLOUD, TRACKING_CATEGORY.CLOUD, 'github_gist');
+
+      if (fileHandle) {
+        saveToLocalFile(fileHandle, {
+          cards: mergedCards,
+          studyHistory: mergedHistory,
+          longestStreak: mergedStreak,
+          deletedCards: mergedDeletedRecord,
+        }).catch(() => {});
+      }
+
+      return {
+        gistId,
+        createdNewGist: !!createdNewGist,
+        cardCount: mergedCards.length,
+        localCount,
+        pantryCount: pantryMigratedCount,
+        gistCount,
+        cloudCount,
+        pantryMigratedCount,
+        historyDays: Object.keys(mergedHistory).length,
+      };
+    } finally {
+      isMigratingCloudRef.current = false;
+    }
+  };
+
   const handleConnectCloud = async (
     pantryId: string,
     onProgress?: (progress: CloudSyncProgress) => void
@@ -1190,21 +1545,33 @@ const App: React.FC = () => {
         }
       };
 
-      const cloudData = await getDeck(cloudConfig.pantryId, undefined, {
-        strict: true,
-        localCards: cardsRef.current,
-        onPartialCards: (partial) => {
-          applyPulledCloudData(partial);
-        },
-        onProgress: (info) => {
-          handleBackgroundCloudProgress(info);
-          onProgress?.({
-            percent: info.percent ?? Math.min(95, Math.round(((info.currentChunk ?? 1) / Math.max(1, info.totalChunks ?? 1)) * 100)),
-            step: info.step || 'Loading flashcards from Cloud...',
-            estimatedRemainingSec: info.estimatedRemainingSec,
+      const cloudData = isGistCloud(cloudConfig)
+        ? await getGistDeck(cloudConfig.gistToken!, cloudConfig.gistId!, {
+            forceRefresh: true,
+            onProgress: (info) => {
+              handleBackgroundCloudProgress(info);
+              onProgress?.({
+                percent: info.percent ?? 50,
+                step: info.step || 'Loading flashcards from GitHub Gist...',
+                estimatedRemainingSec: info.estimatedRemainingSec ?? 1,
+              });
+            },
+          })
+        : await getDeck(cloudConfig.pantryId, undefined, {
+            strict: true,
+            localCards: cardsRef.current,
+            onPartialCards: (partial) => {
+              applyPulledCloudData(partial);
+            },
+            onProgress: (info) => {
+              handleBackgroundCloudProgress(info);
+              onProgress?.({
+                percent: info.percent ?? Math.min(95, Math.round(((info.currentChunk ?? 1) / Math.max(1, info.totalChunks ?? 1)) * 100)),
+                step: info.step || 'Loading flashcards from Cloud...',
+                estimatedRemainingSec: info.estimatedRemainingSec,
+              });
+            },
           });
-        },
-      });
       applyPulledCloudData(cloudData);
       lastKeepAliveRef.current = Date.now();
       trackEvent(TRACKING_ACTION.CLOUD_PULL, TRACKING_CATEGORY.CLOUD);
@@ -1227,20 +1594,39 @@ const App: React.FC = () => {
     beginCloudSyncProgress(cards.length, 'push');
     setIsCloudSaving(true);
     try {
-      await updateDeck(
-        cloudConfig.pantryId,
-        { cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() },
-        {
-          onProgress: (info) => {
-            handleBackgroundCloudProgress(info);
-            onProgress?.({
-              percent: info.percent ?? 25,
-              step: info.step || 'Uploading flashcards to Cloud...',
-              estimatedRemainingSec: info.estimatedRemainingSec,
-            });
-          },
-        }
-      );
+      if (isGistCloud(cloudConfig)) {
+        await updateGistDeck(
+          cloudConfig.gistToken!,
+          cloudConfig.gistId!,
+          { cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() },
+          {
+            force: true,
+            onProgress: (info) => {
+              handleBackgroundCloudProgress(info);
+              onProgress?.({
+                percent: info.percent ?? 50,
+                step: info.step || 'Saving flashcards to GitHub Gist...',
+                estimatedRemainingSec: info.estimatedRemainingSec ?? 1,
+              });
+            },
+          }
+        );
+      } else {
+        await updateDeck(
+          cloudConfig.pantryId,
+          { cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() },
+          {
+            onProgress: (info) => {
+              handleBackgroundCloudProgress(info);
+              onProgress?.({
+                percent: info.percent ?? 25,
+                step: info.step || 'Uploading flashcards to Cloud...',
+                estimatedRemainingSec: info.estimatedRemainingSec,
+              });
+            },
+          }
+        );
+      }
       setPendingCloudSync(false);
       trackEvent(TRACKING_ACTION.CLOUD_PUSH, TRACKING_CATEGORY.CLOUD);
     } finally {
@@ -1576,18 +1962,10 @@ const App: React.FC = () => {
         .finally(() => setIsFileSaving(false));
     }
 
-    // 3. Immediately sync with Pantry cloud so deleted flashcards are removed from Pantry right away
-    let activePantryId = cloudConfig?.pantryId;
-    if (!activePantryId) {
-      try {
-        const saved = localStorage.getItem(CLOUD_CONFIG_KEY);
-        if (saved) activePantryId = JSON.parse(saved)?.pantryId;
-      } catch {
-        // ignore
-      }
-    }
+    // 3. Immediately sync with Cloud (GitHub Gist or Pantry) so deleted flashcards are removed right away
+    let activeConfig: CloudConfig | null = cloudConfig || parseSavedCloudConfig(localStorage.getItem(CLOUD_CONFIG_KEY));
 
-    if (activePantryId && !isMigratingCloudRef.current) {
+    if (activeConfig?.pantryId && !isMigratingCloudRef.current) {
       if (!navigator.onLine) {
         setPendingCloudSync(true);
         return;
@@ -1597,16 +1975,31 @@ const App: React.FC = () => {
       skipNextCloudAutoSaveRef.current = true;
       beginCloudSyncProgress(nextCards.length, 'push');
       setIsCloudSaving(true);
-      updateDeck(
-        activePantryId,
-        {
-          cards: nextCards,
-          studyHistory,
-          longestStreak,
-          deletedCards: nextDeletedRecord,
-        },
-        { immediate: true, onProgress: handleBackgroundCloudProgress }
-      )
+      const syncPromise =
+        isGistCloud(activeConfig) && activeConfig.gistToken && activeConfig.gistId
+          ? updateGistDeck(
+              activeConfig.gistToken,
+              activeConfig.gistId,
+              {
+                cards: nextCards,
+                studyHistory,
+                longestStreak,
+                deletedCards: nextDeletedRecord,
+              },
+              { immediate: true, onProgress: handleBackgroundCloudProgress }
+            )
+          : updateDeck(
+              activeConfig.pantryId,
+              {
+                cards: nextCards,
+                studyHistory,
+                longestStreak,
+                deletedCards: nextDeletedRecord,
+              },
+              { immediate: true, onProgress: handleBackgroundCloudProgress }
+            );
+
+      syncPromise
         .then(() => {
           lastKeepAliveRef.current = Date.now();
           setPendingCloudSync(false);
@@ -1996,6 +2389,7 @@ const App: React.FC = () => {
         cloudConfig={cloudConfig}
         onConnectCloud={handleConnectCloud}
         onMigrateCloud={handleMigrateCloud}
+        onConnectGist={handleConnectGist}
         onDisconnectCloud={handleDisconnectCloud}
         onCloudPull={handleCloudPull}
         onCloudPush={handleCloudPush}

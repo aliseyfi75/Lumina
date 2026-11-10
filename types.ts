@@ -77,8 +77,13 @@ export interface FileSystemWritableFileStream extends WritableStream {
 }
 
 // Cloud Sync Types
+export type CloudProvider = 'gist' | 'pantry';
+
 export interface CloudConfig {
+  provider?: CloudProvider;
   pantryId: string;
+  gistToken?: string;
+  gistId?: string;
 }
 
 export interface CloudData {

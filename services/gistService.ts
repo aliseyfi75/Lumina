@@ -494,13 +494,17 @@ export const updateGistDeck = async (
     estimatedRemainingSec: 1,
   });
 
-  const fileContent = JSON.stringify({
-    cards: orderedCards,
-    studyHistory: cloudData.studyHistory || {},
-    longestStreak: cloudData.longestStreak || 0,
-    deletedCards: cloudData.deletedCards || {},
-    updatedAt: Date.now(),
-  });
+  const fileContent = JSON.stringify(
+    {
+      cards: orderedCards,
+      studyHistory: cloudData.studyHistory || {},
+      longestStreak: cloudData.longestStreak || 0,
+      deletedCards: cloudData.deletedCards || {},
+      updatedAt: Date.now(),
+    },
+    null,
+    2
+  );
 
   const res = await fetch(`${GIST_API_BASE}/${cleanId}`, {
     method: 'PATCH',

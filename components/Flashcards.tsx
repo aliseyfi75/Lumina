@@ -8,6 +8,8 @@ import { BookPrepModal } from './BookPrepModal';
 import { BookExtractedWord } from '../services/bookService';
 import { parseTagHierarchy, BOOKS_FOLDER_FILTER, compareChapterNames, getCardBookInfo, getCardBookInfos, getCardBookInfoForBook, formatBookTag, formatBookChapterTag } from '../utils/tagUtils';
 import { TagSelectorInput } from './TagSelectorInput';
+import { useCardFlip3D } from '../utils/cardFlip';
+import { getAdaptiveWordHeadingClass } from '../utils/deviceScale';
 
 const PAGE_SIZE = 24;
 const COLLAPSED_DOCK_CHAPTER_LIMIT = 4;
@@ -44,6 +46,16 @@ const FlashcardItem: React.FC<{
   onEdit: (card: Flashcard) => void;
 }> = ({ card, onDelete, onReview, onEdit }) => {
   const [isFlipped, setIsFlipped] = useState(false);
+  const {
+    flipRotateY,
+    frontVisibility,
+    frontOpacity,
+    backVisibility,
+    backOpacity,
+    flipContainerStyle,
+    frontPlaneStyle,
+    backPlaneStyle,
+  } = useCardFlip3D(isFlipped);
 
   const displayTags = useMemo(() => {
     const rawTags = card.tags || [];
@@ -66,205 +78,222 @@ const FlashcardItem: React.FC<{
 
   return (
     <div
-      className="group h-80 w-full perspective-1000 cursor-pointer"
+      className="group h-72 sm:h-80 w-full perspective-1000 cursor-pointer"
       onClick={() => setIsFlipped(!isFlipped)}
     >
       <motion.div
         className="relative w-full h-full preserve-3d"
-        style={{ transformStyle: 'preserve-3d' }}
-        initial={false}
-        animate={{ rotateY: isFlipped ? 180 : 0 }}
-        transition={{ type: "spring", stiffness: 260, damping: 20 }}
+        style={{ ...flipContainerStyle, rotateY: flipRotateY }}
       >
         {/* Front of Card */}
         <div
-          className="absolute inset-0 backface-hidden bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 flex flex-col items-center justify-center text-center hover:shadow-md hover:border-brand-200 transition-all"
-          style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}
+          data-testid="deck-card-front"
+          aria-hidden={isFlipped}
+          className="absolute inset-0 backface-hidden"
+          style={frontPlaneStyle}
         >
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onEdit(card);
-            }}
-            aria-label={`Edit ${card.word}`}
-            title="Edit Card"
-            className="absolute top-3.5 left-3.5 p-1.5 text-slate-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg opacity-0 group-hover:opacity-100 focus:opacity-100 transition-all"
+          <motion.div
+            style={{ opacity: frontOpacity, visibility: frontVisibility }}
+            className="w-full h-full bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 p-4 sm:p-6 flex flex-col items-center justify-between text-center hover:shadow-md hover:border-brand-200 transition-shadow overflow-hidden"
           >
-            <Pencil className="h-3.5 w-3.5" />
-          </button>
+            <div className="w-full flex items-center justify-between gap-2 shrink-0">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEdit(card);
+                }}
+                aria-label={`Edit ${card.word}`}
+                title="Edit Card"
+                className="p-1.5 text-slate-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 transition-all"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
 
-          <div className="absolute top-4 right-4 flex items-center gap-1.5 pl-2">
-            {/* Added logic for displaying the due string for Learning cards */}
-            {card.status === FlashcardStatus.Learning && card.nextReviewDate && (
-              <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded-md">
-                {card.nextReviewDate <= Date.now() ? 'Due Today' : `in ${Math.max(1, Math.ceil((card.nextReviewDate - Date.now()) / (1000 * 60 * 60 * 24)))} days`}
-              </span>
-            )}
-            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider
-              ${card.status === FlashcardStatus.New ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300' :
-                card.status === FlashcardStatus.Learning ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300' :
-                  'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300'}`}>
-              {card.status}
-            </span>
-          </div>
-
-          <h3 className="text-3xl font-serif font-bold text-slate-900 dark:text-white mb-2">{card.word}</h3>
-          <p className="text-slate-500 dark:text-slate-400 italic font-serif">{card.partOfSpeech}</p>
-          <div className="flex items-center gap-2 mt-1">
-            {card.phonetic && <p className="text-slate-400 text-sm">{card.phonetic}</p>}
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                playAudio(card.word, card.audio);
-              }}
-              className="p-1 text-slate-400 hover:text-brand-500 hover:bg-brand-50 rounded-full transition-colors"
-              title="Listen to pronunciation"
-            >
-              <Volume2 className="h-4 w-4" />
-            </button>
-          </div>
-
-          {displayTags.length > 0 && (
-            <div className="flex flex-wrap items-center justify-center gap-1.5 mt-3 max-w-full px-2">
-              {displayTags.slice(0, 3).map((tag) => {
-                const parsed = parseTagHierarchy(tag);
-                return (
-                  <span
-                    key={tag}
-                    data-testid="card-tag-badge"
-                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
-                      parsed.isBook
-                        ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border-emerald-200/70 dark:border-emerald-800/60'
-                        : 'bg-slate-100 dark:bg-slate-700/80 text-slate-600 dark:text-slate-300 border-slate-200/70 dark:border-slate-600'
-                    }`}
-                  >
-                    {parsed.isBook ? (
-                      <>
-                        <BookOpen className="h-2.5 w-2.5 shrink-0" />
-                        <span className="opacity-70">Books /</span>
-                        <span>{parsed.bookTitle || parsed.name}</span>
-                        {parsed.chapter && (
-                          <>
-                            <span className="opacity-70">/</span>
-                            <span>{parsed.chapter}</span>
-                          </>
-                        )}
-                      </>
-                    ) : parsed.folder ? (
-                      <>
-                        <Folder className="h-2.5 w-2.5 shrink-0" />
-                        <span className="opacity-70">{parsed.folder} /</span>
-                        <span>{parsed.name}</span>
-                      </>
-                    ) : (
-                      <span>#{parsed.name}</span>
-                    )}
+              <div className="flex items-center gap-1.5 pl-1">
+                {/* Added logic for displaying the due string for Learning cards */}
+                {card.status === FlashcardStatus.Learning && card.nextReviewDate && (
+                  <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded-md">
+                    {card.nextReviewDate <= Date.now() ? 'Due Today' : `in ${Math.max(1, Math.ceil((card.nextReviewDate - Date.now()) / (1000 * 60 * 60 * 24)))} days`}
                   </span>
-                );
-              })}
-              {displayTags.length > 3 && (
-                <span className="text-[10px] font-medium text-slate-400">+{displayTags.length - 3}</span>
+                )}
+                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider
+                  ${card.status === FlashcardStatus.New ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300' :
+                    card.status === FlashcardStatus.Learning ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300' :
+                      'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300'}`}>
+                  {card.status}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex-1 flex flex-col items-center justify-center w-full min-h-0 px-1 my-1">
+              <h3 className={`${getAdaptiveWordHeadingClass(card.word, 'card')} font-serif font-bold text-slate-900 dark:text-white mb-1.5 break-words max-w-full leading-tight`}>
+                {card.word}
+              </h3>
+              <p className="text-slate-500 dark:text-slate-400 italic font-serif text-sm">{card.partOfSpeech}</p>
+              <div className="flex items-center gap-2 mt-1 max-w-full">
+                {card.phonetic && <p className="text-slate-400 text-xs sm:text-sm truncate">{card.phonetic}</p>}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    playAudio(card.word, card.audio);
+                  }}
+                  className="p-1 text-slate-400 hover:text-brand-500 hover:bg-brand-50 rounded-full transition-colors shrink-0"
+                  title="Listen to pronunciation"
+                >
+                  <Volume2 className="h-4 w-4" />
+                </button>
+              </div>
+
+              {displayTags.length > 0 && (
+                <div className="flex flex-wrap items-center justify-center gap-1 mt-2.5 max-w-full px-1">
+                  {displayTags.slice(0, 3).map((tag) => {
+                    const parsed = parseTagHierarchy(tag);
+                    return (
+                      <span
+                        key={tag}
+                        data-testid="card-tag-badge"
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border max-w-full truncate ${
+                          parsed.isBook
+                            ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border-emerald-200/70 dark:border-emerald-800/60'
+                            : 'bg-slate-100 dark:bg-slate-700/80 text-slate-600 dark:text-slate-300 border-slate-200/70 dark:border-slate-600'
+                        }`}
+                      >
+                        {parsed.isBook ? (
+                          <>
+                            <BookOpen className="h-2.5 w-2.5 shrink-0" />
+                            <span className="opacity-70">Books /</span>
+                            <span className="truncate">{parsed.bookTitle || parsed.name}</span>
+                            {parsed.chapter && (
+                              <>
+                                <span className="opacity-70">/</span>
+                                <span className="truncate">{parsed.chapter}</span>
+                              </>
+                            )}
+                          </>
+                        ) : parsed.folder ? (
+                          <>
+                            <Folder className="h-2.5 w-2.5 shrink-0" />
+                            <span className="opacity-70">{parsed.folder} /</span>
+                            <span className="truncate">{parsed.name}</span>
+                          </>
+                        ) : (
+                          <span className="truncate">#{parsed.name}</span>
+                        )}
+                      </span>
+                    );
+                  })}
+                  {displayTags.length > 3 && (
+                    <span className="text-[10px] font-medium text-slate-400">+{displayTags.length - 3}</span>
+                  )}
+                </div>
               )}
             </div>
-          )}
 
-          <div className="absolute bottom-6 text-slate-300 dark:text-slate-600 group-hover:text-brand-400 transition-colors flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider">
-            <RotateCw className="h-3.5 w-3.5" />
-            Tap to reveal
-          </div>
+            <div className="shrink-0 pt-1 text-slate-300 dark:text-slate-600 group-hover:text-brand-400 transition-colors flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider">
+              <RotateCw className="h-3.5 w-3.5" />
+              Tap to reveal
+            </div>
+          </motion.div>
         </div>
 
         {/* Back of Card */}
         <div
-          className="absolute inset-0 backface-hidden rotate-y-180 bg-slate-900 rounded-2xl shadow-xl p-6 flex flex-col items-center justify-between text-center overflow-hidden border border-slate-800"
-          style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
+          data-testid="deck-card-back"
+          aria-hidden={!isFlipped}
+          className="absolute inset-0 backface-hidden"
+          style={backPlaneStyle}
         >
-          <div className="overflow-y-auto w-full flex-1 flex flex-col items-center justify-start custom-scrollbar px-2 py-4">
-            {card.image && (
-              <div className="mb-4 shrink-0 rounded-xl overflow-hidden shadow-sm border border-slate-700 h-32 flex justify-center bg-slate-800 items-center w-full mt-auto">
-                <img
-                  src={card.image}
-                  alt={`Visual mnemonic for ${card.word}`}
-                  className="max-h-full max-w-full object-contain"
-                  loading="lazy"
-                />
-              </div>
-            )}
-            <p className="text-slate-100 text-lg font-medium leading-relaxed mb-auto w-full text-center">
-              {card.mainDefinition}
-            </p>
-            {card.example && (
-              <p className="text-slate-400 text-sm italic border-t border-slate-700 pt-3 mt-auto w-full">
-                "{card.example}"
+          <motion.div
+            style={{ opacity: backOpacity, visibility: backVisibility }}
+            className="w-full h-full bg-slate-900 rounded-2xl shadow-xl p-4 sm:p-6 flex flex-col items-center justify-between text-center overflow-hidden border border-slate-800"
+          >
+            <div className="overflow-y-auto w-full flex-1 flex flex-col items-center justify-start custom-scrollbar px-2 py-2 sm:py-4">
+              {card.image && (
+                <div className="mb-3 sm:mb-4 shrink-0 rounded-xl overflow-hidden shadow-sm border border-slate-700 h-28 sm:h-32 flex justify-center bg-slate-800 items-center w-full mt-auto">
+                  <img
+                    src={card.image}
+                    alt={`Visual mnemonic for ${card.word}`}
+                    className="max-h-full max-w-full object-contain"
+                    loading="lazy"
+                  />
+                </div>
+              )}
+              <p className="text-slate-100 text-base sm:text-lg font-medium leading-relaxed mb-auto w-full text-center">
+                {card.mainDefinition}
               </p>
-            )}
-            {card.synonyms && card.synonyms.length > 0 && (
-              <div className="flex flex-wrap items-center justify-center gap-1.5 pt-2 mt-2 w-full">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Syn:</span>
-                {card.synonyms.slice(0, 4).map((syn) => (
-                  <span
-                    key={syn}
-                    className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-800 text-emerald-300 border border-slate-700"
-                  >
-                    {syn}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="pt-4 w-full grid grid-cols-4 gap-1 border-t border-slate-800 mt-2" onClick={(e) => e.stopPropagation()}>
-            <button
-              onClick={() => onReview(card.id, 1)}
-              className={`flex flex-col items-center justify-center gap-1 p-1.5 rounded-lg transition-colors 
-                ${card.lastQuality === 1
-                  ? 'bg-red-500/20 text-red-400'
-                  : 'text-slate-500 hover:bg-slate-800 hover:text-red-400'}`}
-              title="Again"
-            >
-              <RotateCw className="h-4 w-4" />
-              <span className="text-[8px] font-bold uppercase">Again</span>
-            </button>
-            <button
-              onClick={() => onReview(card.id, 3)}
-              className={`flex flex-col items-center justify-center gap-1 p-1.5 rounded-lg transition-colors
-                ${card.lastQuality === 3
-                  ? 'bg-blue-500/20 text-blue-400'
-                  : 'text-slate-500 hover:bg-slate-800 hover:text-blue-400'}`}
-              title="Learned"
-            >
-              <Brain className="h-4 w-4" />
-              <span className="text-[8px] font-bold uppercase">Learned</span>
-            </button>
-            <button
-              onClick={() => onReview(card.id, 5)}
-              className={`flex flex-col items-center justify-center gap-1 p-1.5 rounded-lg transition-colors
-                ${card.lastQuality === 5
-                  ? 'bg-green-500/20 text-green-400'
-                  : 'text-slate-500 hover:bg-slate-800 hover:text-green-400'}`}
-              title="Mastered"
-            >
-              <CheckCircle className="h-4 w-4" />
-              <span className="text-[8px] font-bold uppercase">Mastered</span>
-            </button>
-            <div className="flex border-l border-slate-700 justify-center items-center ml-1 pl-1 gap-0.5">
-              <button
-                onClick={() => onEdit(card)}
-                className="p-1.5 text-slate-500 hover:text-brand-400 hover:bg-brand-500/10 rounded-lg transition-colors"
-                title="Edit Card"
-                aria-label={`Edit ${card.word} (back)`}
-              >
-                <Pencil className="h-4 w-4" />
-              </button>
-              <button
-                onClick={() => onDelete(card.id)}
-                className="p-1.5 text-slate-600 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
-                title="Delete Card"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
+              {card.example && (
+                <p className="text-slate-400 text-xs sm:text-sm italic border-t border-slate-700 pt-2.5 sm:pt-3 mt-auto w-full">
+                  "{card.example}"
+                </p>
+              )}
+              {card.synonyms && card.synonyms.length > 0 && (
+                <div className="flex flex-wrap items-center justify-center gap-1.5 pt-2 mt-2 w-full">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Syn:</span>
+                  {card.synonyms.slice(0, 4).map((syn) => (
+                    <span
+                      key={syn}
+                      className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-800 text-emerald-300 border border-slate-700"
+                    >
+                      {syn}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
-          </div>
+
+            <div className="pt-3 sm:pt-4 w-full grid grid-cols-4 gap-1 border-t border-slate-800 mt-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+              <button
+                onClick={() => onReview(card.id, 1)}
+                className={`flex flex-col items-center justify-center gap-1 p-1.5 rounded-lg transition-colors 
+                  ${card.lastQuality === 1
+                    ? 'bg-red-500/20 text-red-400'
+                    : 'text-slate-500 hover:bg-slate-800 hover:text-red-400'}`}
+                title="Again"
+              >
+                <RotateCw className="h-4 w-4" />
+                <span className="text-[8px] font-bold uppercase">Again</span>
+              </button>
+              <button
+                onClick={() => onReview(card.id, 3)}
+                className={`flex flex-col items-center justify-center gap-1 p-1.5 rounded-lg transition-colors
+                  ${card.lastQuality === 3
+                    ? 'bg-blue-500/20 text-blue-400'
+                    : 'text-slate-500 hover:bg-slate-800 hover:text-blue-400'}`}
+                title="Learned"
+              >
+                <Brain className="h-4 w-4" />
+                <span className="text-[8px] font-bold uppercase">Learned</span>
+              </button>
+              <button
+                onClick={() => onReview(card.id, 5)}
+                className={`flex flex-col items-center justify-center gap-1 p-1.5 rounded-lg transition-colors
+                  ${card.lastQuality === 5
+                    ? 'bg-green-500/20 text-green-400'
+                    : 'text-slate-500 hover:bg-slate-800 hover:text-green-400'}`}
+                title="Mastered"
+              >
+                <CheckCircle className="h-4 w-4" />
+                <span className="text-[8px] font-bold uppercase">Mastered</span>
+              </button>
+              <div className="flex border-l border-slate-700 justify-center items-center ml-1 pl-1 gap-0.5">
+                <button
+                  onClick={() => onEdit(card)}
+                  className="p-1.5 text-slate-500 hover:text-brand-400 hover:bg-brand-500/10 rounded-lg transition-colors"
+                  title="Edit Card"
+                  aria-label={`Edit ${card.word} (back)`}
+                >
+                  <Pencil className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => onDelete(card.id)}
+                  className="p-1.5 text-slate-600 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                  title="Delete Card"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          </motion.div>
         </div>
       </motion.div>
     </div>
@@ -331,11 +360,11 @@ const CardEditorModal: React.FC<{
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-lg bg-white dark:bg-slate-800 rounded-3xl shadow-2xl border border-slate-100 dark:border-slate-700 overflow-hidden z-10">
-        <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between bg-slate-50 dark:bg-slate-800/60">
-          <h2 className="text-xl font-serif font-bold text-slate-900 dark:text-white">
+      <div className="relative w-full max-w-lg bg-white dark:bg-slate-800 rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-100 dark:border-slate-700 overflow-hidden z-10">
+        <div className="px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between bg-slate-50 dark:bg-slate-800/60">
+          <h2 className="text-lg sm:text-xl font-serif font-bold text-slate-900 dark:text-white">
             {editingCard ? 'Edit Flashcard' : 'Create Custom Card'}
           </h2>
           <button
@@ -347,7 +376,7 @@ const CardEditorModal: React.FC<{
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar">
+        <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-4 max-h-[82dvh] overflow-y-auto custom-scrollbar">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
@@ -962,33 +991,33 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
   }
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500">
+    <div className="space-y-6 sm:space-y-8 animate-in fade-in duration-500">
       {/* Header and Stats */}
-      <div className="space-y-6">
-        <div className="flex flex-col md:flex-row gap-6 justify-between items-start md:items-end">
+      <div className="space-y-5 sm:space-y-6">
+        <div className="flex flex-col md:flex-row gap-4 sm:gap-6 justify-between items-start md:items-end">
           <div>
-            <h1 className="text-3xl font-serif font-bold text-slate-900 dark:text-white">My Deck</h1>
-            <p className="text-slate-500 dark:text-slate-400 mt-1">{cards.length} cards total</p>
+            <h1 className="text-2xl sm:text-3xl font-serif font-bold text-slate-900 dark:text-white">My Deck</h1>
+            <p className="text-slate-500 dark:text-slate-400 mt-1 text-sm sm:text-base">{cards.length} cards total</p>
           </div>
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <button
               onClick={() => setIsBookPrepOpen(true)}
-              className="flex items-center gap-2 px-4 py-3 rounded-xl font-medium bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 hover:border-brand-300 transition-all shadow-sm"
+              className="flex items-center gap-2 px-3.5 sm:px-4 py-2.5 sm:py-3 rounded-xl text-sm sm:text-base font-medium bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 hover:border-brand-300 transition-all shadow-sm"
             >
-              <BookOpen className="h-4 w-4 text-brand-600 dark:text-brand-400" />
+              <BookOpen className="h-4 w-4 text-brand-600 dark:text-brand-400 shrink-0" />
               Prepare for a Book
             </button>
             <button
               onClick={handleOpenCreateModal}
-              className="flex items-center gap-2 px-4 py-3 rounded-xl font-medium bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 hover:border-brand-300 transition-all shadow-sm"
+              className="flex items-center gap-2 px-3.5 sm:px-4 py-2.5 sm:py-3 rounded-xl text-sm sm:text-base font-medium bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 hover:border-brand-300 transition-all shadow-sm"
             >
-              <Plus className="h-4 w-4 text-brand-600 dark:text-brand-400" />
+              <Plus className="h-4 w-4 text-brand-600 dark:text-brand-400 shrink-0" />
               Create Card
             </button>
             <button
               onClick={() => onStartStudy()}
               disabled={studyQueueCount === 0}
-              className={`flex items-center gap-2 px-6 py-3 rounded-xl font-medium shadow-lg transition-all 
+              className={`flex items-center gap-2 px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl text-sm sm:text-base font-medium shadow-lg transition-all 
                 ${studyQueueCount > 0
                   ? 'bg-brand-600 hover:bg-brand-700 text-white shadow-brand-500/30 hover:scale-105 active:scale-95'
                   : 'bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-500 cursor-not-allowed shadow-none'
@@ -996,12 +1025,12 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
             >
               {studyQueueCount > 0 ? (
                 <>
-                  <Play className="h-5 w-5 fill-current" />
+                  <Play className="h-4 w-4 sm:h-5 sm:w-5 fill-current shrink-0" />
                   Start Study Session
                 </>
               ) : (
                 <>
-                  <CheckCircle className="h-5 w-5" />
+                  <CheckCircle className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" />
                   All Mastered
                 </>
               )}

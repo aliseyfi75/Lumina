@@ -15,6 +15,7 @@ import { findOrCreateLuminaGist, getGistDeck, updateGistDeck, hasPendingGistSync
 import { saveFileHandleToIDB, loadFileHandleFromIDB, clearFileHandleFromIDB, saveAppDataToIDB, loadAppDataFromIDB, requestPersistentStorage, checkPersistentStorage, getStorageEstimate } from './services/idbService';
 import { initializeTracking, trackEvent, setTrackingUserId, trackPageView, PAGE_TITLES, TRACKING_CATEGORY, TRACKING_ACTION } from './services/trackingService';
 import { getLocalDateString, calculateCurrentStreak, getDueCards } from './utils/studyUtils';
+import { installDeviceRootScaleListeners } from './utils/deviceScale';
 import { Book, Layers, Database, Save, Cloud, BarChart2, Home, Sun, Moon, RefreshCw } from 'lucide-react';
 import Confetti from 'react-confetti';
 import { useWindowSize } from 'react-use';
@@ -82,6 +83,11 @@ const App: React.FC = () => {
   const deletedCardsRef = useRef<Map<string, number>>(new Map());
   const [studyHistory, setStudyHistory] = useState<Record<string, number>>({});
   const [longestStreak, setLongestStreak] = useState(0);
+
+  // Keep root typography & spacing calibrated to the active device viewport
+  useEffect(() => {
+    return installDeviceRootScaleListeners();
+  }, []);
 
   // Dark Mode — respect persisted user preference or follow device theme
   const [isDark, setIsDark] = useState(() => {
@@ -2100,13 +2106,13 @@ const App: React.FC = () => {
 
   // Nav link active class helper
   const navLinkClass = ({ isActive }: { isActive: boolean }) =>
-    `flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${isActive
+    `flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg text-sm font-medium transition-all duration-200 ${isActive
       ? 'bg-white dark:bg-slate-700 text-brand-600 dark:text-brand-400 shadow-sm'
       : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-700/50'
     }`;
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 font-sans">
+    <div className="min-h-[100dvh] flex flex-col bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 font-sans overflow-x-clip">
       {/* GA page-view tracker — fires on every route change */}
       <RouteTracker />
 
@@ -2150,22 +2156,22 @@ const App: React.FC = () => {
       )}
 
       <header className="sticky top-0 z-50 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-700">
-        <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
-          <NavLink to="/" className="flex items-center gap-2 cursor-pointer">
-            <div className="w-8 h-8 bg-brand-600 rounded-lg flex items-center justify-center text-white font-serif font-bold text-xl shadow-lg shadow-brand-500/30">
+        <div className="max-w-5xl mx-auto px-3 sm:px-4 h-14 sm:h-16 flex items-center justify-between gap-2">
+          <NavLink to="/" className="flex items-center gap-2 cursor-pointer shrink-0">
+            <div className="w-8 h-8 bg-brand-600 rounded-lg flex items-center justify-center text-white font-serif font-bold text-lg sm:text-xl shadow-lg shadow-brand-500/30">
               L
             </div>
             <span className="font-bold text-xl tracking-tight text-slate-900 dark:text-white hidden sm:block">Lumina</span>
           </NavLink>
 
-          <div className="flex items-center gap-2">
-            <nav className="flex items-center gap-1 bg-slate-100/50 dark:bg-slate-800/80 p-1 rounded-xl mr-2">
+          <div className="flex items-center gap-1 sm:gap-2 min-w-0">
+            <nav className="flex items-center gap-0.5 sm:gap-1 bg-slate-100/50 dark:bg-slate-800/80 p-1 rounded-xl mr-0.5 sm:mr-2">
               <NavLink to="/" end className={navLinkClass}>
-                <Home className="h-4 w-4" />
+                <Home className="h-4 w-4 shrink-0" />
                 <span className="hidden sm:inline">Home</span>
               </NavLink>
               <NavLink to="/dictionary" className={navLinkClass}>
-                <Book className="h-4 w-4" />
+                <Book className="h-4 w-4 shrink-0" />
                 <span className="hidden sm:inline">Dictionary</span>
               </NavLink>
               <NavLink
@@ -2174,7 +2180,7 @@ const App: React.FC = () => {
                   navLinkClass({ isActive: isActive || location.pathname === '/study' })
                 }
               >
-                <Layers className="h-4 w-4" />
+                <Layers className="h-4 w-4 shrink-0" />
                 <span className="hidden sm:inline">Flashcards</span>
                 {cards.length > 0 && (
                   <span className="bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] px-1.5 py-0.5 rounded-full min-w-[20px] text-center">
@@ -2183,31 +2189,31 @@ const App: React.FC = () => {
                 )}
               </NavLink>
               <NavLink to="/statistics" className={navLinkClass}>
-                <BarChart2 className="h-4 w-4" />
+                <BarChart2 className="h-4 w-4 shrink-0" />
                 <span className="hidden sm:inline">Statistics</span>
               </NavLink>
             </nav>
 
             <button
               onClick={handleToggleDark}
-              className="p-2.5 rounded-xl transition-all bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-700 dark:hover:text-slate-200 mr-1"
+              className="p-2 sm:p-2.5 rounded-xl transition-all bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-700 dark:hover:text-slate-200 shrink-0"
               title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
               aria-label="Toggle dark mode"
             >
-              {isDark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+              {isDark ? <Sun className="h-4 w-4 sm:h-5 sm:w-5" /> : <Moon className="h-4 w-4 sm:h-5 sm:w-5" />}
             </button>
             <button
               onClick={() => setIsDataModalOpen(true)}
-              className={`p-2.5 rounded-xl transition-all hover:bg-slate-200 dark:hover:bg-slate-700 ${fileHandle || cloudConfig ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-400 border border-brand-200 dark:border-brand-800' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-brand-600 dark:hover:text-brand-400'}`}
+              className={`p-2 sm:p-2.5 rounded-xl transition-all hover:bg-slate-200 dark:hover:bg-slate-700 shrink-0 ${fileHandle || cloudConfig ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-400 border border-brand-200 dark:border-brand-800' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-brand-600 dark:hover:text-brand-400'}`}
               title="Manage Data"
             >
-              {cloudConfig ? <Cloud className="h-5 w-5" /> : (fileHandle ? <Save className="h-5 w-5" /> : <Database className="h-5 w-5" />)}
+              {cloudConfig ? <Cloud className="h-4 w-4 sm:h-5 sm:w-5" /> : (fileHandle ? <Save className="h-4 w-4 sm:h-5 sm:w-5" /> : <Database className="h-4 w-4 sm:h-5 sm:w-5" />)}
             </button>
           </div>
         </div>
       </header>
 
-      <main className="flex-1 max-w-5xl mx-auto w-full px-4 py-8">
+      <main className="flex-1 max-w-5xl mx-auto w-full px-3 sm:px-4 py-4 sm:py-8">
         <Routes>
           <Route
             path="/"

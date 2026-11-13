@@ -1,3 +1,21 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer utilities {
+  .study-viewport-height {
+    height: calc(100vh - 6.5rem);
+    height: calc(100dvh - 6.5rem);
+    min-height: 24rem;
+    max-height: 44rem;
+  }
+
+  @media (min-width: 640px) {
+    .study-viewport-height {
+      height: calc(100vh - 8.5rem);
+      height: calc(100dvh - 8.5rem);
+      min-height: 28rem;
+      max-height: 46rem;
+    }
+  }
+}

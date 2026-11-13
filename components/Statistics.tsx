@@ -154,100 +154,100 @@ export const Statistics: React.FC<StatisticsProps> = ({ cards, studyHistory, lon
 
 
     return (
-        <div className="space-y-8 animate-in fade-in duration-500 pb-20">
-            <div className="flex flex-col md:flex-row gap-6 justify-between items-end">
+        <div className="space-y-6 sm:space-y-8 animate-in fade-in duration-500 pb-20">
+            <div className="flex flex-col md:flex-row gap-4 sm:gap-6 justify-between items-start md:items-end">
                 <div>
-                    <h1 className="text-3xl font-serif font-bold text-slate-900 dark:text-white">Statistics</h1>
-                    <p className="text-slate-500 dark:text-slate-400 mt-1">Track your learning progress and vocabulary growth</p>
+                    <h1 className="text-2xl sm:text-3xl font-serif font-bold text-slate-900 dark:text-white">Statistics</h1>
+                    <p className="text-slate-500 dark:text-slate-400 mt-1 text-sm sm:text-base">Track your learning progress and vocabulary growth</p>
                 </div>
 
-                <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-3 bg-white dark:bg-slate-800 px-5 py-3 rounded-2xl shadow-sm border border-amber-200 dark:border-amber-800/50 ring-1 ring-amber-100 dark:ring-amber-900/50 relative overflow-hidden">
+                <div className="w-full md:w-auto grid grid-cols-2 sm:flex items-stretch sm:items-center gap-3 sm:gap-4">
+                    <div className="flex items-center gap-2.5 sm:gap-3 bg-white dark:bg-slate-800 px-3.5 sm:px-5 py-2.5 sm:py-3 rounded-2xl shadow-sm border border-amber-200 dark:border-amber-800/50 ring-1 ring-amber-100 dark:ring-amber-900/50 relative overflow-hidden">
                         <div className="absolute top-0 right-0 w-16 h-16 bg-gradient-to-br from-amber-400/20 to-transparent blur-xl"></div>
-                        <div className="p-2 bg-amber-100 dark:bg-amber-900/40 rounded-xl relative overflow-hidden group">
+                        <div className="p-1.5 sm:p-2 bg-amber-100 dark:bg-amber-900/40 rounded-xl relative overflow-hidden group shrink-0">
                             <div className="absolute inset-0 bg-amber-300 opacity-0 group-hover:opacity-30 transition-opacity blur-md"></div>
-                            <Target className="h-6 w-6 text-amber-500 relative z-10" />
+                            <Target className="h-5 w-5 sm:h-6 sm:w-6 text-amber-500 relative z-10" />
                         </div>
-                        <div className="relative z-10">
-                            <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Longest Streak</p>
-                            <p className="text-2xl font-bold text-amber-600">{longestStreak} <span className="text-base font-medium text-amber-400">{longestStreak === 1 ? 'Day' : 'Days'}</span></p>
+                        <div className="relative z-10 min-w-0">
+                            <p className="text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400 truncate">Longest Streak</p>
+                            <p className="text-xl sm:text-2xl font-bold text-amber-600 leading-tight">{longestStreak} <span className="text-xs sm:text-base font-medium text-amber-400">{longestStreak === 1 ? 'Day' : 'Days'}</span></p>
                         </div>
                     </div>
-                    <div className="flex items-center gap-3 bg-white dark:bg-slate-800 px-5 py-3 rounded-2xl shadow-sm border border-orange-200 dark:border-orange-800/50 ring-1 ring-orange-100 dark:ring-orange-900/50 relative overflow-hidden">
+                    <div className="flex items-center gap-2.5 sm:gap-3 bg-white dark:bg-slate-800 px-3.5 sm:px-5 py-2.5 sm:py-3 rounded-2xl shadow-sm border border-orange-200 dark:border-orange-800/50 ring-1 ring-orange-100 dark:ring-orange-900/50 relative overflow-hidden">
                         <div className="absolute top-0 right-0 w-16 h-16 bg-gradient-to-br from-orange-400/20 to-transparent blur-xl"></div>
-                        <div className="p-2 bg-orange-100 dark:bg-orange-900/40 rounded-xl relative overflow-hidden group">
+                        <div className="p-1.5 sm:p-2 bg-orange-100 dark:bg-orange-900/40 rounded-xl relative overflow-hidden group shrink-0">
                             <div className="absolute inset-0 bg-orange-300 opacity-0 group-hover:opacity-30 transition-opacity blur-md"></div>
-                            <Flame className="h-6 w-6 text-orange-500 relative z-10" />
+                            <Flame className="h-5 w-5 sm:h-6 sm:w-6 text-orange-500 relative z-10" />
                         </div>
-                        <div className="relative z-10">
-                            <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Current Streak</p>
-                            <p className="text-2xl font-bold text-orange-600">{currentStreak} <span className="text-base font-medium text-orange-400">{currentStreak === 1 ? 'Day' : 'Days'}</span></p>
+                        <div className="relative z-10 min-w-0">
+                            <p className="text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400 truncate">Current Streak</p>
+                            <p className="text-xl sm:text-2xl font-bold text-orange-600 leading-tight">{currentStreak} <span className="text-xs sm:text-base font-medium text-orange-400">{currentStreak === 1 ? 'Day' : 'Days'}</span></p>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div className="bg-blue-50 dark:bg-blue-900/20 p-5 rounded-2xl border border-blue-100 dark:border-blue-800/40 shadow-sm flex items-center gap-4 hover:shadow-md transition-shadow">
-                    <div className="p-3 bg-blue-100 dark:bg-blue-900/40 rounded-xl text-blue-600 dark:text-blue-400"><BookOpen className="h-6 w-6" /></div>
-                    <div>
-                        <p className="text-2xl font-bold text-slate-900 dark:text-white">{totalCards}</p>
-                        <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">Total Cards</p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
+                <div className="bg-blue-50 dark:bg-blue-900/20 p-3.5 sm:p-5 rounded-2xl border border-blue-100 dark:border-blue-800/40 shadow-sm flex items-center gap-3 sm:gap-4 hover:shadow-md transition-shadow">
+                    <div className="p-2.5 sm:p-3 bg-blue-100 dark:bg-blue-900/40 rounded-xl text-blue-600 dark:text-blue-400 shrink-0"><BookOpen className="h-5 w-5 sm:h-6 sm:w-6" /></div>
+                    <div className="min-w-0">
+                        <p className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white leading-tight">{totalCards}</p>
+                        <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-medium truncate">Total Cards</p>
                     </div>
                 </div>
-                <div className="bg-indigo-50 dark:bg-indigo-900/20 p-5 rounded-2xl border border-indigo-100 dark:border-indigo-800/40 shadow-sm flex items-center gap-4 hover:shadow-md transition-shadow">
-                    <div className="p-3 bg-indigo-100 dark:bg-indigo-900/40 rounded-xl text-indigo-600 dark:text-indigo-400"><Activity className="h-6 w-6" /></div>
-                    <div>
-                        <p className="text-2xl font-bold text-slate-900 dark:text-white">{newCount}</p>
-                        <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">New</p>
+                <div className="bg-indigo-50 dark:bg-indigo-900/20 p-3.5 sm:p-5 rounded-2xl border border-indigo-100 dark:border-indigo-800/40 shadow-sm flex items-center gap-3 sm:gap-4 hover:shadow-md transition-shadow">
+                    <div className="p-2.5 sm:p-3 bg-indigo-100 dark:bg-indigo-900/40 rounded-xl text-indigo-600 dark:text-indigo-400 shrink-0"><Activity className="h-5 w-5 sm:h-6 sm:w-6" /></div>
+                    <div className="min-w-0">
+                        <p className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white leading-tight">{newCount}</p>
+                        <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-medium truncate">New</p>
                     </div>
                 </div>
-                <div className="bg-amber-50 dark:bg-amber-900/20 p-5 rounded-2xl border border-amber-100 dark:border-amber-800/40 shadow-sm flex items-center gap-4 hover:shadow-md transition-shadow">
-                    <div className="p-3 bg-amber-100 dark:bg-amber-900/40 rounded-xl text-amber-600 dark:text-amber-400"><Brain className="h-6 w-6" /></div>
-                    <div>
-                        <p className="text-2xl font-bold text-slate-900 dark:text-white">{learningCount}</p>
-                        <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">Learning</p>
+                <div className="bg-amber-50 dark:bg-amber-900/20 p-3.5 sm:p-5 rounded-2xl border border-amber-100 dark:border-amber-800/40 shadow-sm flex items-center gap-3 sm:gap-4 hover:shadow-md transition-shadow">
+                    <div className="p-2.5 sm:p-3 bg-amber-100 dark:bg-amber-900/40 rounded-xl text-amber-600 dark:text-amber-400 shrink-0"><Brain className="h-5 w-5 sm:h-6 sm:w-6" /></div>
+                    <div className="min-w-0">
+                        <p className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white leading-tight">{learningCount}</p>
+                        <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-medium truncate">Learning</p>
                     </div>
                 </div>
-                <div className="bg-emerald-50 dark:bg-emerald-900/20 p-5 rounded-2xl border border-emerald-100 dark:border-emerald-800/40 shadow-sm flex items-center gap-4 hover:shadow-md transition-shadow">
-                    <div className="p-3 bg-emerald-100 dark:bg-emerald-900/40 rounded-xl text-emerald-600 dark:text-emerald-400"><CheckCircle className="h-6 w-6" /></div>
-                    <div>
-                        <p className="text-2xl font-bold text-slate-900 dark:text-white">{masteredCount}</p>
-                        <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">Mastered</p>
+                <div className="bg-emerald-50 dark:bg-emerald-900/20 p-3.5 sm:p-5 rounded-2xl border border-emerald-100 dark:border-emerald-800/40 shadow-sm flex items-center gap-3 sm:gap-4 hover:shadow-md transition-shadow">
+                    <div className="p-2.5 sm:p-3 bg-emerald-100 dark:bg-emerald-900/40 rounded-xl text-emerald-600 dark:text-emerald-400 shrink-0"><CheckCircle className="h-5 w-5 sm:h-6 sm:w-6" /></div>
+                    <div className="min-w-0">
+                        <p className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white leading-tight">{masteredCount}</p>
+                        <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-medium truncate">Mastered</p>
                     </div>
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                <div className="lg:col-span-2 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm p-6 flex flex-col hover:border-brand-200 transition-colors">
-                    <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
-                        <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 sm:gap-8">
+                <div className="lg:col-span-2 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm p-4 sm:p-6 flex flex-col hover:border-brand-200 transition-colors">
+                    <div className="flex items-center justify-between mb-6 flex-wrap gap-3 sm:gap-4">
+                        <h2 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
                             <TrendingUp className="h-5 w-5 text-brand-500" />
                             Progress Charts
                         </h2>
 
-                        <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-700 p-1 rounded-xl">
+                        <div className="flex flex-wrap items-center gap-1 bg-slate-100 dark:bg-slate-700 p-1 rounded-xl max-w-full">
                             <button
                                 onClick={() => setActiveChartTab('growth')}
-                                className={cn("px-3 py-1.5 text-xs font-medium rounded-lg transition-colors", activeChartTab === 'growth' ? "bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm" : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200")}
+                                className={cn("px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg transition-colors", activeChartTab === 'growth' ? "bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm" : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200")}
                             >
                                 Mastered
                             </button>
                             <button
                                 onClick={() => setActiveChartTab('building')}
-                                className={cn("px-3 py-1.5 text-xs font-medium rounded-lg transition-colors", activeChartTab === 'building' ? "bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm" : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200")}
+                                className={cn("px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg transition-colors", activeChartTab === 'building' ? "bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm" : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200")}
                             >
                                 Total Built
                             </button>
                             <button
                                 onClick={() => setActiveChartTab('remaining')}
-                                className={cn("px-3 py-1.5 text-xs font-medium rounded-lg transition-colors", activeChartTab === 'remaining' ? "bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm" : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200")}
+                                className={cn("px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg transition-colors", activeChartTab === 'remaining' ? "bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm" : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200")}
                             >
                                 Remaining
                             </button>
                             <button
                                 onClick={() => setActiveChartTab('future')}
-                                className={cn("px-3 py-1.5 text-xs font-medium rounded-lg transition-colors flex items-center gap-1", activeChartTab === 'future' ? "bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-400 shadow-sm border border-brand-100 dark:border-brand-800" : "text-slate-500 dark:text-slate-400 hover:text-brand-600 hover:bg-brand-50/50")}
+                                className={cn("px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg transition-colors flex items-center gap-1", activeChartTab === 'future' ? "bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-400 shadow-sm border border-brand-100 dark:border-brand-800" : "text-slate-500 dark:text-slate-400 hover:text-brand-600 hover:bg-brand-50/50")}
                             >
                                 <Clock className="h-3 w-3" />
                                 Reminders

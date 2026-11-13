@@ -28,26 +28,26 @@ const MappingRow: React.FC<{
   preview: string;
   onChange: (val: string | null) => void;
 }> = ({ lumina, fields, selected, preview, onChange }) => (
-  <div className="grid grid-cols-[130px_1fr_1fr] items-center px-4 py-2.5 gap-3 hover:bg-slate-50/50 dark:hover:bg-slate-700/40 transition-colors">
+  <div className="grid grid-cols-[95px_1fr] sm:grid-cols-[130px_1fr_1fr] items-center px-3 sm:px-4 py-2.5 gap-2 sm:gap-3 hover:bg-slate-50/50 dark:hover:bg-slate-700/40 transition-colors">
     <div className="flex items-center gap-1">
-      <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{lumina.label}</span>
+      <span className="text-xs sm:text-sm font-medium text-slate-700 dark:text-slate-200">{lumina.label}</span>
       {lumina.required && <span className="text-orange-500 text-xs">*</span>}
     </div>
-    <div className="relative">
+    <div className="relative min-w-0">
       <select
         value={selected ?? ''}
         onChange={e => onChange(e.target.value || null)}
-        className="w-full text-sm appearance-none bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-1.5 pr-8 text-slate-700 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent cursor-pointer"
+        className="w-full text-xs sm:text-sm appearance-none bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg px-2.5 sm:px-3 py-1.5 pr-7 sm:pr-8 text-slate-700 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent cursor-pointer"
       >
         <option value="">(none)</option>
         {fields.map(f => <option key={f} value={f}>{f}</option>)}
       </select>
       <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
     </div>
-    <div className="truncate">
+    <div className="truncate col-span-2 sm:col-span-1 pl-[103px] sm:pl-0 -mt-1 sm:mt-0">
       {preview
         ? <span className="text-xs text-slate-400 dark:text-slate-300 italic truncate block" title={preview}>{preview}</span>
-        : <span className="text-xs text-slate-300 dark:text-slate-600">—</span>
+        : <span className="text-xs text-slate-300 dark:text-slate-600 hidden sm:inline">—</span>
       }
     </div>
   </div>
@@ -72,33 +72,33 @@ const ModelSection: React.FC<{
   return (
     <div className={`rounded-xl border overflow-hidden transition-opacity ${enabled ? (hasWord ? 'border-slate-200 dark:border-slate-700' : 'border-amber-200 dark:border-amber-700') : 'border-slate-200 dark:border-slate-700 opacity-50'}`}>
       {/* Header */}
-      <div className="px-4 py-2.5 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
+      <div className="px-3 sm:px-4 py-2.5 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
           {/* Checkbox toggle */}
           <input
             type="checkbox"
             id={`model-toggle-${model.id}`}
             checked={enabled}
             onChange={onToggle}
-            className="h-4 w-4 rounded accent-orange-500 cursor-pointer"
+            className="h-4 w-4 rounded accent-orange-500 cursor-pointer shrink-0"
           />
-          <label htmlFor={`model-toggle-${model.id}`} className="text-sm font-semibold text-slate-800 dark:text-slate-100 cursor-pointer select-none">
+          <label htmlFor={`model-toggle-${model.id}`} className="text-sm font-semibold text-slate-800 dark:text-slate-100 cursor-pointer select-none truncate">
             {model.name}
           </label>
           {enabled && !hasWord && (
-            <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 rounded-full uppercase tracking-wider">
+            <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 rounded-full uppercase tracking-wider shrink-0">
               Word field required
             </span>
           )}
         </div>
-        <span className="text-xs font-medium text-slate-500 dark:text-slate-400">{model.noteCount.toLocaleString()} notes</span>
+        <span className="text-xs font-medium text-slate-500 dark:text-slate-400 shrink-0">{model.noteCount.toLocaleString()} notes</span>
       </div>
 
       {/* Column headers */}
-      <div className="grid grid-cols-[130px_1fr_1fr] px-4 py-1.5 gap-3 bg-slate-50/50 dark:bg-slate-800/60 border-b border-slate-100 dark:border-slate-700">
+      <div className="grid grid-cols-[95px_1fr] sm:grid-cols-[130px_1fr_1fr] px-3 sm:px-4 py-1.5 gap-2 sm:gap-3 bg-slate-50/50 dark:bg-slate-800/60 border-b border-slate-100 dark:border-slate-700">
         <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Lumina field</span>
         <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Anki field</span>
-        <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Preview</span>
+        <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider hidden sm:inline">Preview</span>
       </div>
 
       {/* Rows */}
@@ -180,29 +180,29 @@ export const AnkiImportModal: React.FC<AnkiImportModalProps> = ({ file, onClose,
   const canImport = !!schema && schema.models.some(m => enabled[m.id] && mappings[m.id]?.word);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-2xl flex flex-col max-h-[90vh] border border-slate-100 dark:border-slate-700">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-2xl flex flex-col max-h-[90dvh] border border-slate-100 dark:border-slate-700">
 
         {/* Header */}
-        <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between bg-orange-50/60 dark:bg-orange-950/30 rounded-t-2xl shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-orange-100 dark:bg-orange-900/40 text-orange-600 dark:text-orange-400 rounded-lg">
+        <div className="px-4 sm:px-6 py-4 sm:py-5 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between bg-orange-50/60 dark:bg-orange-950/30 rounded-t-2xl shrink-0 gap-2">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+            <div className="p-2 bg-orange-100 dark:bg-orange-900/40 text-orange-600 dark:text-orange-400 rounded-lg shrink-0">
               <Zap className="h-5 w-5" />
             </div>
-            <div>
-              <h2 className="text-xl font-serif font-bold text-slate-900 dark:text-white">Import from Anki</h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-1.5">
-                <FileText className="h-3 w-3" />{file.name}
+            <div className="min-w-0">
+              <h2 className="text-lg sm:text-xl font-serif font-bold text-slate-900 dark:text-white truncate">Import from Anki</h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-1.5 truncate">
+                <FileText className="h-3 w-3 shrink-0" /><span className="truncate">{file.name}</span>
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors shrink-0">
             <X className="h-5 w-5" />
           </button>
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-5 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-5 custom-scrollbar">
           {isLoading && (
             <div className="flex flex-col items-center justify-center py-16 gap-3 text-slate-500 dark:text-slate-400">
               <Loader2 className="h-8 w-8 text-orange-400 animate-spin" />
@@ -219,7 +219,7 @@ export const AnkiImportModal: React.FC<AnkiImportModalProps> = ({ file, onClose,
 
           {schema && (
             <>
-              <div className="flex items-center gap-2.5 text-sm text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-900/50 rounded-xl p-3.5 border border-slate-100 dark:border-slate-700">
+              <div className="flex items-center gap-2.5 text-xs sm:text-sm text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-900/50 rounded-xl p-3 sm:p-3.5 border border-slate-100 dark:border-slate-700">
                 <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
                 <span>
                   Found <strong>{schema.models.length}</strong> note type{schema.models.length !== 1 ? 's' : ''} · <strong>{schema.totalNotes.toLocaleString()}</strong> cards total.
@@ -244,14 +244,14 @@ export const AnkiImportModal: React.FC<AnkiImportModalProps> = ({ file, onClose,
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between shrink-0">
-          <button onClick={onClose} className="text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors px-4 py-2">
+        <div className="px-4 sm:px-6 py-3.5 sm:py-4 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between gap-2 shrink-0">
+          <button onClick={onClose} className="text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors px-3 sm:px-4 py-2">
             Cancel
           </button>
           <button
             onClick={handleImport}
             disabled={!canImport || isImporting || isLoading}
-            className="flex items-center gap-2 px-6 py-2.5 bg-orange-500 text-white text-sm font-semibold rounded-xl hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm shadow-orange-400/30"
+            className="flex items-center gap-2 px-4 sm:px-6 py-2 sm:py-2.5 bg-orange-500 text-white text-sm font-semibold rounded-xl hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm shadow-orange-400/30"
           >
             {isImporting
               ? <><Loader2 className="h-4 w-4 animate-spin" />Importing…</>

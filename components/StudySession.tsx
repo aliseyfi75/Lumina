@@ -8,6 +8,8 @@ import { useLocation } from 'react-router-dom';
 import { playAudio } from '../utils/audio';
 import { getDueCards, sortStudySessionCards, isBookFlashcard, getCardComplexityLevel } from '../utils/studyUtils';
 import { parseTagHierarchy, getCardBookInfo, getCardBookInfoForBook } from '../utils/tagUtils';
+import { useCardFlip3D } from '../utils/cardFlip';
+import { getAdaptiveWordHeadingClass } from '../utils/deviceScale';
 import { SessionMode } from './SessionConfigModal';
 
 const FALLBACK_DISTRACTORS = [
@@ -200,6 +202,17 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
   const x = useMotionValue(0);
   const y = useMotionValue(0);
   const rotate = useTransform(x, [-200, 200], [-10, 10]);
+  const {
+    flipRotateY,
+    frontVisibility,
+    frontOpacity,
+    backVisibility,
+    backOpacity,
+    flipContainerStyle,
+    frontPlaneStyle,
+    backPlaneStyle,
+    resetFlipInstant,
+  } = useCardFlip3D(isFlipped);
 
   const swipeRightOpacity = useTransform(x, [50, 150], [0, 1]);
   const swipeLeftOpacity = useTransform(x, [-50, -150], [0, 1]);
@@ -269,6 +282,7 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
     onRestoreCard?.(lastEntry.previousCard);
     x.set(0);
     y.set(0);
+    resetFlipInstant(false);
     setIsFlipped(false);
     setShowBookHint(false);
     setSelectedQuizOption(null);
@@ -280,18 +294,19 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
       bgColorClass: "bg-amber-500/10 border-amber-500/20",
     });
     setTimeout(() => setActionToast(null), 1800);
-  }, [reviewHistory, onRestoreCard, x, y]);
+  }, [reviewHistory, onRestoreCard, x, y, resetFlipInstant]);
 
   const handleReviewMissedCards = useCallback((missedCards: Flashcard[]) => {
     if (missedCards.length === 0) return;
     setQueue(missedCards);
     setCurrentIndex(0);
     setReviewHistory([]);
+    resetFlipInstant(false);
     setIsFlipped(false);
     setShowBookHint(false);
     setSelectedQuizOption(null);
     setShowConfetti(false);
-  }, []);
+  }, [resetFlipInstant]);
 
   // Keyboard support for desktop
   useEffect(() => {
@@ -469,39 +484,39 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
   const progress = ((currentIndex) / queue.length) * 100;
 
   return (
-    <div className="max-w-xl mx-auto h-[calc(100vh-140px)] flex flex-col">
-      <div className="flex items-center justify-between mb-8 px-4">
+    <div className="max-w-xl mx-auto study-viewport-height flex flex-col">
+      <div className="flex items-center justify-between mb-4 sm:mb-6 px-1 sm:px-4 shrink-0">
         <button
           onClick={onExit}
-          className="p-2 -ml-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"
+          className="p-2 -ml-1 sm:-ml-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"
         >
-          <ArrowLeft className="h-6 w-6" />
+          <ArrowLeft className="h-5 w-5 sm:h-6 sm:w-6" />
         </button>
-        <div className="flex-1 mx-6 bg-slate-200 dark:bg-slate-700 rounded-full h-2">
+        <div className="flex-1 mx-3 sm:mx-6 bg-slate-200 dark:bg-slate-700 rounded-full h-2">
           <div
             className="bg-brand-500 h-2 rounded-full transition-all duration-300"
             style={{ width: `${progress}%` }}
           />
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           <button
             onClick={handleUndo}
             disabled={reviewHistory.length === 0}
             title="Undo last review (⌘Z / Ctrl+Z)"
             aria-label="Undo last review"
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+            className="inline-flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none transition-colors"
           >
             <Undo2 className="h-4 w-4" />
             <span className="hidden sm:inline">Undo</span>
           </button>
-          <span className="text-sm font-medium text-slate-500 dark:text-slate-400 tabular-nums">
+          <span className="text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400 tabular-nums">
             {currentIndex + 1} / {queue.length}
           </span>
         </div>
       </div>
 
       {/* Action Toast */}
-      <div className="absolute top-24 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
+      <div className="fixed sm:absolute top-20 sm:top-24 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
         <AnimatePresence>
           {actionToast && (
             <motion.div
@@ -509,7 +524,7 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -10, scale: 0.9 }}
               transition={{ duration: 0.2 }}
-              className={`px-4 py-2 rounded-full border backdrop-blur-sm shadow-sm font-bold tracking-wider uppercase text-sm flex items-center gap-2 ${actionToast.colorClass} ${actionToast.bgColorClass}`}
+              className={`px-4 py-2 rounded-full border backdrop-blur-sm shadow-sm font-bold tracking-wider uppercase text-xs sm:text-sm flex items-center gap-2 ${actionToast.colorClass} ${actionToast.bgColorClass}`}
             >
               {actionToast.message}
             </motion.div>
@@ -517,13 +532,13 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
         </AnimatePresence>
       </div>
 
-      <div className="flex-1 relative perspective-1000 mb-8 sm:px-12 flex justify-center items-center">
+      <div className="flex-1 min-h-0 relative perspective-1000 mb-2 sm:mb-6 sm:px-12 flex justify-center items-center">
         {isQuizMode ? (
-          <div className="w-full max-w-lg bg-white dark:bg-slate-800 rounded-3xl shadow-xl border border-slate-100 dark:border-slate-700 p-6 sm:p-8 flex flex-col gap-6">
-            <div className="text-center space-y-2 border-b border-slate-100 dark:border-slate-700 pb-5">
-              <div className="flex flex-wrap items-center justify-center gap-2 mb-1">
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-xs font-bold uppercase tracking-wider">
-                  <ListChecks className="h-3.5 w-3.5" />
+          <div className="w-full max-w-lg max-h-full overflow-y-auto custom-scrollbar bg-white dark:bg-slate-800 rounded-3xl shadow-xl border border-slate-100 dark:border-slate-700 p-4 sm:p-8 flex flex-col gap-4 sm:gap-6">
+            <div className="text-center space-y-2 border-b border-slate-100 dark:border-slate-700 pb-4 sm:pb-5">
+              <div className="flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 mb-1">
+                <div className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-[11px] sm:text-xs font-bold uppercase tracking-wider">
+                  <ListChecks className="h-3.5 w-3.5 shrink-0" />
                   Multiple-Choice Quiz
                 </div>
                 {currentCardComplexity && (
@@ -549,8 +564,10 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
                   </span>
                 )}
               </div>
-              <h2 className="text-4xl font-serif font-bold text-slate-900 dark:text-white">{currentCard.word}</h2>
-              <div className="flex items-center justify-center gap-2">
+              <h2 className={`${getAdaptiveWordHeadingClass(currentCard.word, 'quiz')} font-serif font-bold text-slate-900 dark:text-white break-words max-w-full px-1`}>
+                {currentCard.word}
+              </h2>
+              <div className="flex flex-wrap items-center justify-center gap-2">
                 {currentCard.partOfSpeech && (
                   <span className="text-xs italic text-slate-400 dark:text-slate-500">{currentCard.partOfSpeech}</span>
                 )}
@@ -581,17 +598,17 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
                   ) : (
                     <div
                       data-testid="book-hint-content"
-                      className="w-full mt-1 p-3.5 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-800/60 text-left space-y-1.5"
+                      className="w-full mt-1 p-3 sm:p-3.5 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-800/60 text-left space-y-1.5"
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">
-                          <BookOpen className="h-3 w-3" />
-                          From {bookSourceTitle}
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400 min-w-0">
+                          <BookOpen className="h-3 w-3 shrink-0" />
+                          <span className="truncate">From {bookSourceTitle}</span>
                         </span>
                         <button
                           type="button"
                           onClick={() => setShowBookHint(false)}
-                          className="text-[11px] font-semibold text-amber-700/80 dark:text-amber-400/80 hover:underline"
+                          className="text-[11px] font-semibold text-amber-700/80 dark:text-amber-400/80 hover:underline shrink-0"
                         >
                           Hide Hint
                         </button>
@@ -605,7 +622,7 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
               )}
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-2.5 sm:space-y-3">
               {quizOptions.map((option, idx) => {
                 const isCorrectOption = option === currentCard.mainDefinition.trim();
                 const isSelected = selectedQuizOption === option;
@@ -631,7 +648,7 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
                     key={idx}
                     disabled={hasAnswered}
                     onClick={() => handleSelectQuizOption(option)}
-                    className={`w-full text-left p-4 rounded-2xl border-2 transition-all flex items-start gap-3 ${optionClasses}`}
+                    className={`w-full text-left p-3 sm:p-4 rounded-2xl border-2 transition-all flex items-start gap-2.5 sm:gap-3 ${optionClasses}`}
                   >
                     <span className="shrink-0 w-6 h-6 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 text-xs font-bold flex items-center justify-center text-slate-500 dark:text-slate-400 mt-0.5">
                       {idx + 1}
@@ -649,9 +666,9 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
             </div>
 
             {selectedQuizOption !== null && (
-              <div className="pt-2 flex items-center justify-between border-t border-slate-100 dark:border-slate-700">
+              <div className="pt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 dark:border-slate-700">
                 <span
-                  className={`text-sm font-semibold ${
+                  className={`text-xs sm:text-sm font-semibold ${
                     selectedQuizOption === currentCard.mainDefinition.trim()
                       ? 'text-emerald-600 dark:text-emerald-400'
                       : 'text-red-600 dark:text-red-400'
@@ -663,7 +680,7 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
                 </span>
                 <button
                   onClick={() => handleNext(null)}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl shadow-md shadow-indigo-500/20 transition-colors"
+                  className="ml-auto inline-flex items-center gap-2 px-4 sm:px-5 py-2 sm:py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl shadow-md shadow-indigo-500/20 transition-colors"
                 >
                   Next Question
                   <ArrowRight className="h-4 w-4" />
@@ -675,228 +692,244 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
         <>
         {/* Swipe Indicators */}
         <motion.div style={{ opacity: swipeRightOpacity, pointerEvents: 'none' }} className="absolute left-0 top-1/2 -translate-y-1/2 z-0 flex flex-col items-center text-green-500">
-          <MoveRight className="h-10 w-10" />
+          <MoveRight className="h-8 w-8 sm:h-10 sm:w-10" />
           <span className="font-bold tracking-widest uppercase mt-2 text-xs">Mastered</span>
         </motion.div>
         <motion.div style={{ opacity: swipeLeftOpacity, pointerEvents: 'none' }} className="absolute right-0 top-1/2 -translate-y-1/2 z-0 flex flex-col items-center text-red-500">
-          <MoveLeft className="h-10 w-10" />
+          <MoveLeft className="h-8 w-8 sm:h-10 sm:w-10" />
           <span className="font-bold tracking-widest uppercase mt-2 text-xs">Again</span>
         </motion.div>
-        <motion.div style={{ opacity: swipeDownOpacity, pointerEvents: 'none' }} className="absolute top-[-20px] left-1/2 -translate-x-1/2 z-0 flex flex-col items-center text-blue-500">
-          <MoveDown className="h-10 w-10" />
+        <motion.div style={{ opacity: swipeDownOpacity, pointerEvents: 'none' }} className="absolute top-[-16px] sm:top-[-20px] left-1/2 -translate-x-1/2 z-0 flex flex-col items-center text-blue-500">
+          <MoveDown className="h-8 w-8 sm:h-10 sm:w-10" />
           <span className="font-bold tracking-widest uppercase mt-2 text-xs">Learned</span>
         </motion.div>
-        <motion.div style={{ opacity: swipeUpOpacity, pointerEvents: 'none' }} className="absolute bottom-[-10px] left-1/2 -translate-x-1/2 z-0 flex flex-col items-center text-blue-500">
-          <MoveUp className="h-10 w-10" />
+        <motion.div style={{ opacity: swipeUpOpacity, pointerEvents: 'none' }} className="absolute bottom-[-8px] sm:bottom-[-10px] left-1/2 -translate-x-1/2 z-0 flex flex-col items-center text-blue-500">
+          <MoveUp className="h-8 w-8 sm:h-10 sm:w-10" />
           <span className="font-bold tracking-widest uppercase mt-2 text-xs">Learned</span>
         </motion.div>
 
-        <div className="relative w-full h-full cursor-pointer group perspective-1000 z-10 mx-auto max-w-sm">
+        <motion.div
+          className="relative w-full h-full cursor-pointer group perspective-1000 z-10 mx-auto max-w-sm"
+          style={{
+            x,
+            y,
+            rotateZ: rotate,
+          }}
+          drag={isFlipped}
+          dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
+          dragElastic={0.8}
+          onDragEnd={handleDragEnd}
+          onClick={() => setIsFlipped(prev => !prev)}
+          whileDrag={{ scale: 1.04, cursor: "grabbing" }}
+        >
           <motion.div
             className="relative w-full h-full preserve-3d"
             style={{
-              transformStyle: 'preserve-3d',
-              x,
-              y,
-              rotateZ: rotate
+              ...flipContainerStyle,
+              rotateY: flipRotateY,
             }}
-            drag={isFlipped}
-            dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
-            dragElastic={0.8}
-            onDragEnd={handleDragEnd}
-            onClick={() => setIsFlipped(!isFlipped)}
-            whileDrag={{ scale: 1.05, cursor: "grabbing" }}
-            initial={false}
-            animate={{ rotateY: isFlipped ? 180 : 0 }}
-            transition={{ type: "spring", stiffness: 260, damping: 20 }}
           >
-
             {/* Front of Card - Minimal Design (Word Only) */}
             <div
-              className="absolute inset-0 backface-hidden bg-white dark:bg-slate-800 rounded-3xl shadow-xl shadow-slate-200/50 dark:shadow-none border border-slate-100 dark:border-slate-700 flex flex-col items-center justify-center p-8 text-center hover:shadow-2xl transition-shadow"
-              style={{
-                backfaceVisibility: 'hidden',
-                WebkitBackfaceVisibility: 'hidden',
-                pointerEvents: isFlipped ? 'none' : 'auto',
-              }}
+              data-testid="study-card-front"
+              aria-hidden={isFlipped}
+              className="absolute inset-0 backface-hidden"
+              style={frontPlaneStyle}
             >
-              {/* Drag Overlays */}
-              <motion.div style={{ opacity: swipeRightOpacity }} className="absolute inset-0 rounded-3xl pointer-events-none bg-green-500/10 dark:bg-green-500/20" />
-              <motion.div style={{ opacity: swipeLeftOpacity }} className="absolute inset-0 rounded-3xl pointer-events-none bg-red-500/10 dark:bg-red-500/20" />
-              <motion.div style={{ opacity: swipeDownOpacity }} className="absolute inset-0 rounded-3xl pointer-events-none bg-blue-500/10 dark:bg-blue-500/20" />
-              <motion.div style={{ opacity: swipeUpOpacity }} className="absolute inset-0 rounded-3xl pointer-events-none bg-blue-500/10 dark:bg-blue-500/20" />
+              <motion.div
+                style={{ opacity: frontOpacity, visibility: frontVisibility }}
+                className="relative w-full h-full bg-white dark:bg-slate-800 rounded-3xl shadow-xl shadow-slate-200/50 dark:shadow-none border border-slate-100 dark:border-slate-700 flex flex-col items-center justify-between p-5 sm:p-8 text-center hover:shadow-2xl transition-shadow overflow-hidden"
+              >
+                {/* Drag Overlays */}
+                <motion.div style={{ opacity: swipeRightOpacity }} className="absolute inset-0 rounded-3xl pointer-events-none bg-green-500/10 dark:bg-green-500/20" />
+                <motion.div style={{ opacity: swipeLeftOpacity }} className="absolute inset-0 rounded-3xl pointer-events-none bg-red-500/10 dark:bg-red-500/20" />
+                <motion.div style={{ opacity: swipeDownOpacity }} className="absolute inset-0 rounded-3xl pointer-events-none bg-blue-500/10 dark:bg-blue-500/20" />
+                <motion.div style={{ opacity: swipeUpOpacity }} className="absolute inset-0 rounded-3xl pointer-events-none bg-blue-500/10 dark:bg-blue-500/20" />
 
-              <div className="relative z-10 flex flex-col items-center w-full">
-                {(currentCardComplexity || currentCardChapter) && (
-                  <div className="mb-3 flex flex-wrap items-center justify-center gap-1.5">
-                    {currentCardComplexity && (
-                      <span
-                        data-testid="study-card-complexity-badge"
-                        className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
-                          currentCardComplexity === 'advanced'
-                            ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800/60'
-                            : currentCardComplexity === 'intermediate'
-                              ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/60'
-                              : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/60'
-                        }`}
-                      >
-                        {currentCardComplexity}
-                      </span>
+                <div className="h-4 shrink-0" aria-hidden="true" />
+
+                <div className="relative z-10 flex-1 min-h-0 flex flex-col items-center justify-center w-full overflow-y-auto custom-scrollbar py-2">
+                  {(currentCardComplexity || currentCardChapter) && (
+                    <div className="mb-3 flex flex-wrap items-center justify-center gap-1.5">
+                      {currentCardComplexity && (
+                        <span
+                          data-testid="study-card-complexity-badge"
+                          className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
+                            currentCardComplexity === 'advanced'
+                              ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800/60'
+                              : currentCardComplexity === 'intermediate'
+                                ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/60'
+                                : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/60'
+                          }`}
+                        >
+                          {currentCardComplexity}
+                        </span>
+                      )}
+                      {currentCardChapter && (
+                        <span
+                          data-testid="study-card-chapter-badge"
+                          className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/60"
+                        >
+                          {currentCardChapter}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  <h2 className={`${getAdaptiveWordHeadingClass(currentCard.word, 'study')} font-serif font-bold text-slate-900 dark:text-white mb-4 sm:mb-6 break-words max-w-full px-1`}>
+                    {currentCard.word}
+                  </h2>
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-3 justify-center max-w-full">
+                    {currentCard.phonetic && (
+                      <p className="text-lg sm:text-2xl text-slate-400 dark:text-slate-500 font-serif italic break-words">
+                        {currentCard.phonetic}
+                      </p>
                     )}
-                    {currentCardChapter && (
-                      <span
-                        data-testid="study-card-chapter-badge"
-                        className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/60"
-                      >
-                        {currentCardChapter}
-                      </span>
-                    )}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        playAudio(currentCard.word, currentCard.audio);
+                      }}
+                      className="p-2 text-slate-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded-full transition-colors"
+                      title="Listen to pronunciation"
+                    >
+                      <Volume2 className="h-5 w-5 sm:h-6 sm:w-6" />
+                    </button>
                   </div>
-                )}
-                <h2 className="text-5xl font-serif font-bold text-slate-900 dark:text-white mb-6">{currentCard.word}</h2>
-                <div className="flex items-center gap-3 justify-center">
-                  {currentCard.phonetic && <p className="text-2xl text-slate-400 dark:text-slate-500 font-serif italic">{currentCard.phonetic}</p>}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      playAudio(currentCard.word, currentCard.audio);
-                    }}
-                    className="p-2 text-slate-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded-full transition-colors z-10 relative"
-                    title="Listen to pronunciation"
-                  >
-                    <Volume2 className="h-6 w-6" />
-                  </button>
+
+                  {bookSourceTitle && currentCard.example && (
+                    <div
+                      className="mt-4 sm:mt-6 w-full flex flex-col items-center"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {!showBookHint ? (
+                        <button
+                          type="button"
+                          data-testid="book-hint-button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setShowBookHint(true);
+                          }}
+                          className="inline-flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-full text-xs font-semibold bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 hover:bg-amber-100 dark:hover:bg-amber-900/50 transition-all shadow-sm"
+                        >
+                          <Lightbulb className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                          <span>Show Book Hint</span>
+                          <span className="hidden sm:inline text-[10px] opacity-60 font-mono">(H)</span>
+                        </button>
+                      ) : (
+                        <div
+                          data-testid="book-hint-content"
+                          className="w-full p-3.5 sm:p-4 rounded-2xl bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 text-left space-y-2"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400 min-w-0">
+                              <BookOpen className="h-3 w-3 shrink-0" />
+                              <span className="truncate">From {bookSourceTitle}</span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setShowBookHint(false);
+                              }}
+                              className="text-[11px] font-semibold text-amber-700/80 dark:text-amber-400/80 hover:underline shrink-0"
+                            >
+                              Hide Hint
+                            </button>
+                          </div>
+                          <p className="text-xs sm:text-sm italic font-serif text-slate-700 dark:text-slate-200 leading-relaxed max-h-28 overflow-y-auto custom-scrollbar">
+                            {renderHighlightedBookSentence(currentCard.example, currentCard.word)}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
-                {bookSourceTitle && currentCard.example && (
-                  <div
-                    className="mt-6 w-full flex flex-col items-center"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {!showBookHint ? (
-                      <button
-                        type="button"
-                        data-testid="book-hint-button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setShowBookHint(true);
-                        }}
-                        className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-semibold bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 hover:bg-amber-100 dark:hover:bg-amber-900/50 transition-all shadow-sm"
-                      >
-                        <Lightbulb className="h-3.5 w-3.5 text-amber-500" />
-                        <span>Show Book Hint</span>
-                        <span className="text-[10px] opacity-60 font-mono">(H)</span>
-                      </button>
-                    ) : (
-                      <div
-                        data-testid="book-hint-content"
-                        className="w-full p-4 rounded-2xl bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 text-left space-y-2 animate-in fade-in zoom-in-95 duration-150"
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">
-                            <BookOpen className="h-3 w-3 shrink-0" />
-                            <span className="truncate">From {bookSourceTitle}</span>
-                          </span>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setShowBookHint(false);
-                            }}
-                            className="text-[11px] font-semibold text-amber-700/80 dark:text-amber-400/80 hover:underline shrink-0"
-                          >
-                            Hide Hint
-                          </button>
-                        </div>
-                        <p className="text-sm italic font-serif text-slate-700 dark:text-slate-200 leading-relaxed max-h-28 overflow-y-auto custom-scrollbar">
-                          {renderHighlightedBookSentence(currentCard.example, currentCard.word)}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div className="absolute bottom-10 text-slate-300 dark:text-slate-600 flex items-center gap-2 opacity-50 group-hover:opacity-100 transition-opacity z-10">
-                <RotateCw className="h-4 w-4" />
-                <span className="text-xs uppercase tracking-widest font-medium">Click to reveal</span>
-              </div>
+                <div className="relative z-10 pt-2 shrink-0 text-slate-300 dark:text-slate-600 flex items-center gap-2 opacity-60 group-hover:opacity-100 transition-opacity">
+                  <RotateCw className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                  <span className="text-[11px] sm:text-xs uppercase tracking-widest font-medium">Click to reveal</span>
+                </div>
+              </motion.div>
             </div>
 
             {/* Back of Card - Definition & Controls */}
             <div
-              className="absolute inset-0 backface-hidden rotate-y-180 bg-slate-900 rounded-3xl shadow-xl flex flex-col p-8 text-center overflow-hidden"
-              style={{
-                backfaceVisibility: 'hidden',
-                WebkitBackfaceVisibility: 'hidden',
-                transform: 'rotateY(180deg)',
-                pointerEvents: isFlipped ? 'auto' : 'none',
-              }}
+              data-testid="study-card-back"
+              aria-hidden={!isFlipped}
+              className="absolute inset-0 backface-hidden rotate-y-180"
+              style={backPlaneStyle}
             >
-              {/* Drag Overlays */}
-              <motion.div style={{ opacity: swipeRightOpacity }} className="absolute inset-0 rounded-3xl pointer-events-none bg-green-500/10" />
-              <motion.div style={{ opacity: swipeLeftOpacity }} className="absolute inset-0 rounded-3xl pointer-events-none bg-red-500/10" />
-              <motion.div style={{ opacity: swipeDownOpacity }} className="absolute inset-0 rounded-3xl pointer-events-none bg-blue-500/10" />
-              <motion.div style={{ opacity: swipeUpOpacity }} className="absolute inset-0 rounded-3xl pointer-events-none bg-blue-500/10" />
+              <motion.div
+                style={{ opacity: backOpacity, visibility: backVisibility }}
+                className="relative w-full h-full bg-slate-900 rounded-3xl shadow-xl flex flex-col p-5 sm:p-8 text-center overflow-hidden"
+              >
+                {/* Drag Overlays */}
+                <motion.div style={{ opacity: swipeRightOpacity }} className="absolute inset-0 rounded-3xl pointer-events-none bg-green-500/10" />
+                <motion.div style={{ opacity: swipeLeftOpacity }} className="absolute inset-0 rounded-3xl pointer-events-none bg-red-500/10" />
+                <motion.div style={{ opacity: swipeDownOpacity }} className="absolute inset-0 rounded-3xl pointer-events-none bg-blue-500/10" />
+                <motion.div style={{ opacity: swipeUpOpacity }} className="absolute inset-0 rounded-3xl pointer-events-none bg-blue-500/10" />
 
-              <div className="relative z-10 flex-1 flex flex-col items-center justify-center overflow-y-auto custom-scrollbar w-full">
-                <span className="inline-block px-3 py-1 bg-brand-900/50 text-brand-300 text-xs font-bold uppercase tracking-widest rounded-full mb-6">
-                  {currentCard.partOfSpeech}
-                </span>
+                <div className="relative z-10 flex-1 min-h-0 flex flex-col items-center justify-center overflow-y-auto custom-scrollbar w-full">
+                  <span className="inline-block px-3 py-1 bg-brand-900/50 text-brand-300 text-[11px] sm:text-xs font-bold uppercase tracking-widest rounded-full mb-3 sm:mb-5 shrink-0">
+                    {currentCard.partOfSpeech}
+                  </span>
 
-                {currentCard.image && (
-                  <div className="mb-6 shrink-0 rounded-2xl overflow-hidden shadow-sm border border-slate-700 h-48 flex justify-center bg-slate-800 items-center w-full max-w-sm mx-auto">
-                    <img
-                      src={currentCard.image}
-                      alt={`Visual mnemonic for ${currentCard.word}`}
-                      className="max-h-full max-w-full object-contain"
-                      loading="lazy"
-                    />
-                  </div>
-                )}
+                  {currentCard.image && (
+                    <div className="mb-3 sm:mb-5 shrink-0 rounded-2xl overflow-hidden shadow-sm border border-slate-700 h-28 sm:h-44 flex justify-center bg-slate-800 items-center w-full max-w-sm mx-auto">
+                      <img
+                        src={currentCard.image}
+                        alt={`Visual mnemonic for ${currentCard.word}`}
+                        className="max-h-full max-w-full object-contain"
+                        loading="lazy"
+                      />
+                    </div>
+                  )}
 
-                <p className="text-xl text-slate-50 leading-relaxed font-medium mb-6">
-                  {currentCard.mainDefinition}
-                </p>
-                {currentCard.example && (
-                  <div className="bg-slate-800/50 p-4 rounded-xl w-full border border-slate-800">
-                    <p className="text-slate-400 italic font-serif text-lg">"{currentCard.example}"</p>
-                  </div>
-                )}
-              </div>
+                  <p className="text-base sm:text-xl text-slate-50 leading-relaxed font-medium mb-4 sm:mb-6 break-words max-w-full">
+                    {currentCard.mainDefinition}
+                  </p>
+                  {currentCard.example && (
+                    <div className="bg-slate-800/50 p-3 sm:p-4 rounded-xl w-full border border-slate-800">
+                      <p className="text-slate-400 italic font-serif text-sm sm:text-lg leading-relaxed break-words">
+                        "{currentCard.example}"
+                      </p>
+                    </div>
+                  )}
+                </div>
 
-              {/* Integrated Controls */}
-              <div className="relative z-10 pt-6 mt-4 border-t border-slate-800 grid grid-cols-3 gap-3 w-full" onClick={(e) => e.stopPropagation()}>
-                <button
-                  onClick={() => handleNext(1)}
-                  className="group/btn flex flex-col items-center justify-center p-3 rounded-xl bg-slate-800 hover:bg-red-900/20 border border-slate-700 hover:border-red-700/50 transition-all text-center relative overflow-hidden"
-                >
-                  <span className="text-sm font-bold uppercase tracking-wider text-slate-300 group-hover/btn:text-red-400 mb-1 z-10 transition-colors">Again</span>
-                  <span className="text-[9px] text-slate-500 leading-tight mb-2 z-10 transition-colors">Study again<br />today</span>
-                  <div className="hidden sm:flex text-[10px] items-center gap-1 text-slate-600 bg-slate-900/50 px-2 py-0.5 rounded border border-slate-700/50 z-10 transition-colors"><MoveLeft className="w-3 h-3" /> Swipe</div>
-                </button>
+                {/* Integrated Controls */}
+                <div className="relative z-10 pt-3.5 sm:pt-5 mt-3 sm:mt-4 border-t border-slate-800 grid grid-cols-3 gap-2 sm:gap-3 w-full shrink-0" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    onClick={() => handleNext(1)}
+                    className="group/btn flex flex-col items-center justify-center p-2 sm:p-3 rounded-xl bg-slate-800 hover:bg-red-900/20 border border-slate-700 hover:border-red-700/50 transition-all text-center relative overflow-hidden"
+                  >
+                    <span className="text-xs sm:text-sm font-bold uppercase tracking-wide sm:tracking-wider text-slate-300 group-hover/btn:text-red-400 mb-0.5 sm:mb-1 z-10 transition-colors">Again</span>
+                    <span className="text-[9px] text-slate-500 leading-tight sm:mb-2 z-10 transition-colors">Study again<br />today</span>
+                    <div className="hidden sm:flex text-[10px] items-center gap-1 text-slate-600 bg-slate-900/50 px-2 py-0.5 rounded border border-slate-700/50 z-10 transition-colors"><MoveLeft className="w-3 h-3" /> Swipe</div>
+                  </button>
 
-                <button
-                  onClick={() => handleNext(3)}
-                  className="group/btn flex flex-col items-center justify-center p-3 rounded-xl bg-slate-800 hover:bg-blue-900/20 border border-slate-700 hover:border-blue-700/50 transition-all text-center relative overflow-hidden"
-                >
-                  <span className="text-sm font-bold uppercase tracking-wider text-slate-300 group-hover/btn:text-blue-400 mb-1 z-10 transition-colors">Learned</span>
-                  <span className="text-[9px] text-slate-500 leading-tight mb-2 z-10 transition-colors">Pushes to<br />tomorrow</span>
-                  <div className="hidden sm:flex text-[10px] items-center gap-1 text-slate-600 bg-slate-900/50 px-2 py-0.5 rounded border border-slate-700/50 z-10 transition-colors"><MoveDown className="w-3 h-3" /><MoveUp className="w-3 h-3" /> Swipe</div>
-                </button>
+                  <button
+                    onClick={() => handleNext(3)}
+                    className="group/btn flex flex-col items-center justify-center p-2 sm:p-3 rounded-xl bg-slate-800 hover:bg-blue-900/20 border border-slate-700 hover:border-blue-700/50 transition-all text-center relative overflow-hidden"
+                  >
+                    <span className="text-xs sm:text-sm font-bold uppercase tracking-wide sm:tracking-wider text-slate-300 group-hover/btn:text-blue-400 mb-0.5 sm:mb-1 z-10 transition-colors">Learned</span>
+                    <span className="text-[9px] text-slate-500 leading-tight sm:mb-2 z-10 transition-colors">Pushes to<br />tomorrow</span>
+                    <div className="hidden sm:flex text-[10px] items-center gap-1 text-slate-600 bg-slate-900/50 px-2 py-0.5 rounded border border-slate-700/50 z-10 transition-colors"><MoveDown className="w-3 h-3" /><MoveUp className="w-3 h-3" /> Swipe</div>
+                  </button>
 
-                <button
-                  onClick={() => handleNext(5)}
-                  className="group/btn flex flex-col items-center justify-center p-3 rounded-xl bg-slate-800 hover:bg-green-900/20 border border-slate-700 hover:border-green-700/50 transition-all text-center relative overflow-hidden"
-                >
-                  <span className="text-sm font-bold uppercase tracking-wider text-slate-300 group-hover/btn:text-green-400 mb-1 z-10 transition-colors">Mastered</span>
-                  <span className="text-[9px] text-slate-500 leading-tight mb-2 z-10 transition-colors">Remove from<br />sessions</span>
-                  <div className="hidden sm:flex text-[10px] items-center gap-1 text-slate-600 bg-slate-900/50 px-2 py-0.5 rounded border border-slate-700/50 z-10 transition-colors"><MoveRight className="w-3 h-3" /> Swipe</div>
-                </button>
-              </div>
+                  <button
+                    onClick={() => handleNext(5)}
+                    className="group/btn flex flex-col items-center justify-center p-2 sm:p-3 rounded-xl bg-slate-800 hover:bg-green-900/20 border border-slate-700 hover:border-green-700/50 transition-all text-center relative overflow-hidden"
+                  >
+                    <span className="text-xs sm:text-sm font-bold uppercase tracking-wide sm:tracking-wider text-slate-300 group-hover/btn:text-green-400 mb-0.5 sm:mb-1 z-10 transition-colors">Mastered</span>
+                    <span className="text-[9px] text-slate-500 leading-tight sm:mb-2 z-10 transition-colors">Remove from<br />sessions</span>
+                    <div className="hidden sm:flex text-[10px] items-center gap-1 text-slate-600 bg-slate-900/50 px-2 py-0.5 rounded border border-slate-700/50 z-10 transition-colors"><MoveRight className="w-3 h-3" /> Swipe</div>
+                  </button>
+                </div>
+              </motion.div>
             </div>
           </motion.div>
-        </div>
+        </motion.div>
         </>
         )}
       </div>

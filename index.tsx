@@ -2,7 +2,10 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { HashRouter } from 'react-router-dom';
 import App from './App';
+import { applyDeviceRootScale } from './utils/deviceScale';
 import './src/index.css';
+
+applyDeviceRootScale();
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {

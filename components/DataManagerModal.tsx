@@ -386,22 +386,22 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90dvh]">
         {/* Header */}
-        <div className="p-6 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/30 shrink-0">
+        <div className="px-4 sm:px-6 py-4 sm:py-5 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/30 shrink-0">
           <div className="flex items-center gap-2">
             <div className="p-2 bg-brand-100 dark:bg-brand-900/40 text-brand-600 dark:text-brand-400 rounded-lg">
               <Database className="h-5 w-5" />
             </div>
-            <h2 className="text-xl font-serif font-bold text-slate-900 dark:text-white">Data Manager</h2>
+            <h2 className="text-lg sm:text-xl font-serif font-bold text-slate-900 dark:text-white">Data Manager</h2>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="p-6 space-y-5 overflow-y-auto custom-scrollbar">
+        <div className="p-4 sm:p-6 space-y-5 overflow-y-auto custom-scrollbar">
 
           {/* ── Local Storage (merged) ──────────────────────────────────── */}
           {(() => {

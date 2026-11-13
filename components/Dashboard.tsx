@@ -7,6 +7,8 @@ import { getLocalDateString, calculateCurrentStreak, getDueCards } from '../util
 import { BookExtractedWord } from '../services/bookService';
 import { BookPrepModal } from './BookPrepModal';
 import { parseTagHierarchy, formatBookTag } from '../utils/tagUtils';
+import { useCardFlip3D } from '../utils/cardFlip';
+import { getAdaptiveWordHeadingClass } from '../utils/deviceScale';
 import { motion } from 'framer-motion';
 import {
     Search, Play, BookOpen, CheckCircle, Brain, Loader2,
@@ -242,8 +244,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
     // Inline flashcard modal state
     const [selectedCard, setSelectedCard] = useState<Flashcard | null>(null);
     const [isFlipped, setIsFlipped] = useState(false);
+    const {
+        flipRotateY,
+        frontVisibility,
+        frontOpacity,
+        backVisibility,
+        backOpacity,
+        flipContainerStyle,
+        frontPlaneStyle,
+        backPlaneStyle,
+        resetFlipInstant,
+    } = useCardFlip3D(isFlipped);
 
     const openCard = (card: Flashcard) => {
+        resetFlipInstant(false);
         setSelectedCard(card);
         setIsFlipped(false);
     };
@@ -346,63 +360,81 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         {/* Close button */}
                         <button
                             onClick={closeCard}
-                            className="absolute -top-4 -right-4 z-10 bg-white dark:bg-slate-700 rounded-full p-2 shadow-lg text-slate-500 dark:text-slate-300 hover:text-slate-800 dark:hover:text-white transition-colors"
+                            aria-label="Close card preview"
+                            className="absolute -top-3 -right-2 sm:-top-4 sm:-right-4 z-10 bg-white dark:bg-slate-700 rounded-full p-2 shadow-lg text-slate-500 dark:text-slate-300 hover:text-slate-800 dark:hover:text-white transition-colors"
                         >
                             <X className="h-4 w-4" />
                         </button>
 
                         {/* Flip card */}
                         <div
-                            className="h-80 w-full perspective-1000 cursor-pointer"
+                            className="h-72 sm:h-80 w-full perspective-1000 cursor-pointer"
                             onClick={() => setIsFlipped(f => !f)}
                         >
                             <motion.div
-                                className="relative w-full h-full"
-                                style={{ transformStyle: 'preserve-3d' }}
-                                initial={false}
-                                animate={{ rotateY: isFlipped ? 180 : 0 }}
-                                transition={{ type: 'spring', stiffness: 260, damping: 20 }}
+                                className="relative w-full h-full preserve-3d"
+                                style={{ ...flipContainerStyle, rotateY: flipRotateY }}
                             >
                                 {/* Front */}
                                 <div
-                                    className="absolute inset-0 bg-white dark:bg-slate-800 rounded-2xl shadow-xl p-6 flex flex-col items-center justify-center text-center"
-                                    style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}
+                                    data-testid="dashboard-card-front"
+                                    aria-hidden={isFlipped}
+                                    className="absolute inset-0 backface-hidden"
+                                    style={frontPlaneStyle}
                                 >
-                                    <div className="absolute top-4 right-4">
-                                        <StatusPill status={selectedCard.status} />
-                                    </div>
-                                    <h3 className="text-3xl font-serif font-bold text-slate-900 dark:text-white mb-1">{selectedCard.word}</h3>
-                                    {selectedCard.phonetic && (
-                                        <p className="text-slate-400 text-sm font-serif italic">{selectedCard.phonetic}</p>
-                                    )}
-                                    <button
-                                        onClick={e => { e.stopPropagation(); playAudio(selectedCard.word, selectedCard.audio); }}
-                                        className="mt-1 p-1 text-slate-400 hover:text-brand-500 rounded-full transition-colors"
+                                    <motion.div
+                                        style={{ opacity: frontOpacity, visibility: frontVisibility }}
+                                        className="w-full h-full bg-white dark:bg-slate-800 rounded-2xl shadow-xl p-5 sm:p-6 flex flex-col items-center justify-between text-center overflow-hidden"
                                     >
-                                        <Volume2 className="h-4 w-4" />
-                                    </button>
-                                    <p className="text-slate-500 dark:text-slate-400 italic text-sm mt-1">{selectedCard.partOfSpeech}</p>
-                                    <div className="absolute bottom-5 flex items-center gap-1.5 text-slate-300 dark:text-slate-600 text-xs font-medium uppercase tracking-wider">
-                                        <RotateCw className="h-3.5 w-3.5" /> Tap to reveal
-                                    </div>
+                                        <div className="w-full flex justify-end shrink-0">
+                                            <StatusPill status={selectedCard.status} />
+                                        </div>
+                                        <div className="flex-1 flex flex-col items-center justify-center w-full px-1 min-h-0">
+                                            <h3 className={`${getAdaptiveWordHeadingClass(selectedCard.word, 'card')} font-serif font-bold text-slate-900 dark:text-white mb-1 break-words max-w-full leading-tight`}>
+                                                {selectedCard.word}
+                                            </h3>
+                                            {selectedCard.phonetic && (
+                                                <p className="text-slate-400 text-sm font-serif italic truncate max-w-full">{selectedCard.phonetic}</p>
+                                            )}
+                                            <button
+                                                onClick={e => { e.stopPropagation(); playAudio(selectedCard.word, selectedCard.audio); }}
+                                                className="mt-1 p-1 text-slate-400 hover:text-brand-500 rounded-full transition-colors"
+                                            >
+                                                <Volume2 className="h-4 w-4" />
+                                            </button>
+                                            <p className="text-slate-500 dark:text-slate-400 italic text-sm mt-1">{selectedCard.partOfSpeech}</p>
+                                        </div>
+                                        <div className="shrink-0 flex items-center gap-1.5 text-slate-300 dark:text-slate-600 text-xs font-medium uppercase tracking-wider">
+                                            <RotateCw className="h-3.5 w-3.5" /> Tap to reveal
+                                        </div>
+                                    </motion.div>
                                 </div>
 
                                 {/* Back */}
                                 <div
-                                    className="absolute inset-0 bg-slate-900 rounded-2xl shadow-xl p-6 flex flex-col gap-3 overflow-hidden"
-                                    style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
+                                    data-testid="dashboard-card-back"
+                                    aria-hidden={!isFlipped}
+                                    className="absolute inset-0 backface-hidden"
+                                    style={backPlaneStyle}
                                 >
-                                    {selectedCard.image && (
-                                        <div className="h-24 rounded-xl overflow-hidden border border-slate-700 bg-slate-800 flex items-center justify-center shrink-0">
-                                            <img src={selectedCard.image} alt={selectedCard.word} className="max-h-full object-contain" loading="lazy" />
+                                    <motion.div
+                                        style={{ opacity: backOpacity, visibility: backVisibility }}
+                                        className="w-full h-full bg-slate-900 rounded-2xl shadow-xl p-5 sm:p-6 flex flex-col gap-3 overflow-hidden"
+                                    >
+                                        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar flex flex-col gap-3">
+                                            {selectedCard.image && (
+                                                <div className="h-24 rounded-xl overflow-hidden border border-slate-700 bg-slate-800 flex items-center justify-center shrink-0">
+                                                    <img src={selectedCard.image} alt={selectedCard.word} className="max-h-full object-contain" loading="lazy" />
+                                                </div>
+                                            )}
+                                            <p className="text-slate-100 text-sm sm:text-base leading-relaxed flex-1">{selectedCard.mainDefinition}</p>
+                                            {selectedCard.example && (
+                                                <p className="text-slate-400 text-xs sm:text-sm italic border-t border-slate-700 pt-3">
+                                                    "{selectedCard.example}"
+                                                </p>
+                                            )}
                                         </div>
-                                    )}
-                                    <p className="text-slate-100 text-base leading-relaxed flex-1">{selectedCard.mainDefinition}</p>
-                                    {selectedCard.example && (
-                                        <p className="text-slate-400 text-sm italic border-t border-slate-700 pt-3">
-                                            "{selectedCard.example}"
-                                        </p>
-                                    )}
+                                    </motion.div>
                                 </div>
                             </motion.div>
                         </div>
@@ -411,24 +443,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
             )}
 
             {
-                <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-16">
+                <div className="max-w-5xl mx-auto space-y-6 sm:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-12 sm:pb-16">
 
                     {/* ── Hero / Search ───────────────────────────────────────────────── */}
-                    <div className="relative rounded-3xl bg-gradient-to-br from-slate-900 via-brand-950 to-slate-900 dark:from-slate-700 dark:via-slate-800 dark:to-slate-700 dark:border dark:border-slate-600/50 p-8 md:p-12 text-white shadow-2xl shadow-brand-900/20 dark:shadow-slate-900/50">
+                    <div className="relative rounded-2xl sm:rounded-3xl bg-gradient-to-br from-slate-900 via-brand-950 to-slate-900 dark:from-slate-700 dark:via-slate-800 dark:to-slate-700 dark:border dark:border-slate-600/50 p-5 sm:p-8 md:p-12 text-white shadow-2xl shadow-brand-900/20 dark:shadow-slate-900/50 overflow-hidden">
                         {/* Decorative blobs */}
                         <div className="pointer-events-none absolute -top-20 -right-20 w-80 h-80 rounded-full bg-brand-500/10 blur-3xl" />
                         <div className="pointer-events-none absolute -bottom-16 -left-16 w-64 h-64 rounded-full bg-indigo-500/10 blur-3xl" />
 
-                        <div className="relative space-y-6">
+                        <div className="relative space-y-4 sm:space-y-6">
                             <div className="space-y-1">
-                                <div className="flex items-center gap-2 text-brand-300 text-sm font-medium">
-                                    <Sparkles className="h-4 w-4" />
+                                <div className="flex items-center gap-2 text-brand-300 text-xs sm:text-sm font-medium">
+                                    <Sparkles className="h-4 w-4 shrink-0" />
                                     {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
                                 </div>
-                                <h1 className="text-3xl md:text-4xl font-serif font-bold tracking-tight">
+                                <h1 className="text-2xl sm:text-3xl md:text-4xl font-serif font-bold tracking-tight">
                                     Welcome back{studiedToday > 0 ? ' 🔥' : ' 👋'}
                                 </h1>
-                                <p className="text-slate-400 text-base">
+                                <p className="text-slate-400 text-sm sm:text-base">
                                     {dueCount > 0
                                         ? `You have ${dueCount} card${dueCount !== 1 ? 's' : ''} to review today.`
                                         : cards.length > 0
@@ -440,7 +472,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             {/* Search Bar */}
                             <div ref={wrapperRef} className="relative">
                                 <form onSubmit={handleSearch} className="relative group">
-                                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                    <div className="absolute inset-y-0 left-0 pl-3.5 sm:pl-4 flex items-center pointer-events-none">
                                         <Search className="h-5 w-5 text-slate-400 group-focus-within:text-brand-400 transition-colors" />
                                     </div>
                                     <input
@@ -455,12 +487,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                         }}
                                         placeholder="Look up a word…"
                                         autoComplete="off"
-                                        className="block w-full pl-11 pr-28 py-4 bg-white/10 backdrop-blur border border-white/20 rounded-2xl text-white text-lg placeholder:text-slate-500 focus:outline-none focus:border-brand-400 focus:ring-4 focus:ring-brand-400/20 transition-all"
+                                        className="block w-full pl-10 sm:pl-11 pr-24 sm:pr-28 py-3 sm:py-4 bg-white/10 backdrop-blur border border-white/20 rounded-2xl text-white text-base sm:text-lg placeholder:text-slate-500 focus:outline-none focus:border-brand-400 focus:ring-4 focus:ring-brand-400/20 transition-all"
                                     />
                                     <button
                                         type="submit"
                                         disabled={isSearching || !query.trim()}
-                                        className="absolute right-2 top-2 bottom-2 bg-brand-500 hover:bg-brand-600 text-white px-5 rounded-xl font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                                        className="absolute right-1.5 sm:right-2 top-1.5 sm:top-2 bottom-1.5 sm:bottom-2 bg-brand-500 hover:bg-brand-600 text-white px-3.5 sm:px-5 rounded-xl text-sm sm:text-base font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
                                     >
                                         {isSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Search'}
                                     </button>
@@ -490,9 +522,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             {dueCount > 0 && (
                                 <button
                                     onClick={() => onNavigate('study')}
-                                    className="inline-flex items-center gap-2.5 px-6 py-3 bg-brand-500 hover:bg-brand-600 text-white rounded-xl font-semibold shadow-lg shadow-brand-500/30 hover:scale-105 active:scale-95 transition-all"
+                                    className="inline-flex items-center gap-2 sm:gap-2.5 px-4 sm:px-6 py-2.5 sm:py-3 bg-brand-500 hover:bg-brand-600 text-white rounded-xl text-sm sm:text-base font-semibold shadow-lg shadow-brand-500/30 hover:scale-105 active:scale-95 transition-all"
                                 >
-                                    <Play className="h-4 w-4 fill-current" />
+                                    <Play className="h-4 w-4 fill-current shrink-0" />
                                     Start Study Session
                                     <span className="bg-white/20 text-white text-xs px-2 py-0.5 rounded-full font-bold">
                                         {dueCount}
@@ -503,7 +535,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     </div>
 
                     {/* ── Stats Grid ──────────────────────────────────────────────────── */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
                         {[
                             {
                                 label: 'Due Today',
@@ -539,15 +571,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 iconBg: 'bg-blue-100 dark:bg-blue-900/40',
                             },
                         ].map(({ label, value, suffix, icon: Icon, color, bg, iconBg }) => (
-                            <div key={label} className={`p-5 rounded-2xl border ${bg} flex flex-col gap-3`}>
-                                <div className={`w-10 h-10 ${iconBg} rounded-xl flex items-center justify-center`}>
-                                    <Icon className={`h-5 w-5 ${color}`} />
+                            <div key={label} className={`p-3.5 sm:p-5 rounded-2xl border ${bg} flex flex-col gap-2.5 sm:gap-3`}>
+                                <div className={`w-9 h-9 sm:w-10 sm:h-10 ${iconBg} rounded-xl flex items-center justify-center shrink-0`}>
+                                    <Icon className={`h-4 w-4 sm:h-5 sm:w-5 ${color}`} />
                                 </div>
-                                <div>
-                                    <p className="text-2xl font-bold text-slate-900 dark:text-white leading-none">
+                                <div className="min-w-0">
+                                    <p className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white leading-none truncate">
                                         {value}{suffix}
                                     </p>
-                                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">{label}</p>
+                                    <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1 truncate">{label}</p>
                                 </div>
                             </div>
                         ))}
@@ -557,14 +589,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     {categoryProgressItems.length > 0 && (
                         <div
                             data-testid="home-categories-section"
-                            className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm shadow-slate-100 dark:shadow-none overflow-hidden"
+                            className="bg-white dark:bg-slate-800 rounded-2xl sm:rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm shadow-slate-100 dark:shadow-none overflow-hidden"
                         >
-                            <div className="px-6 pt-6 pb-4 border-b border-slate-50 dark:border-slate-700 flex flex-wrap items-center justify-between gap-3">
-                                <div className="flex items-center gap-2.5">
-                                    <div className="p-2 rounded-xl bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-400">
+                            <div className="px-4 sm:px-6 pt-5 sm:pt-6 pb-4 border-b border-slate-50 dark:border-slate-700 flex flex-wrap items-center justify-between gap-3">
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                    <div className="p-2 rounded-xl bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-400 shrink-0">
                                         <BookOpen className="h-4 w-4" />
                                     </div>
-                                    <div>
+                                    <div className="min-w-0">
                                         <div className="flex items-center gap-2">
                                             <h2 className="font-semibold text-slate-800 dark:text-slate-100 text-sm uppercase tracking-wider">
                                                 Categories & Books
@@ -579,12 +611,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                     </div>
                                 </div>
 
-                                <div className="flex items-center gap-2.5">
+                                <div className="flex flex-wrap items-center gap-2.5">
                                     {onImportBookWords && (
                                         <button
                                             type="button"
                                             onClick={() => setIsBookPrepOpen(true)}
-                                            className="px-3.5 py-2 rounded-xl bg-brand-50 hover:bg-brand-100 dark:bg-brand-900/30 dark:hover:bg-brand-900/50 text-brand-700 dark:text-brand-300 text-xs font-semibold border border-brand-200 dark:border-brand-800/60 transition-colors flex items-center gap-1.5"
+                                            className="px-3 sm:px-3.5 py-2 rounded-xl bg-brand-50 hover:bg-brand-100 dark:bg-brand-900/30 dark:hover:bg-brand-900/50 text-brand-700 dark:text-brand-300 text-xs font-semibold border border-brand-200 dark:border-brand-800/60 transition-colors flex items-center gap-1.5"
                                         >
                                             <Plus className="h-3.5 w-3.5" />
                                             Prepare for a Book
@@ -601,7 +633,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 </div>
                             </div>
 
-                            <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            <div className="p-4 sm:p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                 {categoryProgressItems.map((cat) => {
                                     const isBook = cat.kind === 'book';
                                     const isTag = cat.kind === 'tag';
@@ -799,20 +831,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     )}
 
                     {/* ── Two-column layout: Word of the Day + Progress ────────────────── */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
 
                         {/* Word of the Day */}
-                        <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm shadow-slate-100 dark:shadow-none overflow-hidden flex flex-col">
-                            <div className="px-6 pt-6 pb-4 border-b border-slate-50 dark:border-slate-700 flex items-center gap-2">
+                        <div className="bg-white dark:bg-slate-800 rounded-2xl sm:rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm shadow-slate-100 dark:shadow-none overflow-hidden flex flex-col">
+                            <div className="px-4 sm:px-6 pt-5 sm:pt-6 pb-3.5 sm:pb-4 border-b border-slate-50 dark:border-slate-700 flex items-center gap-2">
                                 <Star className="h-4 w-4 text-amber-500 fill-current" />
                                 <h2 className="font-semibold text-slate-800 dark:text-slate-100 text-sm uppercase tracking-wider">Word of the Day</h2>
                             </div>
 
                             {wordOfTheDay ? (
-                                <div className="p-6 flex flex-col flex-1 gap-4">
+                                <div className="p-4 sm:p-6 flex flex-col flex-1 gap-4">
                                     <div className="flex items-start justify-between gap-4">
-                                        <div>
-                                            <h3 className="text-3xl font-serif font-bold text-slate-900 dark:text-white">{wordOfTheDay.word}</h3>
+                                        <div className="min-w-0">
+                                            <h3 className="text-2xl sm:text-3xl font-serif font-bold text-slate-900 dark:text-white break-words">{wordOfTheDay.word}</h3>
                                             <div className="flex items-center gap-2 mt-1 flex-wrap">
                                                 {wordOfTheDay.phonetic && (
                                                     <span className="text-slate-400 text-sm font-serif italic">{wordOfTheDay.phonetic}</span>
@@ -829,7 +861,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                             <p className="text-xs text-slate-400 mt-0.5 italic">{wordOfTheDay.partOfSpeech}</p>
                                         </div>
                                         {wordOfTheDay.image && (
-                                            <div className="w-20 h-20 rounded-xl overflow-hidden border border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 flex items-center justify-center shrink-0">
+                                            <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl overflow-hidden border border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 flex items-center justify-center shrink-0">
                                                 <img
                                                     src={wordOfTheDay.image}
                                                     alt={wordOfTheDay.word}
@@ -859,7 +891,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                     </button>
                                 </div>
                             ) : (
-                                <div className="flex-1 flex flex-col items-center justify-center p-10 text-center gap-3">
+                                <div className="flex-1 flex flex-col items-center justify-center p-8 sm:p-10 text-center gap-3">
                                     <BookOpen className="h-10 w-10 text-slate-200 dark:text-slate-700" />
                                     <p className="text-slate-400 text-sm">
                                         Add words to your deck to get a Word of the Day.
@@ -875,13 +907,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         </div>
 
                         {/* Progress Breakdown */}
-                        <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm shadow-slate-100 dark:shadow-none overflow-hidden flex flex-col">
-                            <div className="px-6 pt-6 pb-4 border-b border-slate-50 dark:border-slate-700 flex items-center gap-2">
+                        <div className="bg-white dark:bg-slate-800 rounded-2xl sm:rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm shadow-slate-100 dark:shadow-none overflow-hidden flex flex-col">
+                            <div className="px-4 sm:px-6 pt-5 sm:pt-6 pb-3.5 sm:pb-4 border-b border-slate-50 dark:border-slate-700 flex items-center gap-2">
                                 <TrendingUp className="h-4 w-4 text-brand-500" />
                                 <h2 className="font-semibold text-slate-800 dark:text-slate-100 text-sm uppercase tracking-wider">Progress</h2>
                             </div>
 
-                            <div className="p-6 flex flex-col gap-4 flex-1">
+                            <div className="p-4 sm:p-6 flex flex-col gap-4 flex-1">
                                 {cards.length === 0 ? (
                                     <div className="flex-1 flex flex-col items-center justify-center text-center gap-3">
                                         <Brain className="h-10 w-10 text-slate-200 dark:text-slate-700" />
@@ -912,13 +944,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                         {/* Streak info */}
                                         <div className="mt-2 pt-4 border-t border-slate-50 dark:border-slate-700 grid grid-cols-2 gap-4">
                                             <div className="text-center">
-                                                <p className="text-2xl font-bold text-slate-900 dark:text-white">{currentStreak}</p>
+                                                <p className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white">{currentStreak}</p>
                                                 <p className="text-xs text-slate-400 mt-0.5 flex items-center justify-center gap-1">
                                                     <Flame className="h-3 w-3 text-orange-400" /> Current Streak
                                                 </p>
                                             </div>
                                             <div className="text-center border-l border-slate-100 dark:border-slate-700">
-                                                <p className="text-2xl font-bold text-slate-900 dark:text-white">{longestStreak}</p>
+                                                <p className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white">{longestStreak}</p>
                                                 <p className="text-xs text-slate-400 mt-0.5 flex items-center justify-center gap-1">
                                                     <Star className="h-3 w-3 text-amber-400" /> Longest Streak
                                                 </p>
@@ -940,8 +972,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
                     {/* ── Recently Added ──────────────────────────────────────────────── */}
                     {recentCards.length > 0 && (
-                        <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm shadow-slate-100 dark:shadow-none overflow-hidden">
-                            <div className="px-6 pt-6 pb-4 border-b border-slate-50 dark:border-slate-700 flex items-center justify-between">
+                        <div className="bg-white dark:bg-slate-800 rounded-2xl sm:rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm shadow-slate-100 dark:shadow-none overflow-hidden">
+                            <div className="px-4 sm:px-6 pt-5 sm:pt-6 pb-3.5 sm:pb-4 border-b border-slate-50 dark:border-slate-700 flex items-center justify-between">
                                 <div className="flex items-center gap-2">
                                     <Clock className="h-4 w-4 text-slate-400" />
                                     <h2 className="font-semibold text-slate-800 dark:text-slate-100 text-sm uppercase tracking-wider">Recently Added</h2>

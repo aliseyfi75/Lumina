@@ -140,7 +140,7 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
     };
 
     return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4">
             <div
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
                 onClick={onClose}
@@ -150,11 +150,11 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 20 }}
                 transition={{ duration: 0.2 }}
-                className="relative w-full max-w-md bg-white dark:bg-slate-800 rounded-3xl shadow-2xl overflow-hidden border border-slate-100 dark:border-slate-700"
+                className="relative w-full max-w-md max-h-[90dvh] flex flex-col bg-white dark:bg-slate-800 rounded-2xl sm:rounded-3xl shadow-2xl overflow-hidden border border-slate-100 dark:border-slate-700"
             >
                 {/* Header */}
-                <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between bg-slate-50 dark:bg-slate-800/50">
-                    <h2 className="text-xl font-serif font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <div className="px-4 sm:px-6 py-4 sm:py-5 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between bg-slate-50 dark:bg-slate-800/50 shrink-0">
+                    <h2 className="text-lg sm:text-xl font-serif font-bold text-slate-900 dark:text-white flex items-center gap-2">
                         <BrainCircuit className="h-5 w-5 text-brand-500" />
                         Study Session
                     </h2>
@@ -167,7 +167,7 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
                 </div>
 
                 {/* Content */}
-                <div className="p-6 space-y-5 max-h-[75vh] overflow-y-auto custom-scrollbar">
+                <div className="p-4 sm:p-6 space-y-4 sm:space-y-5 flex-1 min-h-0 overflow-y-auto custom-scrollbar">
                     {availableTags.length > 0 && (
                         <div className="space-y-2">
                             <label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
@@ -455,16 +455,16 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
                 </div>
 
                 {/* Footer */}
-                <div className="px-6 py-5 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 flex justify-end gap-3">
+                <div className="px-4 sm:px-6 py-4 sm:py-5 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 flex justify-end gap-2.5 sm:gap-3 shrink-0">
                     <button
                         onClick={onClose}
-                        className="px-5 py-2.5 text-slate-600 dark:text-slate-300 font-medium hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors"
+                        className="px-4 sm:px-5 py-2 sm:py-2.5 text-sm sm:text-base text-slate-600 dark:text-slate-300 font-medium hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors"
                     >
                         Cancel
                     </button>
                     <button
                         onClick={handleStart}
-                        className={`px-6 py-2.5 text-white font-medium rounded-xl shadow-lg transition-all active:scale-95 flex items-center gap-2 ${mode === 'full'
+                        className={`px-4 sm:px-6 py-2 sm:py-2.5 text-sm sm:text-base text-white font-medium rounded-xl shadow-lg transition-all active:scale-95 flex items-center gap-2 ${mode === 'full'
                             ? 'bg-brand-600 hover:bg-brand-700 shadow-brand-500/30'
                             : mode === 'short'
                                 ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-500/30'
@@ -472,11 +472,11 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
                             }`}
                     >
                         {mode === 'full' ? (
-                            <Play className="h-4 w-4 fill-current" />
+                            <Play className="h-4 w-4 fill-current shrink-0" />
                         ) : mode === 'short' ? (
-                            <Zap className="h-4 w-4 fill-current" />
+                            <Zap className="h-4 w-4 fill-current shrink-0" />
                         ) : (
-                            <ListChecks className="h-4 w-4" />
+                            <ListChecks className="h-4 w-4 shrink-0" />
                         )}
                         Start {mode === 'full' ? 'Full Session' : mode === 'short' ? 'Short Session' : 'Quiz Session'}
                     </button>

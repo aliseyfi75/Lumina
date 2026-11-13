@@ -327,16 +327,16 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
   };
 
   return (
-    <div className="max-w-2xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="text-center space-y-4">
-        <h1 className="text-5xl font-serif font-bold text-slate-900 dark:text-white tracking-tight">Lumina</h1>
-        <p className="text-slate-500 dark:text-slate-400 text-lg">Illuminate your vocabulary.</p>
+    <div className="max-w-2xl mx-auto space-y-6 sm:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div className="text-center space-y-2 sm:space-y-4">
+        <h1 className="text-3xl sm:text-4xl md:text-5xl font-serif font-bold text-slate-900 dark:text-white tracking-tight">Lumina</h1>
+        <p className="text-slate-500 dark:text-slate-400 text-base sm:text-lg">Illuminate your vocabulary.</p>
       </div>
 
       <div className="space-y-3">
         <div ref={wrapperRef} className="relative group z-20">
           <form onSubmit={handleSearch} className="relative">
-            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+            <div className="absolute inset-y-0 left-0 pl-3.5 sm:pl-4 flex items-center pointer-events-none">
               <Search className="h-5 w-5 text-slate-400 group-focus-within:text-brand-500 transition-colors" />
             </div>
             <input
@@ -352,13 +352,13 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
                 }
               }}
               placeholder="Lookup a word..."
-              className="block w-full pl-11 pr-4 py-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-2xl text-lg text-slate-900 dark:text-white shadow-sm placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 transition-all"
+              className="block w-full pl-10 sm:pl-11 pr-24 py-3 sm:py-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-2xl text-base sm:text-lg text-slate-900 dark:text-white shadow-sm placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 transition-all"
               autoComplete="off"
             />
             <button
               type="submit"
               disabled={(loading && query.trim().toLowerCase() === lastSearched.current.toLowerCase()) || !query.trim()}
-              className="absolute right-2 top-2 bottom-2 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-4 rounded-xl font-medium hover:bg-slate-800 dark:hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="absolute right-2 top-1.5 bottom-1.5 sm:top-2 sm:bottom-2 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-3.5 sm:px-4 rounded-xl text-sm sm:text-base font-medium hover:bg-slate-800 dark:hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Search'}
             </button>
@@ -495,19 +495,19 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
       )}
 
       {result && (
-        <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-xl shadow-slate-200/50 dark:shadow-none overflow-hidden border border-slate-100 dark:border-slate-700">
-          <div className="p-8 border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/30 space-y-3">
-            <div className="flex items-baseline gap-4 flex-wrap">
-              <h2 className="text-4xl font-serif font-bold text-slate-900 dark:text-white">{result.word}</h2>
+        <div className="bg-white dark:bg-slate-800 rounded-2xl sm:rounded-3xl shadow-xl shadow-slate-200/50 dark:shadow-none overflow-hidden border border-slate-100 dark:border-slate-700">
+          <div className="p-5 sm:p-8 border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/30 space-y-3">
+            <div className="flex items-baseline gap-3 sm:gap-4 flex-wrap">
+              <h2 className="text-2xl sm:text-3xl md:text-4xl font-serif font-bold text-slate-900 dark:text-white break-words">{result.word}</h2>
               {result.phonetic && (
-                <span className="text-xl text-slate-500 dark:text-slate-400 font-serif italic">{result.phonetic}</span>
+                <span className="text-base sm:text-xl text-slate-500 dark:text-slate-400 font-serif italic">{result.phonetic}</span>
               )}
               <button
                 onClick={() => playAudio(result.word, result.audio)}
                 className="p-1.5 text-slate-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded-full transition-colors"
                 title="Listen to pronunciation"
               >
-                <Volume2 className="h-6 w-6" />
+                <Volume2 className="h-5 w-5 sm:h-6 sm:w-6" />
               </button>
             </div>
             {result.origin && (
@@ -532,13 +532,13 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
             </div>
           </div>
 
-          <div className="p-8 space-y-8">
+          <div className="p-5 sm:p-8 space-y-6 sm:space-y-8">
             {result.image && (
-              <div className="mb-6 rounded-2xl overflow-hidden shadow-sm border border-slate-100 dark:border-slate-700 max-h-64 flex justify-center bg-slate-50 dark:bg-slate-900 items-center">
+              <div className="mb-4 sm:mb-6 rounded-2xl overflow-hidden shadow-sm border border-slate-100 dark:border-slate-700 max-h-56 sm:max-h-64 flex justify-center bg-slate-50 dark:bg-slate-900 items-center">
                 <img
                   src={result.image}
                   alt={`Visual mnemonic for ${result.word}`}
-                  className="max-h-64 object-contain"
+                  className="max-h-56 sm:max-h-64 object-contain"
                   loading="lazy"
                 />
               </div>
@@ -546,27 +546,27 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
             {result.meanings?.map((meaning, idx) => (
               <div key={`${meaning.partOfSpeech}-${idx}`} className="space-y-4">
                 <div className="flex items-center gap-3">
-                  <span className="px-3 py-1 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-sm font-semibold rounded-full uppercase tracking-wider">
+                  <span className="px-3 py-1 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs sm:text-sm font-semibold rounded-full uppercase tracking-wider">
                     {meaning.partOfSpeech}
                   </span>
                   <div className="h-px bg-slate-100 dark:bg-slate-700 flex-grow"></div>
                 </div>
 
-                <div className="space-y-6">
+                <div className="space-y-5 sm:space-y-6">
                   {meaning.definitions?.map((def, dIdx) => {
                     const savedCard = getSavedCard(result.word, def.definition);
                     const isSaved = !!savedCard;
 
                     return (
-                      <div key={dIdx} className="group relative pl-4 border-l-2 border-transparent hover:border-brand-200 transition-colors">
-                        <p className="text-slate-800 dark:text-slate-200 text-lg leading-relaxed">
+                      <div key={dIdx} className="group relative pl-3.5 sm:pl-4 border-l-2 border-transparent hover:border-brand-200 transition-colors">
+                        <p className="text-slate-800 dark:text-slate-200 text-base sm:text-lg leading-relaxed">
                           <ClickableDefinitionText
                             text={def.definition}
                             onWordClick={handleSuggestionClick}
                           />
                         </p>
                         {def.example && (
-                          <p className="mt-2 text-slate-500 dark:text-slate-400 italic font-serif">
+                          <p className="mt-2 text-sm sm:text-base text-slate-500 dark:text-slate-400 italic font-serif">
                             "{def.example}"
                           </p>
                         )}

@@ -233,6 +233,14 @@ const extractDeckFromGistObject = async (
     studyHistory: parsed.studyHistory && typeof parsed.studyHistory === 'object' ? parsed.studyHistory : {},
     longestStreak: typeof parsed.longestStreak === 'number' ? parsed.longestStreak : 0,
     deletedCards: parsed.deletedCards && typeof parsed.deletedCards === 'object' ? parsed.deletedCards : {},
+    ...(parsed.languagePreference === 'en' ||
+    parsed.languagePreference === 'fa' ||
+    parsed.languagePreference === 'both'
+      ? { languagePreference: parsed.languagePreference }
+      : {}),
+    ...(typeof parsed.languagePreferenceUpdatedAt === 'number'
+      ? { languagePreferenceUpdatedAt: parsed.languagePreferenceUpdatedAt }
+      : {}),
     chunkCount: 1,
     basketExists: true,
   };

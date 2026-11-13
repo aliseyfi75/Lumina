@@ -1,11 +1,12 @@
 import JSZip from 'jszip';
-import type { WordEntry, Meaning } from '../types';
+import type { WordEntry, Meaning, LocalizedTranslations } from '../types';
 import {
   lookupWord,
   isCircularOrFormOfDefinition,
   normalizePartOfSpeech,
   deriveCandidateLemmas,
 } from './dictionaryService';
+import { translateCardMeaningToPersian } from './translationService';
 
 export type ComplexityLevel = 'beginner' | 'intermediate' | 'advanced';
 export type ComplexityFilter = 'all' | ComplexityLevel;
@@ -38,6 +39,7 @@ export interface BookExtractedWord {
   audio?: string;
   partOfSpeech: string;
   mainDefinition: string;
+  translations?: LocalizedTranslations;
   bookSentence: string;
   synonyms?: string[];
   antonyms?: string[];
@@ -1894,6 +1896,7 @@ const queryDatamuseFrequency = async (
 export interface SelectedContextualMeaning {
   partOfSpeech: string;
   definition: string;
+  translations?: LocalizedTranslations;
   synonyms?: string[];
   antonyms?: string[];
 }
@@ -2602,6 +2605,8 @@ export const extractComplexWordsFromText = async (
         let phonetic = dictEntry?.phonetic || freqInfo.phonetic;
         let audio = dictEntry?.audio;
 
+        let resolvedDictSource: WordEntry | null = dictEntry;
+
         // If an inflected book word still lacked a definition across all sources, check derived base lemmas
         if (!selected || isCircularOrFormOfDefinition(selected.definition, candidate.word)) {
           const lemmas = deriveCandidateLemmas(candidate.word);
@@ -2615,6 +2620,7 @@ export const extractComplexWordsFromText = async (
               );
               if (lemmaSelected && !isCircularOrFormOfDefinition(lemmaSelected.definition, lemma)) {
                 selected = lemmaSelected;
+                resolvedDictSource = lemmaDict;
                 phonetic = phonetic || lemmaDict.phonetic;
                 audio = audio || lemmaDict.audio;
                 break;
@@ -2629,6 +2635,7 @@ export const extractComplexWordsFromText = async (
               );
               if (stemSelected) {
                 selected = stemSelected;
+                resolvedDictSource = null;
                 phonetic = phonetic || stemInfo.phonetic;
                 break;
               }
@@ -2643,6 +2650,23 @@ export const extractComplexWordsFromText = async (
 
         const partOfSpeech = selected?.partOfSpeech || freqInfo.fallbackPos || 'noun';
 
+        let resolvedTranslations = selected?.translations;
+        const sourceHadAnyTranslations = Boolean(
+          resolvedDictSource?.wordTranslations?.fa?.length ||
+            resolvedDictSource?.meanings.some(m => m.definitions.some(d => Boolean(d.translations?.fa)))
+        );
+        // Only run standalone Persian translation if finalDef came from Datamuse fallback (!resolvedDictSource)
+        // or if lookupWord succeeded on other senses and picked a deep un-enriched sense (sourceHadAnyTranslations)
+        if (!resolvedTranslations?.fa && (!resolvedDictSource || sourceHadAnyTranslations)) {
+          resolvedTranslations = await translateCardMeaningToPersian({
+            word: candidate.word,
+            partOfSpeech,
+            mainDefinition: finalDef,
+            existingTranslations: resolvedTranslations,
+            maxWaitMs: 800,
+          });
+        }
+
         const complexityLevel = classifyComplexityLevel(
           candidate.word,
           freqInfo.frequency,
@@ -2656,6 +2680,7 @@ export const extractComplexWordsFromText = async (
           audio,
           partOfSpeech,
           mainDefinition: finalDef,
+          ...(resolvedTranslations ? { translations: resolvedTranslations } : {}),
           bookSentence: cleanSentence,
           synonyms: selected?.synonyms,
           antonyms: selected?.antonyms,

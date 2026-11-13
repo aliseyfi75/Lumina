@@ -1,11 +1,12 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Flashcard, FlashcardStatus, ViewState } from '../types';
+import { Flashcard, FlashcardStatus, MeaningLanguagePreference, ViewState } from '../types';
 import { getWordSuggestions } from '../services/suggestionService';
 import { prefetchWord } from '../services/dictionaryService';
 import { playAudio } from '../utils/audio';
 import { getLocalDateString, calculateCurrentStreak, getDueCards } from '../utils/studyUtils';
 import { BookExtractedWord } from '../services/bookService';
 import { BookPrepModal } from './BookPrepModal';
+import { MeaningDisplay } from './MeaningDisplay';
 import { parseTagHierarchy, formatBookTag } from '../utils/tagUtils';
 import { useCardFlip3D } from '../utils/cardFlip';
 import { getAdaptiveWordHeadingClass } from '../utils/deviceScale';
@@ -25,6 +26,7 @@ interface DashboardProps {
     onStartStudy?: (initialTag?: string, initialChapters?: string[]) => void;
     onImportBookWords?: (bookTitle: string, words: BookExtractedWord[]) => void;
     onDeleteBook?: (bookTag: string) => void;
+    languagePreference?: MeaningLanguagePreference;
 }
 
 interface CategoryProgressItem {
@@ -225,6 +227,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     onStartStudy,
     onImportBookWords,
     onDeleteBook,
+    languagePreference = 'en',
 }) => {
     const [query, setQuery] = useState('');
     const [suggestions, setSuggestions] = useState<string[]>([]);
@@ -427,7 +430,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                                     <img src={selectedCard.image} alt={selectedCard.word} className="max-h-full object-contain" loading="lazy" />
                                                 </div>
                                             )}
-                                            <p className="text-slate-100 text-sm sm:text-base leading-relaxed flex-1">{selectedCard.mainDefinition}</p>
+                                            <div className="flex-1">
+                                                <MeaningDisplay
+                                                    englishText={selectedCard.mainDefinition}
+                                                    translations={selectedCard.translations}
+                                                    preference={languagePreference}
+                                                    variant="darkCard"
+                                                    testIdPrefix="dashboard-card"
+                                                />
+                                            </div>
                                             {selectedCard.example && (
                                                 <p className="text-slate-400 text-xs sm:text-sm italic border-t border-slate-700 pt-3">
                                                     "{selectedCard.example}"
@@ -872,9 +883,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                         )}
                                     </div>
 
-                                    <p className="text-slate-700 dark:text-slate-300 leading-relaxed text-sm flex-1">
-                                        {wordOfTheDay.mainDefinition}
-                                    </p>
+                                    <MeaningDisplay
+                                        englishText={wordOfTheDay.mainDefinition}
+                                        translations={wordOfTheDay.translations}
+                                        preference={languagePreference}
+                                        variant="compact"
+                                        englishClassName="text-slate-700 dark:text-slate-300 leading-relaxed text-sm"
+                                        containerClassName="flex-1"
+                                        testIdPrefix="wotd"
+                                    />
 
                                     {wordOfTheDay.example && (
                                         <p className="text-slate-400 italic text-sm font-serif border-t border-slate-50 dark:border-slate-700 pt-3">
@@ -1018,6 +1035,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     existingWords={existingWordsSet}
                     existingCards={cards}
                     onImportBookWords={onImportBookWords}
+                    languagePreference={languagePreference}
                 />
             )}
 

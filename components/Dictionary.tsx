@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
-import { WordEntry, Flashcard } from '../types';
+import { WordEntry, Flashcard, LocalizedTranslations, MeaningLanguagePreference } from '../types';
 import { lookupWord, fetchImageForWord, getSpellingSuggestions, prefetchWord } from '../services/dictionaryService';
 import { getWordSuggestions } from '../services/suggestionService';
 import { trackEvent, TRACKING_ACTION, TRACKING_CATEGORY } from '../services/trackingService';
 import { playAudio } from '../utils/audio';
+import { resolveMeaningDisplay } from '../utils/languageUtils';
 import { Search, Plus, Check, Loader2, BookOpen, Clock, Volume2, Sparkles, Compass, X } from 'lucide-react';
 import { TagSelectorInput } from './TagSelectorInput';
 
@@ -41,10 +42,18 @@ const CURATED_WORD_PACKS: Array<{
 const ALL_DISCOVERY_WORDS = CURATED_WORD_PACKS.flatMap(p => p.words);
 
 interface DictionaryProps {
-  onAddCard: (entry: WordEntry, definition: string, example: string, partOfSpeech: string, tags?: string[]) => void;
+  onAddCard: (
+    entry: WordEntry,
+    definition: string,
+    example: string,
+    partOfSpeech: string,
+    tags?: string[],
+    translations?: LocalizedTranslations
+  ) => void;
   onRemoveCard: (id: string) => void;
   onUpdateCard?: (id: string, updates: { tags?: string[] }) => void;
   existingCards: Flashcard[];
+  languagePreference?: MeaningLanguagePreference;
 }
 
 const STOP_WORDS = new Set([
@@ -99,7 +108,13 @@ const ClickableDefinitionText: React.FC<{
   );
 };
 
-export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard, onUpdateCard, existingCards }) => {
+export const Dictionary: React.FC<DictionaryProps> = ({
+  onAddCard,
+  onRemoveCard,
+  onUpdateCard,
+  existingCards,
+  languagePreference = 'en',
+}) => {
   const location = useLocation();
   const initialQuery: string | undefined = (location.state as { query?: string } | null)?.query;
   const [query, setQuery] = useState(initialQuery || '');
@@ -510,6 +525,18 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
                 <Volume2 className="h-5 w-5 sm:h-6 sm:w-6" />
               </button>
             </div>
+            {(languagePreference === 'fa' || languagePreference === 'both') &&
+              result.wordTranslations?.fa &&
+              result.wordTranslations.fa.length > 0 && (
+                <div
+                  lang="fa"
+                  dir="rtl"
+                  data-testid="dictionary-word-translation-fa"
+                  className="font-persian text-base sm:text-lg font-semibold text-emerald-800 dark:text-emerald-300 bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200/70 dark:border-emerald-800/60 rounded-xl px-4 py-2.5 text-right"
+                >
+                  {result.wordTranslations.fa.join('، ')}
+                </div>
+              )}
             {result.origin && (
               <div className="text-sm text-slate-500 dark:text-slate-400 bg-white/70 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-700/70 rounded-xl px-4 py-2.5">
                 <span className="font-semibold uppercase tracking-wider text-[11px] text-slate-400 dark:text-slate-500 mr-2">
@@ -556,15 +583,49 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
                   {meaning.definitions?.map((def, dIdx) => {
                     const savedCard = getSavedCard(result.word, def.definition);
                     const isSaved = !!savedCard;
+                    const resolvedDef = resolveMeaningDisplay(
+                      def.definition,
+                      def.translations,
+                      languagePreference
+                    );
+                    const senseTranslations: LocalizedTranslations | undefined =
+                      def.translations?.fa
+                        ? def.translations
+                        : result.wordTranslations?.fa?.length
+                          ? { fa: result.wordTranslations.fa.join('، ') }
+                          : undefined;
 
                     return (
                       <div key={dIdx} className="group relative pl-3.5 sm:pl-4 border-l-2 border-transparent hover:border-brand-200 transition-colors">
-                        <p className="text-slate-800 dark:text-slate-200 text-base sm:text-lg leading-relaxed">
-                          <ClickableDefinitionText
-                            text={def.definition}
-                            onWordClick={handleSuggestionClick}
-                          />
-                        </p>
+                        <div className="space-y-2" data-testid="dictionary-sense-meaning">
+                          {resolvedDef.showEnglish && (
+                            <p
+                              lang="en"
+                              dir="ltr"
+                              data-testid="dictionary-def-en"
+                              className="text-slate-800 dark:text-slate-200 text-base sm:text-lg leading-relaxed"
+                            >
+                              <ClickableDefinitionText
+                                text={def.definition}
+                                onWordClick={handleSuggestionClick}
+                              />
+                            </p>
+                          )}
+                          {resolvedDef.showPersian && (
+                            <p
+                              lang="fa"
+                              dir="rtl"
+                              data-testid="dictionary-def-fa"
+                              className={
+                                resolvedDef.showEnglish
+                                  ? 'font-persian text-emerald-800 dark:text-emerald-300 text-base sm:text-lg leading-relaxed text-right pt-2 border-t border-slate-100 dark:border-slate-700/70'
+                                  : 'font-persian text-slate-800 dark:text-slate-100 text-base sm:text-lg leading-relaxed text-right'
+                              }
+                            >
+                              {resolvedDef.persianText}
+                            </p>
+                          )}
+                        </div>
                         {def.example && (
                           <p className="mt-2 text-sm sm:text-base text-slate-500 dark:text-slate-400 italic font-serif">
                             "{def.example}"
@@ -583,7 +644,8 @@ export const Dictionary: React.FC<DictionaryProps> = ({ onAddCard, onRemoveCard,
                                   def.definition,
                                   def.example || '',
                                   meaning.partOfSpeech,
-                                  selectedTags.length > 0 ? selectedTags : undefined
+                                  selectedTags.length > 0 ? selectedTags : undefined,
+                                  senseTranslations
                                 );
                                 showToast(`"${result.word}" added to deck`);
                               }

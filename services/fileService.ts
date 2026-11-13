@@ -65,6 +65,12 @@ export const parseFileContent = (text: string): CloudData => {
         studyHistory: data.studyHistory || {},
         longestStreak: data.longestStreak || 0,
         deletedCards,
+        ...(data.languagePreference === 'en' || data.languagePreference === 'fa' || data.languagePreference === 'both'
+          ? { languagePreference: data.languagePreference }
+          : {}),
+        ...(typeof data.languagePreferenceUpdatedAt === 'number'
+          ? { languagePreferenceUpdatedAt: data.languagePreferenceUpdatedAt }
+          : {}),
       };
     }
   } catch (e) {

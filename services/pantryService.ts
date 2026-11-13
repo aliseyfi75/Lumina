@@ -1,4 +1,4 @@
-import { Flashcard, CloudData, FlashcardStatus } from '../types';
+import { Flashcard, CloudData, FlashcardStatus, MeaningLanguagePreference } from '../types';
 
 const BASE_URL = 'https://getpantry.cloud/apiv1/pantry';
 const BASKET_NAME = 'Lumina';
@@ -20,6 +20,8 @@ interface PullCheckpoint {
   studyHistory: Record<string, number>;
   longestStreak: number;
   deletedCards: Record<string, number>;
+  languagePreference?: MeaningLanguagePreference;
+  languagePreferenceUpdatedAt?: number;
   chunks: Record<number, Flashcard[]>;
   updatedAt: number;
 }
@@ -431,6 +433,17 @@ const sanitizeCardsForCloud = (cards: Flashcard[]): Flashcard[] =>
     if (card.phonetic) clean.phonetic = card.phonetic;
     if (card.audio && !card.audio.startsWith('data:')) clean.audio = card.audio;
     if (card.image && !card.image.startsWith('data:')) clean.image = card.image;
+    if (card.translations) {
+      const cleanedTranslations: Record<string, string> = {};
+      for (const [lang, text] of Object.entries(card.translations)) {
+        if (typeof text === 'string' && text.trim()) {
+          cleanedTranslations[lang] = text.trim();
+        }
+      }
+      if (Object.keys(cleanedTranslations).length > 0) {
+        clean.translations = cleanedTranslations;
+      }
+    }
     if (card.example) clean.example = card.example;
     if (card.tags && card.tags.length > 0) clean.tags = card.tags;
     if (card.synonyms && card.synonyms.length > 0) clean.synonyms = card.synonyms;
@@ -529,6 +542,8 @@ const computeMainManifestSignature = (data: {
   studyHistory?: Record<string, number>;
   longestStreak?: number;
   deletedCards?: Record<string, number>;
+  languagePreference?: MeaningLanguagePreference;
+  languagePreferenceUpdatedAt?: number;
   chunkCount?: number;
   chunkHashes?: Record<number, string>;
 }): string =>
@@ -538,6 +553,8 @@ const computeMainManifestSignature = (data: {
       studyHistory: data.studyHistory || {},
       longestStreak: data.longestStreak || 0,
       deletedCards: data.deletedCards || {},
+      languagePreference: data.languagePreference || 'en',
+      languagePreferenceUpdatedAt: data.languagePreferenceUpdatedAt || 0,
       chunkCount: data.chunkCount || 1,
       chunkHashes: data.chunkHashes || null,
     })
@@ -640,6 +657,8 @@ export const getDeck = async (
         studyHistory: data.studyHistory,
         longestStreak: data.longestStreak,
         deletedCards: data.deletedCards,
+        languagePreference: data.languagePreference,
+        languagePreferenceUpdatedAt: data.languagePreferenceUpdatedAt,
         chunkCount,
         chunkHashes: remoteChunkHashes,
       });
@@ -662,7 +681,7 @@ export const getDeck = async (
             cached &&
             cached.chunkCount === chunkCount &&
             cached.manifestSignature === currentManifestSig &&
-            Array.isArray(cached.chunks?.[i])
+            Array.isArray(cached?.chunks?.[i])
           ) {
             initialChunks[i] = cached.chunks[i];
           }
@@ -674,6 +693,12 @@ export const getDeck = async (
         studyHistory: data.studyHistory || {},
         longestStreak: data.longestStreak || 0,
         deletedCards: data.deletedCards || {},
+        ...(data.languagePreference === 'en' || data.languagePreference === 'fa' || data.languagePreference === 'both'
+          ? { languagePreference: data.languagePreference }
+          : {}),
+        ...(typeof data.languagePreferenceUpdatedAt === 'number'
+          ? { languagePreferenceUpdatedAt: data.languagePreferenceUpdatedAt }
+          : {}),
         chunks: initialChunks,
         updatedAt: Date.now(),
       };
@@ -687,6 +712,8 @@ export const getDeck = async (
         studyHistory: checkpoint.studyHistory,
         longestStreak: checkpoint.longestStreak,
         deletedCards: checkpoint.deletedCards,
+        languagePreference: checkpoint.languagePreference,
+        languagePreferenceUpdatedAt: checkpoint.languagePreferenceUpdatedAt,
         chunkCount,
         basketExists: true,
       });
@@ -790,6 +817,8 @@ export const getDeck = async (
         studyHistory: activeCheckpoint.studyHistory,
         longestStreak: activeCheckpoint.longestStreak,
         deletedCards: activeCheckpoint.deletedCards,
+        languagePreference: activeCheckpoint.languagePreference,
+        languagePreferenceUpdatedAt: activeCheckpoint.languagePreferenceUpdatedAt,
         chunkCount,
         basketExists: true,
       });
@@ -809,6 +838,8 @@ export const getDeck = async (
       studyHistory: activeCheckpoint.studyHistory,
       longestStreak: activeCheckpoint.longestStreak,
       deletedCards: activeCheckpoint.deletedCards,
+      languagePreference: activeCheckpoint.languagePreference,
+      languagePreferenceUpdatedAt: activeCheckpoint.languagePreferenceUpdatedAt,
       chunkCount,
       chunkHashes: remoteChunkHashes,
     });
@@ -829,7 +860,9 @@ export const getDeck = async (
       activeCheckpoint.longestStreak,
       activeCheckpoint.deletedCards,
       chunkCount,
-      perChunkCardHashes
+      perChunkCardHashes,
+      activeCheckpoint.languagePreference,
+      activeCheckpoint.languagePreferenceUpdatedAt
     );
     saveUploadedChunkHashes(cleanId, uploadedHashesRecord);
 
@@ -840,6 +873,8 @@ export const getDeck = async (
       studyHistory: activeCheckpoint.studyHistory,
       longestStreak: activeCheckpoint.longestStreak,
       deletedCards: activeCheckpoint.deletedCards,
+      languagePreference: activeCheckpoint.languagePreference,
+      languagePreferenceUpdatedAt: activeCheckpoint.languagePreferenceUpdatedAt,
       chunkCount,
       basketExists: true,
     };
@@ -954,13 +989,17 @@ const computeMetadataOnlyHash = (
   longestStreak: number | undefined,
   deletedCards: Record<string, number> | undefined,
   chunkCount: number,
-  chunkHashes: Record<number, string>
+  chunkHashes: Record<number, string>,
+  languagePreference?: MeaningLanguagePreference,
+  languagePreferenceUpdatedAt?: number
 ): string =>
   computePayloadHash(
     JSON.stringify({
       studyHistory: sortRecordKeys(studyHistory),
       longestStreak: longestStreak || 0,
       deletedCards: sortRecordKeys(deletedCards),
+      languagePreference: languagePreference || 'en',
+      languagePreferenceUpdatedAt: languagePreferenceUpdatedAt || 0,
       chunkCount,
       chunkHashes,
     })

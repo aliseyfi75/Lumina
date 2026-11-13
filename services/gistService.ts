@@ -45,6 +45,17 @@ const sanitizeCardsForGist = (cards: Flashcard[]): Flashcard[] =>
     if (card.phonetic) clean.phonetic = card.phonetic;
     if (card.audio && !card.audio.startsWith('data:')) clean.audio = card.audio;
     if (card.image && !card.image.startsWith('data:')) clean.image = card.image;
+    if (card.translations) {
+      const cleanedTranslations: Record<string, string> = {};
+      for (const [lang, text] of Object.entries(card.translations)) {
+        if (typeof text === 'string' && text.trim()) {
+          cleanedTranslations[lang] = text.trim();
+        }
+      }
+      if (Object.keys(cleanedTranslations).length > 0) {
+        clean.translations = cleanedTranslations;
+      }
+    }
     if (card.example) clean.example = card.example;
     if (card.tags && card.tags.length > 0) clean.tags = card.tags;
     if (card.synonyms && card.synonyms.length > 0) clean.synonyms = card.synonyms;
@@ -89,6 +100,8 @@ export const computeGistPayloadHash = (cloudData: CloudData): string => {
       studyHistory: sortRecordKeys(cloudData.studyHistory),
       longestStreak: cloudData.longestStreak || 0,
       deletedCards: sortRecordKeys(cloudData.deletedCards),
+      languagePreference: cloudData.languagePreference || 'en',
+      languagePreferenceUpdatedAt: cloudData.languagePreferenceUpdatedAt || 0,
     })
   );
 };
@@ -500,6 +513,10 @@ export const updateGistDeck = async (
       studyHistory: cloudData.studyHistory || {},
       longestStreak: cloudData.longestStreak || 0,
       deletedCards: cloudData.deletedCards || {},
+      ...(cloudData.languagePreference ? { languagePreference: cloudData.languagePreference } : {}),
+      ...(cloudData.languagePreferenceUpdatedAt
+        ? { languagePreferenceUpdatedAt: cloudData.languagePreferenceUpdatedAt }
+        : {}),
       updatedAt: Date.now(),
     },
     null,
@@ -539,6 +556,10 @@ export const updateGistDeck = async (
       studyHistory: cloudData.studyHistory || {},
       longestStreak: cloudData.longestStreak || 0,
       deletedCards: cloudData.deletedCards || {},
+      ...(cloudData.languagePreference ? { languagePreference: cloudData.languagePreference } : {}),
+      ...(cloudData.languagePreferenceUpdatedAt
+        ? { languagePreferenceUpdatedAt: cloudData.languagePreferenceUpdatedAt }
+        : {}),
       chunkCount: 1,
       basketExists: true,
     },

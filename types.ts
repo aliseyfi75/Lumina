@@ -6,12 +6,18 @@ export enum FlashcardStatus {
   Mastered = 'Mastered',
 }
 
+export type SupportedLanguageCode = 'en' | 'fa';
+export type TranslationLanguageCode = Exclude<SupportedLanguageCode, 'en'>;
+export type MeaningLanguagePreference = 'en' | 'fa' | 'both';
+export type LocalizedTranslations = Partial<Record<TranslationLanguageCode, string>>;
+
 export interface Definition {
   definition: string;
   example?: string;
   synonyms?: string[];
   antonyms?: string[];
   tags?: string[];
+  translations?: LocalizedTranslations;
 }
 
 export interface Meaning {
@@ -28,6 +34,7 @@ export interface WordEntry {
   image?: string;
   origin?: string;
   meanings: Meaning[];
+  wordTranslations?: Partial<Record<TranslationLanguageCode, string[]>>;
 }
 
 export type WordComplexityLevel = 'beginner' | 'intermediate' | 'advanced';
@@ -39,6 +46,7 @@ export interface Flashcard {
   audio?: string;
   image?: string;
   mainDefinition: string;
+  translations?: LocalizedTranslations;
   example?: string;
   partOfSpeech: string;
   tags?: string[];
@@ -93,6 +101,10 @@ export interface CloudData {
   longestStreak?: number;
   /** id → Unix-ms when the card was deleted. Tombstones are pruned after 30 days. */
   deletedCards?: Record<string, number>;
+  /** User's selected translation display preference ('en' | 'fa' | 'both') */
+  languagePreference?: MeaningLanguagePreference;
+  /** Timestamp when languagePreference was last changed, used for conflict-free cloud merge */
+  languagePreferenceUpdatedAt?: number;
   /** Persisted Pantry connection config in IndexedDB so refresh never loses connection */
   cloudConfig?: CloudConfig | null;
   chunkCount?: number;

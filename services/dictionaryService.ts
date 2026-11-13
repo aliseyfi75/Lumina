@@ -1,4 +1,10 @@
 import type { WordEntry, Meaning, Definition } from "../types";
+import { mergeTranslations } from "../utils/languageUtils";
+import {
+  clearTranslationCache,
+  enrichWordEntryWithTranslations,
+  extractPersianFromSenseTranslations,
+} from "./translationService";
 
 const PRIMARY_API_URL = "https://api.dictionaryapi.dev/api/v2/entries/en";
 const FREE_DICT_API_URL = "https://freedictionaryapi.com/api/v1/entries/en";
@@ -30,6 +36,7 @@ export const clearDictionaryCache = () => {
   inFlightLookups.clear();
   imageCache.clear();
   inFlightImages.clear();
+  clearTranslationCache();
 };
 
 const fetchWithTimeout = async (url: string, timeoutMs: number): Promise<Response> => {
@@ -818,8 +825,22 @@ export const mergeWordEntries = (
   const image = valid.find((s) => s.image)?.image;
 
   const meaningsByPos = new Map<string, Meaning>();
+  const combinedWordFa = new Set<string>();
 
   for (const source of valid) {
+    const rawWordFa = source.wordTranslations?.fa as unknown;
+    if (Array.isArray(rawWordFa)) {
+      rawWordFa.forEach((w) => {
+        if (typeof w === 'string' && w.trim()) combinedWordFa.add(w.trim());
+      });
+    } else if (typeof rawWordFa === 'string' && rawWordFa.trim()) {
+      rawWordFa
+        .split(/[،,;]/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .forEach((w) => combinedWordFa.add(w));
+    }
+
     for (const m of source.meanings) {
       const pos = normalizePartOfSpeech(m.partOfSpeech);
       const existing = meaningsByPos.get(pos);
@@ -832,6 +853,7 @@ export const mergeWordEntries = (
             synonyms: d.synonyms ? [...d.synonyms] : undefined,
             antonyms: d.antonyms ? [...d.antonyms] : undefined,
             tags: d.tags ? [...d.tags] : undefined,
+            translations: d.translations ? { ...d.translations } : undefined,
           })),
           synonyms: m.synonyms ? [...m.synonyms] : undefined,
           antonyms: m.antonyms ? [...m.antonyms] : undefined,
@@ -870,12 +892,16 @@ export const mergeWordEntries = (
               new Set([...(match.antonyms || []), ...incomingDef.antonyms])
             ).slice(0, 6);
           }
+          if (incomingDef.translations) {
+            match.translations = mergeTranslations(match.translations, incomingDef.translations, false);
+          }
         } else if (existing.definitions.length < 12) {
           existing.definitions.push({
             ...incomingDef,
             synonyms: incomingDef.synonyms ? [...incomingDef.synonyms] : undefined,
             antonyms: incomingDef.antonyms ? [...incomingDef.antonyms] : undefined,
             tags: incomingDef.tags ? [...incomingDef.tags] : undefined,
+            translations: incomingDef.translations ? { ...incomingDef.translations } : undefined,
           });
         }
       }
@@ -889,6 +915,7 @@ export const mergeWordEntries = (
     origin,
     image,
     meanings: Array.from(meaningsByPos.values()),
+    wordTranslations: combinedWordFa.size > 0 ? { fa: Array.from(combinedWordFa) } : undefined,
   };
 };
 
@@ -1058,6 +1085,7 @@ const lookupWordCore = async (
             audio: result?.audio || lemmaEntry.audio,
             origin: result?.origin || lemmaEntry.origin,
             meanings: substantiveMeanings,
+            wordTranslations: lemmaEntry.wordTranslations,
           };
           break;
         }
@@ -1105,6 +1133,9 @@ export const lookupWord = async (word: string): Promise<WordEntry | null> => {
     if (!result) {
       return null;
     }
+
+    // Always enrich all supported translation languages (Persian 'fa') so searched & extracted words save all languages
+    await enrichWordEntryWithTranslations(result, 900);
 
     const resultKey = result.word.toLowerCase();
     // Attach image immediately if it already resolved, otherwise don't block definition display

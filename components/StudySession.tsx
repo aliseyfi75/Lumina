@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Flashcard, FlashcardStatus } from '../types';
+import { Flashcard, FlashcardStatus, LocalizedTranslations, MeaningLanguagePreference } from '../types';
 import { RotateCw, CheckCircle, Brain, ArrowLeft, Volume2, MoveUp, MoveDown, MoveLeft, MoveRight, XCircle, ArrowRight, ListChecks, Undo2, RefreshCw, Lightbulb, BookOpen } from 'lucide-react';
 import Confetti from 'react-confetti';
 import { useWindowSize } from 'react-use';
@@ -10,15 +10,42 @@ import { getDueCards, sortStudySessionCards, isBookFlashcard, getCardComplexityL
 import { parseTagHierarchy, getCardBookInfo, getCardBookInfoForBook } from '../utils/tagUtils';
 import { useCardFlip3D } from '../utils/cardFlip';
 import { getAdaptiveWordHeadingClass } from '../utils/deviceScale';
+import { resolveMeaningDisplay } from '../utils/languageUtils';
+import { MeaningDisplay } from './MeaningDisplay';
 import { SessionMode } from './SessionConfigModal';
 
-const FALLBACK_DISTRACTORS = [
-  'Lasting for a very short time; fleeting or transitory.',
-  'Showing great attention to detail; very careful and precise.',
-  'Present, appearing, or found everywhere at the same time.',
-  'Fluent or persuasive in speaking or writing.',
-  'Open to more than one interpretation; not having one obvious meaning.',
+const FALLBACK_DISTRACTOR_ITEMS: Array<{
+  englishText: string;
+  translations: LocalizedTranslations;
+}> = [
+  {
+    englishText: 'Lasting for a very short time; fleeting or transitory.',
+    translations: { fa: 'زودگذر، ناپایدار — ماندگار برای مدت بسیار کوتاه' },
+  },
+  {
+    englishText: 'Showing great attention to detail; very careful and precise.',
+    translations: { fa: 'دقیق، موشکاف — دارای توجه زیاد به جزئیات و بسیار دقیق' },
+  },
+  {
+    englishText: 'Present, appearing, or found everywhere at the same time.',
+    translations: { fa: 'همه‌جاحاضر، فراگیر — حاضر یا یافت‌شده در همه‌جا در یک زمان' },
+  },
+  {
+    englishText: 'Fluent or persuasive in speaking or writing.',
+    translations: { fa: 'شیوا، بلیغ — روان و اثرگذار در سخن گفتن یا نوشتن' },
+  },
+  {
+    englishText: 'Open to more than one interpretation; not having one obvious meaning.',
+    translations: { fa: 'مبهم، دوپهلو — دارای بیش از یک برداشت و بدون معنای آشکار واحد' },
+  },
 ];
+
+interface QuizOptionItem {
+  key: string;
+  englishText: string;
+  translations?: LocalizedTranslations;
+  isCorrect: boolean;
+}
 
 interface ReviewHistoryItem {
   index: number;
@@ -32,9 +59,17 @@ interface StudySessionProps {
   onRestoreCard?: (previousCard: Flashcard) => void;
   onSessionComplete: () => void;
   onExit: () => void;
+  languagePreference?: MeaningLanguagePreference;
 }
 
-export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard, onRestoreCard, onSessionComplete, onExit }) => {
+export const StudySession: React.FC<StudySessionProps> = ({
+  cards,
+  onReviewCard,
+  onRestoreCard,
+  onSessionComplete,
+  onExit,
+  languagePreference = 'en',
+}) => {
   const [queue, setQueue] = useState<Flashcard[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
@@ -164,17 +199,23 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
   }, []);
 
   // Build 4 deterministic multiple-choice options for the current quiz card
-  const quizOptions = useMemo(() => {
+  const quizOptions = useMemo<QuizOptionItem[]>(() => {
     if (!currentCard || !isQuizMode) return [];
     const correct = currentCard.mainDefinition.trim();
-    const otherDefs = Array.from(
-      new Set(
-        cards
-          .filter(c => c.id !== currentCard.id && c.mainDefinition.trim() !== correct)
-          .map(c => c.mainDefinition.trim())
-          .filter(Boolean)
-      )
-    );
+    const seenDefs = new Set<string>([correct]);
+    const otherCandidates: Array<{ englishText: string; translations?: LocalizedTranslations }> = [];
+
+    for (const c of cards) {
+      if (c.id === currentCard.id) continue;
+      const trimmed = c.mainDefinition.trim();
+      if (!trimmed || seenDefs.has(trimmed)) continue;
+      seenDefs.add(trimmed);
+      otherCandidates.push({
+        englishText: trimmed,
+        translations: c.translations,
+      });
+    }
+
     // Deterministic pseudo-random shuffle seeded by card id + currentIndex
     const hashStr = (str: string) => {
       let h = 2166136261 ^ currentIndex;
@@ -185,17 +226,39 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
       return h >>> 0;
     };
 
-    const sortedDeckDistractors = [...otherDefs].sort(
-      (a, b) => hashStr(currentCard.id + a) - hashStr(currentCard.id + b)
+    const sortedDeckDistractors = [...otherCandidates].sort(
+      (a, b) => hashStr(currentCard.id + a.englishText) - hashStr(currentCard.id + b.englishText)
     );
     const fallbackNeeded = Math.max(0, 3 - sortedDeckDistractors.length);
-    const distractors = [
-      ...sortedDeckDistractors.slice(0, 3),
-      ...FALLBACK_DISTRACTORS.filter(d => d !== correct && !sortedDeckDistractors.includes(d)).slice(0, fallbackNeeded),
+    const chosenDeckDistractors = sortedDeckDistractors.slice(0, 3);
+    const chosenDeckTexts = new Set(chosenDeckDistractors.map(d => d.englishText));
+    const fallbackDistractors = FALLBACK_DISTRACTOR_ITEMS.filter(
+      d => d.englishText !== correct && !chosenDeckTexts.has(d.englishText)
+    ).slice(0, fallbackNeeded);
+
+    const allOptions: QuizOptionItem[] = [
+      {
+        key: correct,
+        englishText: correct,
+        translations: currentCard.translations,
+        isCorrect: true,
+      },
+      ...chosenDeckDistractors.map(d => ({
+        key: d.englishText,
+        englishText: d.englishText,
+        translations: d.translations,
+        isCorrect: false,
+      })),
+      ...fallbackDistractors.map(d => ({
+        key: d.englishText,
+        englishText: d.englishText,
+        translations: d.translations,
+        isCorrect: false,
+      })),
     ];
 
-    return [correct, ...distractors].sort(
-      (a, b) => hashStr('opt:' + currentCard.id + a) - hashStr('opt:' + currentCard.id + b)
+    return allOptions.sort(
+      (a, b) => hashStr('opt:' + currentCard.id + a.key) - hashStr('opt:' + currentCard.id + b.key)
     );
   }, [currentCard, isQuizMode, cards, currentIndex]);
 
@@ -336,7 +399,7 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
           const num = parseInt(e.key, 10);
           if (num >= 1 && num <= quizOptions.length) {
             e.preventDefault();
-            handleSelectQuizOption(quizOptions[num - 1]);
+            handleSelectQuizOption(quizOptions[num - 1].key);
           }
         } else if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowRight') {
           e.preventDefault();
@@ -624,9 +687,14 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
 
             <div className="space-y-2.5 sm:space-y-3">
               {quizOptions.map((option, idx) => {
-                const isCorrectOption = option === currentCard.mainDefinition.trim();
-                const isSelected = selectedQuizOption === option;
+                const isCorrectOption = option.isCorrect;
+                const isSelected = selectedQuizOption === option.key;
                 const hasAnswered = selectedQuizOption !== null;
+                const resolvedOpt = resolveMeaningDisplay(
+                  option.englishText,
+                  option.translations,
+                  languagePreference
+                );
 
                 let optionClasses =
                   'border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/40 hover:border-indigo-400 dark:hover:border-indigo-500 hover:bg-indigo-50/40 dark:hover:bg-indigo-900/20 text-slate-700 dark:text-slate-200';
@@ -645,15 +713,41 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
 
                 return (
                   <button
-                    key={idx}
+                    key={option.key}
+                    data-testid={`quiz-option-${idx}`}
                     disabled={hasAnswered}
-                    onClick={() => handleSelectQuizOption(option)}
+                    onClick={() => handleSelectQuizOption(option.key)}
                     className={`w-full text-left p-3 sm:p-4 rounded-2xl border-2 transition-all flex items-start gap-2.5 sm:gap-3 ${optionClasses}`}
                   >
                     <span className="shrink-0 w-6 h-6 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 text-xs font-bold flex items-center justify-center text-slate-500 dark:text-slate-400 mt-0.5">
                       {idx + 1}
                     </span>
-                    <span className="flex-1 text-sm sm:text-base leading-snug font-medium">{option}</span>
+                    <div className="flex-1 min-w-0 space-y-1.5">
+                      {resolvedOpt.showEnglish && (
+                        <p
+                          lang="en"
+                          dir="ltr"
+                          data-testid="quiz-option-en"
+                          className="text-sm sm:text-base leading-snug font-medium text-left"
+                        >
+                          {resolvedOpt.englishText}
+                        </p>
+                      )}
+                      {resolvedOpt.showPersian && (
+                        <p
+                          lang="fa"
+                          dir="rtl"
+                          data-testid="quiz-option-fa"
+                          className={
+                            resolvedOpt.showEnglish
+                              ? 'font-persian text-xs sm:text-sm leading-relaxed text-right pt-1.5 border-t border-slate-200/70 dark:border-slate-700/70 opacity-95'
+                              : 'font-persian text-sm sm:text-base leading-relaxed font-medium text-right'
+                          }
+                        >
+                          {resolvedOpt.persianText}
+                        </p>
+                      )}
+                    </div>
                     {hasAnswered && isCorrectOption && (
                       <CheckCircle className="h-5 w-5 text-emerald-500 shrink-0 mt-0.5" />
                     )}
@@ -885,9 +979,21 @@ export const StudySession: React.FC<StudySessionProps> = ({ cards, onReviewCard,
                     </div>
                   )}
 
-                  <p className="text-base sm:text-xl text-slate-50 leading-relaxed font-medium mb-4 sm:mb-6 break-words max-w-full">
-                    {currentCard.mainDefinition}
-                  </p>
+                  <div className="mb-4 sm:mb-6 w-full max-w-full">
+                    <MeaningDisplay
+                      englishText={currentCard.mainDefinition}
+                      translations={currentCard.translations}
+                      preference={languagePreference}
+                      variant="darkCard"
+                      englishClassName="text-base sm:text-xl text-slate-50 leading-relaxed font-medium break-words text-center"
+                      persianClassName={
+                        languagePreference === 'both'
+                          ? 'font-persian text-base sm:text-xl text-emerald-300 leading-relaxed font-medium break-words text-right pt-3 mt-1 border-t border-slate-700/80'
+                          : 'font-persian text-lg sm:text-2xl text-slate-50 leading-relaxed font-medium break-words text-right'
+                      }
+                      testIdPrefix="study-card"
+                    />
+                  </div>
                   {currentCard.example && (
                     <div className="bg-slate-800/50 p-3 sm:p-4 rounded-xl w-full border border-slate-800">
                       <p className="text-slate-400 italic font-serif text-sm sm:text-lg leading-relaxed break-words">

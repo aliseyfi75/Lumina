@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Routes, Route, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { Flashcard, WordEntry, FlashcardStatus, FileSystemFileHandle, CloudConfig } from './types';
+import { Flashcard, WordEntry, FlashcardStatus, FileSystemFileHandle, CloudConfig, LocalizedTranslations, MeaningLanguagePreference } from './types';
 import { Dashboard } from './components/Dashboard';
 import { Dictionary } from './components/Dictionary';
-import { Flashcards } from './components/Flashcards';
+import { Flashcards, CustomCardFormData } from './components/Flashcards';
 import { StudySession } from './components/StudySession';
 import { Statistics } from './components/Statistics';
 import { DataManagerModal } from './components/DataManagerModal';
+import { SettingsModal } from './components/SettingsModal';
 import { AnkiImportModal } from './components/AnkiImportModal';
 import { PwaInstallBanner } from './components/PwaInstallBanner';
 import { generateJSON, parseFileContent, downloadJSON, saveToLocalFile } from './services/fileService';
@@ -16,7 +17,17 @@ import { saveFileHandleToIDB, loadFileHandleFromIDB, clearFileHandleFromIDB, sav
 import { initializeTracking, trackEvent, setTrackingUserId, trackPageView, PAGE_TITLES, TRACKING_CATEGORY, TRACKING_ACTION } from './services/trackingService';
 import { getLocalDateString, calculateCurrentStreak, getDueCards } from './utils/studyUtils';
 import { installDeviceRootScaleListeners } from './utils/deviceScale';
-import { Book, Layers, Database, Save, Cloud, BarChart2, Home, Sun, Moon, RefreshCw } from 'lucide-react';
+import {
+  loadLanguagePreferenceFromStorage,
+  saveLanguagePreferenceToStorage,
+  isValidLanguagePreference,
+  sanitizeTranslations,
+  mergeTranslations,
+  cardNeedsPersianBackfill,
+  LANGUAGE_PREFERENCE_OPTIONS,
+} from './utils/languageUtils';
+import { translateCardMeaningToPersian } from './services/translationService';
+import { Book, Layers, Database, Save, Cloud, BarChart2, Home, Sun, Moon, RefreshCw, Settings } from 'lucide-react';
 import Confetti from 'react-confetti';
 import { useWindowSize } from 'react-use';
 import { SessionConfigModal, SessionMode } from './components/SessionConfigModal';
@@ -129,6 +140,85 @@ const App: React.FC = () => {
   useEffect(() => {
     deletedCardsRef.current = deletedCards;
   }, [deletedCards]);
+
+  // Language Preference & Settings Modal State
+  const [languagePreference, setLanguagePreference] = useState<MeaningLanguagePreference>(
+    () => loadLanguagePreferenceFromStorage().preference
+  );
+  const [languagePreferenceUpdatedAt, setLanguagePreferenceUpdatedAt] = useState<number>(
+    () => loadLanguagePreferenceFromStorage().updatedAt
+  );
+  const languagePreferenceRef = useRef<MeaningLanguagePreference>(languagePreference);
+  const languagePreferenceUpdatedAtRef = useRef<number>(languagePreferenceUpdatedAt);
+
+  useEffect(() => {
+    languagePreferenceRef.current = languagePreference;
+  }, [languagePreference]);
+
+  useEffect(() => {
+    languagePreferenceUpdatedAtRef.current = languagePreferenceUpdatedAt;
+  }, [languagePreferenceUpdatedAt]);
+
+  const handleChangeLanguagePreference = useCallback((nextPref: MeaningLanguagePreference) => {
+    const now = Date.now();
+    languagePreferenceRef.current = nextPref;
+    languagePreferenceUpdatedAtRef.current = now;
+    setLanguagePreference(nextPref);
+    setLanguagePreferenceUpdatedAt(now);
+    saveLanguagePreferenceToStorage(nextPref, now);
+  }, []);
+
+  const applyIncomingLanguagePreference = useCallback(
+    (incomingPref?: MeaningLanguagePreference, incomingUpdatedAt?: number) => {
+      if (!isValidLanguagePreference(incomingPref)) return;
+      const incTs =
+        typeof incomingUpdatedAt === 'number' && Number.isFinite(incomingUpdatedAt)
+          ? incomingUpdatedAt
+          : 0;
+      const curTs = languagePreferenceUpdatedAtRef.current;
+      const shouldAdopt =
+        (curTs === 0 && (incTs > 0 || incomingPref !== 'en')) ||
+        (incTs > 0 && incTs > curTs);
+      if (shouldAdopt) {
+        const resolvedTs = Math.max(incTs, curTs);
+        languagePreferenceRef.current = incomingPref;
+        languagePreferenceUpdatedAtRef.current = resolvedTs;
+        setLanguagePreference(incomingPref);
+        setLanguagePreferenceUpdatedAt(resolvedTs);
+        saveLanguagePreferenceToStorage(incomingPref, resolvedTs);
+      }
+    },
+    []
+  );
+
+  const resolveMergedLanguagePreference = (
+    ...sources: Array<{
+      languagePreference?: MeaningLanguagePreference;
+      languagePreferenceUpdatedAt?: number;
+    } | undefined>
+  ): { preference: MeaningLanguagePreference; updatedAt: number } => {
+    let bestPref = languagePreferenceRef.current;
+    let bestTs = languagePreferenceUpdatedAtRef.current;
+    for (const src of sources) {
+      if (!src || !isValidLanguagePreference(src.languagePreference)) continue;
+      const ts =
+        typeof src.languagePreferenceUpdatedAt === 'number' &&
+        Number.isFinite(src.languagePreferenceUpdatedAt)
+          ? src.languagePreferenceUpdatedAt
+          : 0;
+      if ((bestTs === 0 && (ts > 0 || src.languagePreference !== 'en')) || (ts > 0 && ts > bestTs)) {
+        bestPref = src.languagePreference;
+        bestTs = Math.max(ts, bestTs);
+      }
+    }
+    return { preference: bestPref, updatedAt: bestTs };
+  };
+
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isBackfillingTranslations, setIsBackfillingTranslations] = useState(false);
+  const [backfillProgress, setBackfillProgress] = useState<{ completed: number; total: number } | null>(null);
+  const isBackfillingRef = useRef(false);
+  const autoAttemptedBackfillIdsRef = useRef<Set<string>>(new Set());
 
   const [isDataModalOpen, setIsDataModalOpen] = useState(false);
   const [ankiImportFile, setAnkiImportFile] = useState<File | null>(null);
@@ -276,6 +366,7 @@ const App: React.FC = () => {
           winner.mainDefinition && winner.mainDefinition !== '—'
             ? winner.mainDefinition
             : fallback.mainDefinition || winner.mainDefinition,
+        translations: mergeTranslations(fallback.translations, winner.translations, true),
         partOfSpeech: winner.partOfSpeech || fallback.partOfSpeech || '',
         phonetic: winner.phonetic || fallback.phonetic,
         audio: winner.audio || fallback.audio,
@@ -394,6 +485,9 @@ const App: React.FC = () => {
 
       // Step A: Try IndexedDB first (primary store)
       const idbData = await loadAppDataFromIDB();
+      if (idbData?.languagePreference) {
+        applyIncomingLanguagePreference(idbData.languagePreference, idbData.languagePreferenceUpdatedAt);
+      }
       if (
         idbData &&
         Array.isArray(idbData.cards) &&
@@ -442,6 +536,8 @@ const App: React.FC = () => {
                   studyHistory: initialStudyHistory,
                   longestStreak: initialLongestStreak,
                   deletedCards: {},
+                  languagePreference: languagePreferenceRef.current,
+                  languagePreferenceUpdatedAt: languagePreferenceUpdatedAtRef.current,
                 });
                 localStorage.removeItem(LOCAL_STORAGE_KEY);
               } catch { /* migration best-effort */ }
@@ -484,6 +580,12 @@ const App: React.FC = () => {
             if (initialLongestStreak === 0 && defaultData.longestStreak) {
               setLongestStreak(defaultData.longestStreak);
             }
+            if (defaultData.languagePreference) {
+              applyIncomingLanguagePreference(
+                defaultData.languagePreference,
+                defaultData.languagePreferenceUpdatedAt
+              );
+            }
           }
         } catch (e) {
           console.warn('No default database found.', e);
@@ -523,6 +625,12 @@ const App: React.FC = () => {
             : await getDeck(resolvedCloudConfig.pantryId, undefined, {
                 localCards: initialCards,
                 onPartialCards: (partial) => {
+                  if (partial.languagePreference) {
+                    applyIncomingLanguagePreference(
+                      partial.languagePreference,
+                      partial.languagePreferenceUpdatedAt
+                    );
+                  }
                   if (
                     (partial.cards && partial.cards.length > 0) ||
                     (partial.deletedCards && Object.keys(partial.deletedCards).length > 0)
@@ -537,6 +645,13 @@ const App: React.FC = () => {
             const cardTs = Math.max(c.updatedAt ?? 0, c.lastReviewed ?? 0, c.createdAt ?? 0);
             return delAt > 0 && delAt >= cardTs;
           });
+
+          if (cloudData.languagePreference) {
+            applyIncomingLanguagePreference(
+              cloudData.languagePreference,
+              cloudData.languagePreferenceUpdatedAt
+            );
+          }
 
           if (
             (cloudData.cards && cloudData.cards.length > 0) ||
@@ -635,6 +750,8 @@ const App: React.FC = () => {
       longestStreak,
       deletedCards: prunedDeletedCards(),
       cloudConfig: cloudConfigRef.current,
+      languagePreference,
+      languagePreferenceUpdatedAt,
     };
     saveAppDataToIDB(data)
       .then(() => {
@@ -645,7 +762,7 @@ const App: React.FC = () => {
       .catch(console.error);
     // Keep localStorage as a secondary safety net without starving CLOUD_CONFIG_KEY of quota
     persistCardsToLocalStorageSafe(cards);
-  }, [cards, studyHistory, longestStreak, deletedCards, cloudConfig, isDataLoaded]);
+  }, [cards, studyHistory, longestStreak, deletedCards, cloudConfig, languagePreference, languagePreferenceUpdatedAt, isDataLoaded]);
 
   // Track online / offline status
   useEffect(() => {
@@ -665,7 +782,14 @@ const App: React.FC = () => {
     const timeoutId = setTimeout(async () => {
       setIsFileSaving(true);
       try {
-        await saveToLocalFile(fileHandle, { cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() });
+        await saveToLocalFile(fileHandle, {
+          cards,
+          studyHistory,
+          longestStreak,
+          deletedCards: prunedDeletedCards(),
+          languagePreference,
+          languagePreferenceUpdatedAt,
+        });
       } catch (error) {
         console.error("Auto-save file failed:", error);
       } finally {
@@ -673,7 +797,7 @@ const App: React.FC = () => {
       }
     }, 1000);
     return () => clearTimeout(timeoutId);
-  }, [cards, studyHistory, longestStreak, deletedCards, fileHandle, isDataLoaded]);
+  }, [cards, studyHistory, longestStreak, deletedCards, languagePreference, languagePreferenceUpdatedAt, fileHandle, isDataLoaded]);
 
   const beginCloudSyncProgress = useCallback(
     (cardsToSyncCount: number, mode: 'push' | 'pull' = 'push', dirtyStepsOverride?: number) => {
@@ -781,12 +905,16 @@ const App: React.FC = () => {
           studyHistory,
           longestStreak,
           deletedCards: currentDeleted,
+          languagePreference,
+          languagePreferenceUpdatedAt,
         })
       : getPendingCloudSyncPlan(cloudConfig.pantryId, {
           cards,
           studyHistory,
           longestStreak,
           deletedCards: currentDeleted,
+          languagePreference,
+          languagePreferenceUpdatedAt,
         }).hasChanges;
 
     if (!hasChanges) {
@@ -804,6 +932,8 @@ const App: React.FC = () => {
     const timeoutId = setTimeout(async () => {
       if (isMigratingCloudRef.current) return;
       const latestDeleted = prunedDeletedCards();
+      const latestPref = languagePreferenceRef.current;
+      const latestPrefTs = languagePreferenceUpdatedAtRef.current;
       if (usingGist) {
         if (
           !hasPendingGistSyncChanges(cloudConfig.gistId!, {
@@ -811,6 +941,8 @@ const App: React.FC = () => {
             studyHistory,
             longestStreak,
             deletedCards: latestDeleted,
+            languagePreference: latestPref,
+            languagePreferenceUpdatedAt: latestPrefTs,
           })
         ) {
           setPendingCloudSync(false);
@@ -822,7 +954,14 @@ const App: React.FC = () => {
           await updateGistDeck(
             cloudConfig.gistToken!,
             cloudConfig.gistId!,
-            { cards, studyHistory, longestStreak, deletedCards: latestDeleted },
+            {
+              cards,
+              studyHistory,
+              longestStreak,
+              deletedCards: latestDeleted,
+              languagePreference: latestPref,
+              languagePreferenceUpdatedAt: latestPrefTs,
+            },
             { onProgress: handleBackgroundCloudProgress }
           );
           setPendingCloudSync(false);
@@ -843,6 +982,8 @@ const App: React.FC = () => {
         studyHistory,
         longestStreak,
         deletedCards: latestDeleted,
+        languagePreference: latestPref,
+        languagePreferenceUpdatedAt: latestPrefTs,
       });
       if (!latestPlan.hasChanges) {
         setPendingCloudSync(false);
@@ -858,7 +999,14 @@ const App: React.FC = () => {
       try {
         await updateDeck(
           cloudConfig.pantryId,
-          { cards, studyHistory, longestStreak, deletedCards: latestDeleted },
+          {
+            cards,
+            studyHistory,
+            longestStreak,
+            deletedCards: latestDeleted,
+            languagePreference: latestPref,
+            languagePreferenceUpdatedAt: latestPrefTs,
+          },
           { onProgress: handleBackgroundCloudProgress }
         );
         lastKeepAliveRef.current = Date.now();
@@ -875,7 +1023,7 @@ const App: React.FC = () => {
     }, debounceMs);
     return () => clearTimeout(timeoutId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cards, studyHistory, longestStreak, deletedCards, cloudConfig, isDataLoaded]);
+  }, [cards, studyHistory, longestStreak, deletedCards, languagePreference, languagePreferenceUpdatedAt, cloudConfig, isDataLoaded]);
 
   // 4b. Keep Pantry alive when user re-opens / focuses an already-open tab or PWA window (not needed for GitHub Gist)
   useEffect(() => {
@@ -907,6 +1055,8 @@ const App: React.FC = () => {
     let cancelled = false;
     const flush = async () => {
       const latestDeleted = prunedDeletedCards();
+      const latestPref = languagePreferenceRef.current;
+      const latestPrefTs = languagePreferenceUpdatedAtRef.current;
       const usingGist = isGistCloud(cloudConfig);
       if (usingGist) {
         if (
@@ -915,6 +1065,8 @@ const App: React.FC = () => {
             studyHistory,
             longestStreak,
             deletedCards: latestDeleted,
+            languagePreference: latestPref,
+            languagePreferenceUpdatedAt: latestPrefTs,
           })
         ) {
           if (!cancelled) setPendingCloudSync(false);
@@ -926,7 +1078,14 @@ const App: React.FC = () => {
           await updateGistDeck(
             cloudConfig.gistToken!,
             cloudConfig.gistId!,
-            { cards, studyHistory, longestStreak, deletedCards: latestDeleted },
+            {
+              cards,
+              studyHistory,
+              longestStreak,
+              deletedCards: latestDeleted,
+              languagePreference: latestPref,
+              languagePreferenceUpdatedAt: latestPrefTs,
+            },
             { onProgress: handleBackgroundCloudProgress }
           );
         } catch (e) {
@@ -946,6 +1105,8 @@ const App: React.FC = () => {
         studyHistory,
         longestStreak,
         deletedCards: latestDeleted,
+        languagePreference: latestPref,
+        languagePreferenceUpdatedAt: latestPrefTs,
       });
       if (!plan.hasChanges) {
         if (!cancelled) setPendingCloudSync(false);
@@ -960,7 +1121,14 @@ const App: React.FC = () => {
       try {
         await updateDeck(
           cloudConfig.pantryId,
-          { cards, studyHistory, longestStreak, deletedCards: latestDeleted },
+          {
+            cards,
+            studyHistory,
+            longestStreak,
+            deletedCards: latestDeleted,
+            languagePreference: latestPref,
+            languagePreferenceUpdatedAt: latestPrefTs,
+          },
           { onProgress: handleBackgroundCloudProgress }
         );
       } catch (e) {
@@ -1001,6 +1169,12 @@ const App: React.FC = () => {
         const file = await handle.getFile();
         const text = await file.text();
         const loadedData = parseFileContent(text);
+        if (loadedData.languagePreference) {
+          applyIncomingLanguagePreference(
+            loadedData.languagePreference,
+            loadedData.languagePreferenceUpdatedAt
+          );
+        }
         if (loadedData.cards.length > 0) {
           performMerge(loadedData.cards, loadedData.deletedCards ?? {});
         }
@@ -1052,13 +1226,27 @@ const App: React.FC = () => {
   const handleManualFileSave = async () => {
     if (!fileHandle) return;
     setIsFileSaving(true);
-    await saveToLocalFile(fileHandle, { cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() });
+    await saveToLocalFile(fileHandle, {
+      cards,
+      studyHistory,
+      longestStreak,
+      deletedCards: prunedDeletedCards(),
+      languagePreference,
+      languagePreferenceUpdatedAt,
+    });
     setIsFileSaving(false);
     trackEvent(TRACKING_ACTION.MANUAL_SAVE, TRACKING_CATEGORY.DATA);
   };
 
   const handleExportData = () => {
-    const jsonContent = generateJSON({ cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() });
+    const jsonContent = generateJSON({
+      cards,
+      studyHistory,
+      longestStreak,
+      deletedCards: prunedDeletedCards(),
+      languagePreference,
+      languagePreferenceUpdatedAt,
+    });
     const date = new Date().toISOString().split('T')[0];
     downloadJSON(jsonContent, `lumina_backup_${date}.json`);
     trackEvent(TRACKING_ACTION.EXPORT_CSV, TRACKING_CATEGORY.DATA);
@@ -1068,6 +1256,12 @@ const App: React.FC = () => {
     const text = await file.text();
     const importedData = parseFileContent(text);
     if (importedData.cards.length === 0) throw new Error("No valid data found");
+    if (importedData.languagePreference) {
+      applyIncomingLanguagePreference(
+        importedData.languagePreference,
+        importedData.languagePreferenceUpdatedAt
+      );
+    }
     performMerge(importedData.cards, importedData.deletedCards ?? {});
     if (importedData.studyHistory) setStudyHistory(prev => ({ ...prev, ...importedData.studyHistory }));
     if (importedData.longestStreak) setLongestStreak(prev => Math.max(prev, importedData.longestStreak!));
@@ -1108,6 +1302,8 @@ const App: React.FC = () => {
         studyHistory: {} as Record<string, number>,
         longestStreak: 0,
         deletedCards: {} as Record<string, number>,
+        languagePreference: undefined as MeaningLanguagePreference | undefined,
+        languagePreferenceUpdatedAt: undefined as number | undefined,
       };
       if (
         cleanOldId &&
@@ -1134,6 +1330,8 @@ const App: React.FC = () => {
             studyHistory: fetchedOld.studyHistory ?? {},
             longestStreak: fetchedOld.longestStreak ?? 0,
             deletedCards: fetchedOld.deletedCards ?? {},
+            languagePreference: fetchedOld.languagePreference,
+            languagePreferenceUpdatedAt: fetchedOld.languagePreferenceUpdatedAt,
           };
         } catch {
           // Old Pantry ID may have expired; local state already holds cached history
@@ -1176,6 +1374,7 @@ const App: React.FC = () => {
         newCloudData.longestStreak || 0,
         calculateCurrentStreak(mergedHistory)
       );
+      const mergedLangPref = resolveMergedLanguagePreference(oldCloudData, newCloudData);
 
       // 5. Merge tombstones, excluding any card ID that is present in our merged active deck
       const activeIds = new Set(mergedCards.map(c => c.id));
@@ -1206,6 +1405,8 @@ const App: React.FC = () => {
           studyHistory: mergedHistory,
           longestStreak: mergedStreak,
           deletedCards: mergedDeletedRecord,
+          languagePreference: mergedLangPref.preference,
+          languagePreferenceUpdatedAt: mergedLangPref.updatedAt,
         },
         {
           onProgress: ({ currentChunk, totalChunks, estimatedRemainingSec }) => {
@@ -1227,6 +1428,11 @@ const App: React.FC = () => {
 
       // 7. Update local state & persistence
       onProgress?.({ percent: 100, step: 'Sync complete!' });
+      languagePreferenceRef.current = mergedLangPref.preference;
+      languagePreferenceUpdatedAtRef.current = mergedLangPref.updatedAt;
+      setLanguagePreference(mergedLangPref.preference);
+      setLanguagePreferenceUpdatedAt(mergedLangPref.updatedAt);
+      saveLanguagePreferenceToStorage(mergedLangPref.preference, mergedLangPref.updatedAt);
       setDeletedCards(new Map(Object.entries(mergedDeletedRecord)));
       setCards(mergedCards);
       setStudyHistory(mergedHistory);
@@ -1245,6 +1451,8 @@ const App: React.FC = () => {
         longestStreak: mergedStreak,
         deletedCards: mergedDeletedRecord,
         cloudConfig: config,
+        languagePreference: mergedLangPref.preference,
+        languagePreferenceUpdatedAt: mergedLangPref.updatedAt,
       }).catch(console.error);
       setTrackingUserId(cleanNewId);
       trackEvent(TRACKING_ACTION.CONNECT_CLOUD, TRACKING_CATEGORY.CLOUD);
@@ -1255,6 +1463,8 @@ const App: React.FC = () => {
           studyHistory: mergedHistory,
           longestStreak: mergedStreak,
           deletedCards: mergedDeletedRecord,
+          languagePreference: mergedLangPref.preference,
+          languagePreferenceUpdatedAt: mergedLangPref.updatedAt,
         }).catch(() => {});
       }
 
@@ -1301,6 +1511,8 @@ const App: React.FC = () => {
         studyHistory: {} as Record<string, number>,
         longestStreak: 0,
         deletedCards: {} as Record<string, number>,
+        languagePreference: undefined as MeaningLanguagePreference | undefined,
+        languagePreferenceUpdatedAt: undefined as number | undefined,
       };
 
       if (cleanPantryId) {
@@ -1330,6 +1542,8 @@ const App: React.FC = () => {
             studyHistory: fetchedPantry.studyHistory ?? {},
             longestStreak: fetchedPantry.longestStreak ?? 0,
             deletedCards: fetchedPantry.deletedCards ?? {},
+            languagePreference: fetchedPantry.languagePreference,
+            languagePreferenceUpdatedAt: fetchedPantry.languagePreferenceUpdatedAt,
           };
         } catch (err) {
           console.warn('Best-effort Pantry pull during Gist migration failed (using local deck):', err);
@@ -1386,6 +1600,7 @@ const App: React.FC = () => {
         gistCloudData?.longestStreak || 0,
         calculateCurrentStreak(mergedHistory)
       );
+      const mergedLangPref = resolveMergedLanguagePreference(pantryCloudData, gistCloudData);
 
       const activeIds = new Set(mergedCards.map(c => c.id));
       const cutoff = Date.now() - TOMBSTONE_TTL;
@@ -1416,6 +1631,8 @@ const App: React.FC = () => {
           studyHistory: mergedHistory,
           longestStreak: mergedStreak,
           deletedCards: mergedDeletedRecord,
+          languagePreference: mergedLangPref.preference,
+          languagePreferenceUpdatedAt: mergedLangPref.updatedAt,
         },
         {
           force: true,
@@ -1436,6 +1653,11 @@ const App: React.FC = () => {
 
       // 5. Update local state & persistence to use GitHub Gist
       onProgress?.({ percent: 100, step: 'Synced to GitHub Gist!' });
+      languagePreferenceRef.current = mergedLangPref.preference;
+      languagePreferenceUpdatedAtRef.current = mergedLangPref.updatedAt;
+      setLanguagePreference(mergedLangPref.preference);
+      setLanguagePreferenceUpdatedAt(mergedLangPref.updatedAt);
+      saveLanguagePreferenceToStorage(mergedLangPref.preference, mergedLangPref.updatedAt);
       const nextDeletedMap = new Map(Object.entries(mergedDeletedRecord));
       deletedCardsRef.current = nextDeletedMap;
       cardsRef.current = mergedCards;
@@ -1461,6 +1683,8 @@ const App: React.FC = () => {
         longestStreak: mergedStreak,
         deletedCards: mergedDeletedRecord,
         cloudConfig: config,
+        languagePreference: mergedLangPref.preference,
+        languagePreferenceUpdatedAt: mergedLangPref.updatedAt,
       }).catch(console.error);
       setTrackingUserId(gistId);
       trackEvent(TRACKING_ACTION.CONNECT_CLOUD, TRACKING_CATEGORY.CLOUD, 'github_gist');
@@ -1471,6 +1695,8 @@ const App: React.FC = () => {
           studyHistory: mergedHistory,
           longestStreak: mergedStreak,
           deletedCards: mergedDeletedRecord,
+          languagePreference: mergedLangPref.preference,
+          languagePreferenceUpdatedAt: mergedLangPref.updatedAt,
         }).catch(() => {});
       }
 
@@ -1510,6 +1736,8 @@ const App: React.FC = () => {
       longestStreak,
       deletedCards: prunedDeletedCards(),
       cloudConfig: null,
+      languagePreference: languagePreferenceRef.current,
+      languagePreferenceUpdatedAt: languagePreferenceUpdatedAtRef.current,
     }).catch(console.error);
     trackEvent(TRACKING_ACTION.DISCONNECT_CLOUD, TRACKING_CATEGORY.CLOUD);
   };
@@ -1535,8 +1763,16 @@ const App: React.FC = () => {
         deletedCards?: Record<string, number>;
         studyHistory?: Record<string, number>;
         longestStreak?: number;
+        languagePreference?: MeaningLanguagePreference;
+        languagePreferenceUpdatedAt?: number;
       }) => {
         skipNextCloudAutoSaveRef.current = true;
+        if (partialOrFull.languagePreference) {
+          applyIncomingLanguagePreference(
+            partialOrFull.languagePreference,
+            partialOrFull.languagePreferenceUpdatedAt
+          );
+        }
         if (
           (partialOrFull.cards && partialOrFull.cards.length > 0) ||
           (partialOrFull.deletedCards && Object.keys(partialOrFull.deletedCards).length > 0)
@@ -1584,7 +1820,14 @@ const App: React.FC = () => {
       // Immediately flush to local file so both are in sync
       if (fileHandle) {
         try {
-          await saveToLocalFile(fileHandle, { cards: cardsRef.current, studyHistory, longestStreak, deletedCards: prunedDeletedCards() });
+          await saveToLocalFile(fileHandle, {
+            cards: cardsRef.current,
+            studyHistory,
+            longestStreak,
+            deletedCards: prunedDeletedCards(),
+            languagePreference: languagePreferenceRef.current,
+            languagePreferenceUpdatedAt: languagePreferenceUpdatedAtRef.current,
+          });
         } catch (e) {
           console.warn('Could not flush cloud pull to local file', e);
         }
@@ -1604,7 +1847,14 @@ const App: React.FC = () => {
         await updateGistDeck(
           cloudConfig.gistToken!,
           cloudConfig.gistId!,
-          { cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() },
+          {
+            cards,
+            studyHistory,
+            longestStreak,
+            deletedCards: prunedDeletedCards(),
+            languagePreference: languagePreferenceRef.current,
+            languagePreferenceUpdatedAt: languagePreferenceUpdatedAtRef.current,
+          },
           {
             force: true,
             onProgress: (info) => {
@@ -1620,7 +1870,14 @@ const App: React.FC = () => {
       } else {
         await updateDeck(
           cloudConfig.pantryId,
-          { cards, studyHistory, longestStreak, deletedCards: prunedDeletedCards() },
+          {
+            cards,
+            studyHistory,
+            longestStreak,
+            deletedCards: prunedDeletedCards(),
+            languagePreference: languagePreferenceRef.current,
+            languagePreferenceUpdatedAt: languagePreferenceUpdatedAtRef.current,
+          },
           {
             onProgress: (info) => {
               handleBackgroundCloudProgress(info);
@@ -1643,20 +1900,159 @@ const App: React.FC = () => {
 
   // --- App Logic ---
 
-  const handleAddCard = (entry: WordEntry, definition: string, example: string, partOfSpeech: string, tags?: string[]) => {
+  // Helper to attach an asynchronous Persian translation onto a specific card once resolved
+  const populateSingleCardTranslationAsync = useCallback(
+    (cardId: string, word: string, mainDefinition: string, partOfSpeech?: string) => {
+      if (!word.trim() || !mainDefinition.trim()) return;
+      translateCardMeaningToPersian({ word, mainDefinition, partOfSpeech })
+        .then(resolved => {
+          if (!resolved?.fa) return;
+          setCards(prev => {
+            let changed = false;
+            const next = prev.map(c => {
+              if (c.id !== cardId) return c;
+              const merged = mergeTranslations(c.translations, resolved, false);
+              if (merged?.fa === c.translations?.fa) return c;
+              changed = true;
+              return {
+                ...c,
+                translations: merged,
+                updatedAt: Date.now(),
+              };
+            });
+            if (changed) {
+              cardsRef.current = next;
+            }
+            return changed ? next : prev;
+          });
+        })
+        .catch(() => {
+          // Non-fatal: background backfill or manual retry can translate later
+        });
+    },
+    []
+  );
+
+  // Batch backfill missing Persian translations for pre-existing cards
+  const runPersianBackfill = useCallback(async (forceRetryAll = false) => {
+    if (isBackfillingRef.current) return;
+
+    const candidates = cardsRef.current.filter(
+      c =>
+        cardNeedsPersianBackfill(c) &&
+        (forceRetryAll || !autoAttemptedBackfillIdsRef.current.has(c.id))
+    );
+    if (candidates.length === 0) return;
+
+    isBackfillingRef.current = true;
+    setIsBackfillingTranslations(true);
+    setBackfillProgress({ completed: 0, total: candidates.length });
+
+    try {
+      const BATCH_SIZE = 4;
+      for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
+        const batch = candidates.slice(i, i + BATCH_SIZE);
+        batch.forEach(c => autoAttemptedBackfillIdsRef.current.add(c.id));
+
+        const results = await Promise.all(
+          batch.map(async card => {
+            try {
+              const resolved = await translateCardMeaningToPersian({
+                word: card.word,
+                mainDefinition: card.mainDefinition,
+                partOfSpeech: card.partOfSpeech,
+                existingTranslations: card.translations,
+              });
+              return { id: card.id, resolved };
+            } catch {
+              return { id: card.id, resolved: undefined };
+            }
+          })
+        );
+
+        const resolvedMap = new Map<string, LocalizedTranslations>();
+        for (const r of results) {
+          if (r.resolved?.fa) {
+            resolvedMap.set(r.id, r.resolved);
+          }
+        }
+
+        if (resolvedMap.size > 0) {
+          const ts = Date.now();
+          setCards(prev => {
+            let changed = false;
+            const next = prev.map(card => {
+              const incoming = resolvedMap.get(card.id);
+              if (!incoming) return card;
+              const merged = mergeTranslations(card.translations, incoming, false);
+              if (merged?.fa === card.translations?.fa) return card;
+              changed = true;
+              return {
+                ...card,
+                translations: merged,
+                updatedAt: ts,
+              };
+            });
+            if (changed) {
+              cardsRef.current = next;
+            }
+            return changed ? next : prev;
+          });
+        }
+
+        setBackfillProgress({
+          completed: Math.min(i + batch.length, candidates.length),
+          total: candidates.length,
+        });
+      }
+    } finally {
+      isBackfillingRef.current = false;
+      setIsBackfillingTranslations(false);
+      setBackfillProgress(null);
+    }
+  }, []);
+
+  // Automatically backfill legacy cards in the background when user selects Persian or Both
+  useEffect(() => {
+    if (!isDataLoaded) return;
+    if (languagePreference !== 'fa' && languagePreference !== 'both') return;
+    if (isBackfillingRef.current) return;
+
+    const hasUntriedMissing = cards.some(
+      c => cardNeedsPersianBackfill(c) && !autoAttemptedBackfillIdsRef.current.has(c.id)
+    );
+    if (!hasUntriedMissing) return;
+
+    const timer = setTimeout(() => {
+      void runPersianBackfill(false);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [isDataLoaded, languagePreference, cards, runPersianBackfill]);
+
+  const handleAddCard = (
+    entry: WordEntry,
+    definition: string,
+    example: string,
+    partOfSpeech: string,
+    tags?: string[],
+    translations?: LocalizedTranslations
+  ) => {
     const matchingMeaning = entry.meanings?.find(m => m.partOfSpeech === partOfSpeech) || entry.meanings?.[0];
     const synonyms = matchingMeaning?.synonyms?.slice(0, 6);
     const antonyms = matchingMeaning?.antonyms?.slice(0, 6);
     const cleanedTags = tags
       ? Array.from(new Set(tags.map(t => t.trim()).filter(Boolean)))
       : [];
+    const cleanTranslations = sanitizeTranslations(translations);
+    const cardId = crypto.randomUUID();
     const newCard: Flashcard = {
-      id: crypto.randomUUID(),
+      id: cardId,
       word: entry.word,
       phonetic: entry.phonetic,
       audio: entry.audio,
       image: entry.image,
       mainDefinition: definition,
+      translations: cleanTranslations,
       example: example,
       partOfSpeech: partOfSpeech,
       synonyms: synonyms && synonyms.length > 0 ? synonyms : undefined,
@@ -1670,6 +2066,9 @@ const App: React.FC = () => {
       updatedAt: Date.now(),
     };
     setCards(prev => [newCard, ...prev]);
+    if (!cleanTranslations?.fa) {
+      populateSingleCardTranslationAsync(cardId, entry.word, definition, partOfSpeech);
+    }
     recordActivity();
     trackEvent(TRACKING_ACTION.ADD_CARD, TRACKING_CATEGORY.FLASHCARDS, entry.word);
   };
@@ -1765,25 +2164,20 @@ const App: React.FC = () => {
     );
   };
 
-  const handleCreateCustomCard = (data: {
-    word: string;
-    partOfSpeech: string;
-    phonetic?: string;
-    mainDefinition: string;
-    example?: string;
-    image?: string;
-    tags?: string[];
-  }) => {
+  const handleCreateCustomCard = (data: CustomCardFormData) => {
     const now = Date.now();
     const cleanedTags = data.tags
       ? Array.from(new Set(data.tags.map(t => t.trim()).filter(Boolean)))
       : [];
+    const cleanTranslations = sanitizeTranslations(data.translations);
+    const cardId = crypto.randomUUID();
     const newCard: Flashcard = {
-      id: crypto.randomUUID(),
+      id: cardId,
       word: data.word.trim(),
       partOfSpeech: data.partOfSpeech.trim() || 'noun',
       phonetic: data.phonetic?.trim() || undefined,
       mainDefinition: data.mainDefinition.trim(),
+      translations: cleanTranslations,
       example: data.example?.trim() || undefined,
       image: data.image?.trim() || undefined,
       tags: cleanedTags.length > 0 ? cleanedTags : undefined,
@@ -1795,6 +2189,9 @@ const App: React.FC = () => {
       updatedAt: now,
     };
     setCards(prev => [newCard, ...prev]);
+    if (!cleanTranslations?.fa) {
+      populateSingleCardTranslationAsync(cardId, newCard.word, newCard.mainDefinition, newCard.partOfSpeech);
+    }
     recordActivity();
     trackEvent(TRACKING_ACTION.ADD_CARD, TRACKING_CATEGORY.FLASHCARDS, newCard.word);
   };
@@ -1806,23 +2203,55 @@ const App: React.FC = () => {
       partOfSpeech?: string;
       phonetic?: string;
       mainDefinition?: string;
+      translations?: LocalizedTranslations;
       example?: string;
       image?: string;
       tags?: string[];
     }
   ) => {
+    let shouldReTranslate = false;
+    let targetWord = '';
+    let targetDef = '';
+    let targetPos = '';
+
     setCards(prev =>
       prev.map(card => {
         if (card.id !== id) return card;
         const cleanedTags = updates.tags !== undefined
           ? Array.from(new Set(updates.tags.map(t => t.trim()).filter(Boolean)))
           : card.tags;
+        const nextWord = updates.word !== undefined ? updates.word.trim() : card.word;
+        const nextPos = updates.partOfSpeech !== undefined ? updates.partOfSpeech.trim() : card.partOfSpeech;
+        const nextDef = updates.mainDefinition !== undefined ? updates.mainDefinition.trim() : card.mainDefinition;
+        const defChanged = nextDef !== card.mainDefinition;
+
+        let nextTranslations = card.translations;
+        if (updates.translations !== undefined) {
+          const explicitClean = sanitizeTranslations(updates.translations);
+          if (explicitClean?.fa) {
+            nextTranslations = explicitClean;
+          } else {
+            nextTranslations = undefined;
+            shouldReTranslate = true;
+          }
+        } else if (defChanged) {
+          nextTranslations = undefined;
+          shouldReTranslate = true;
+        }
+
+        if (shouldReTranslate) {
+          targetWord = nextWord;
+          targetDef = nextDef;
+          targetPos = nextPos;
+        }
+
         return {
           ...card,
-          word: updates.word !== undefined ? updates.word.trim() : card.word,
-          partOfSpeech: updates.partOfSpeech !== undefined ? updates.partOfSpeech.trim() : card.partOfSpeech,
+          word: nextWord,
+          partOfSpeech: nextPos,
           phonetic: updates.phonetic !== undefined ? (updates.phonetic.trim() || undefined) : card.phonetic,
-          mainDefinition: updates.mainDefinition !== undefined ? updates.mainDefinition.trim() : card.mainDefinition,
+          mainDefinition: nextDef,
+          translations: nextTranslations,
           example: updates.example !== undefined ? (updates.example.trim() || undefined) : card.example,
           image: updates.image !== undefined ? (updates.image.trim() || undefined) : card.image,
           tags: cleanedTags && cleanedTags.length > 0 ? cleanedTags : undefined,
@@ -1830,6 +2259,10 @@ const App: React.FC = () => {
         };
       })
     );
+
+    if (shouldReTranslate && targetWord && targetDef) {
+      populateSingleCardTranslationAsync(id, targetWord, targetDef, targetPos);
+    }
   };
 
   const handleImportBookWords = (bookTitle: string, words: BookExtractedWord[]) => {
@@ -1837,6 +2270,7 @@ const App: React.FC = () => {
     const bookTag = `Book: ${cleanTitle}`;
     const bookTagLower = bookTag.toLowerCase();
     const now = Date.now();
+    const cardsNeedingAsyncTranslation: Array<{ id: string; word: string; def: string; pos?: string }> = [];
 
     // Map incoming words by normalized lowercase word
     const incomingByWord = new Map<string, { wordObj: BookExtractedWord; idx: number }>();
@@ -1876,12 +2310,23 @@ const App: React.FC = () => {
           }
         }
 
+        const mergedTrans = mergeTranslations(existing.translations, w.translations, false);
+        if (!mergedTrans?.fa) {
+          cardsNeedingAsyncTranslation.push({
+            id: existing.id,
+            word: existing.word,
+            def: existing.mainDefinition,
+            pos: existing.partOfSpeech,
+          });
+        }
+
         return {
           ...existing,
           // Keep existing status, repetition, review schedule, and core definition intact;
           // only fill in missing optional metadata and append the new book tags
           phonetic: existing.phonetic || w.phonetic?.trim() || undefined,
           audio: existing.audio || w.audio,
+          translations: mergedTrans,
           example: existing.example || w.bookSentence?.trim() || undefined,
           synonyms:
             existing.synonyms && existing.synonyms.length > 0
@@ -1910,13 +2355,24 @@ const App: React.FC = () => {
         const cardTags = cleanChapter
           ? [bookTag, `${bookTag} / ${cleanChapter}`]
           : [bookTag];
+        const cardId = crypto.randomUUID();
+        const cleanTrans = sanitizeTranslations(w.translations);
+        if (!cleanTrans?.fa) {
+          cardsNeedingAsyncTranslation.push({
+            id: cardId,
+            word: w.word.trim(),
+            def: w.mainDefinition.trim(),
+            pos: w.partOfSpeech.trim() || 'noun',
+          });
+        }
         newBookCards.push({
-          id: crypto.randomUUID(),
+          id: cardId,
           word: w.word.trim(),
           partOfSpeech: w.partOfSpeech.trim() || 'noun',
           phonetic: w.phonetic?.trim() || undefined,
           audio: w.audio,
           mainDefinition: w.mainDefinition.trim(),
+          translations: cleanTrans,
           example: w.bookSentence?.trim() || undefined,
           synonyms: w.synonyms && w.synonyms.length > 0 ? w.synonyms : undefined,
           antonyms: w.antonyms && w.antonyms.length > 0 ? w.antonyms : undefined,
@@ -1938,6 +2394,10 @@ const App: React.FC = () => {
       return next;
     });
 
+    for (const item of cardsNeedingAsyncTranslation) {
+      populateSingleCardTranslationAsync(item.id, item.word, item.def, item.pos);
+    }
+
     recordActivity();
     trackEvent(TRACKING_ACTION.ADD_CARD, TRACKING_CATEGORY.FLASHCARDS, `book_${cleanTitle}`);
   };
@@ -1951,6 +2411,8 @@ const App: React.FC = () => {
       longestStreak,
       deletedCards: nextDeletedRecord,
       cloudConfig: cloudConfigRef.current,
+      languagePreference: languagePreferenceRef.current,
+      languagePreferenceUpdatedAt: languagePreferenceUpdatedAtRef.current,
     })
       .then(() => setLastSavedAt(Date.now()))
       .catch(console.error);
@@ -1963,6 +2425,8 @@ const App: React.FC = () => {
         studyHistory,
         longestStreak,
         deletedCards: nextDeletedRecord,
+        languagePreference: languagePreferenceRef.current,
+        languagePreferenceUpdatedAt: languagePreferenceUpdatedAtRef.current,
       })
         .catch(err => console.error('Immediate file save after deletion failed:', err))
         .finally(() => setIsFileSaving(false));
@@ -1991,6 +2455,8 @@ const App: React.FC = () => {
                 studyHistory,
                 longestStreak,
                 deletedCards: nextDeletedRecord,
+                languagePreference: languagePreferenceRef.current,
+                languagePreferenceUpdatedAt: languagePreferenceUpdatedAtRef.current,
               },
               { immediate: true, onProgress: handleBackgroundCloudProgress }
             )
@@ -2001,6 +2467,8 @@ const App: React.FC = () => {
                 studyHistory,
                 longestStreak,
                 deletedCards: nextDeletedRecord,
+                languagePreference: languagePreferenceRef.current,
+                languagePreferenceUpdatedAt: languagePreferenceUpdatedAtRef.current,
               },
               { immediate: true, onProgress: handleBackgroundCloudProgress }
             );
@@ -2203,6 +2671,24 @@ const App: React.FC = () => {
               {isDark ? <Sun className="h-4 w-4 sm:h-5 sm:w-5" /> : <Moon className="h-4 w-4 sm:h-5 sm:w-5" />}
             </button>
             <button
+              onClick={() => setIsSettingsOpen(true)}
+              data-testid="open-settings-button"
+              aria-label="Open settings"
+              title="Settings & Language"
+              className={`inline-flex items-center gap-1 p-2 sm:px-2.5 sm:py-2 rounded-xl transition-all shrink-0 ${
+                languagePreference !== 'en'
+                  ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/70 hover:bg-emerald-100 dark:hover:bg-emerald-900/50'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-700 dark:hover:text-slate-200'
+              }`}
+            >
+              <Settings className="h-4 w-4 sm:h-5 sm:w-5" />
+              {languagePreference !== 'en' && (
+                <span className="hidden md:inline text-[10px] font-bold uppercase tracking-wider">
+                  {LANGUAGE_PREFERENCE_OPTIONS.find(o => o.value === languagePreference)?.shortBadge}
+                </span>
+              )}
+            </button>
+            <button
               onClick={() => setIsDataModalOpen(true)}
               className={`p-2 sm:p-2.5 rounded-xl transition-all hover:bg-slate-200 dark:hover:bg-slate-700 shrink-0 ${fileHandle || cloudConfig ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-400 border border-brand-200 dark:border-brand-800' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-brand-600 dark:hover:text-brand-400'}`}
               title="Manage Data"
@@ -2233,6 +2719,7 @@ const App: React.FC = () => {
                 onStartStudy={handleStartStudySession}
                 onImportBookWords={handleImportBookWords}
                 onDeleteBook={handleDeleteBook}
+                languagePreference={languagePreference}
               />
             }
           />
@@ -2244,6 +2731,7 @@ const App: React.FC = () => {
                 onRemoveCard={handleDeleteCard}
                 onUpdateCard={handleUpdateCard}
                 existingCards={cards}
+                languagePreference={languagePreference}
               />
             }
           />
@@ -2260,6 +2748,7 @@ const App: React.FC = () => {
                 onUpdateCard={handleUpdateCard}
                 onImportBookWords={handleImportBookWords}
                 onOpenImport={() => setIsDataModalOpen(true)}
+                languagePreference={languagePreference}
               />
             }
           />
@@ -2272,6 +2761,7 @@ const App: React.FC = () => {
                 onRestoreCard={handleRestoreCard}
                 onSessionComplete={handleSessionComplete}
                 onExit={() => navigate('/flashcards')}
+                languagePreference={languagePreference}
               />
             }
           />
@@ -2304,6 +2794,7 @@ const App: React.FC = () => {
                 onStartStudy={handleStartStudySession}
                 onImportBookWords={handleImportBookWords}
                 onDeleteBook={handleDeleteBook}
+                languagePreference={languagePreference}
               />
             }
           />
@@ -2374,6 +2865,22 @@ const App: React.FC = () => {
           )}
         </div>
       )}
+
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        languagePreference={languagePreference}
+        onChangeLanguagePreference={handleChangeLanguagePreference}
+        totalCards={cards.length}
+        translatedPersianCount={cards.filter(c => Boolean(c.translations?.fa?.trim())).length}
+        isBackfilling={isBackfillingTranslations}
+        backfillProgress={backfillProgress}
+        onTriggerBackfill={() => {
+          void runPersianBackfill(true);
+        }}
+        isDarkMode={isDark}
+        onToggleDarkMode={handleToggleDark}
+      />
 
       <DataManagerModal
         isOpen={isDataModalOpen}

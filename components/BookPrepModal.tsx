@@ -15,7 +15,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
-import { Flashcard, FlashcardStatus } from '../types';
+import { Flashcard, FlashcardStatus, MeaningLanguagePreference } from '../types';
 import {
   GutenbergBook,
   BookExtractedWord,
@@ -29,6 +29,7 @@ import {
   reassignWordsToBookSections,
 } from '../services/bookService';
 import { compareChapterNames } from '../utils/tagUtils';
+import { MeaningDisplay } from './MeaningDisplay';
 
 const PAGE_SECTION_PRESETS = [5, 10, 20, 50] as const;
 const COLLAPSED_PREVIEW_CHAPTER_LIMIT = 6;
@@ -39,6 +40,7 @@ interface BookPrepModalProps {
   existingWords: Set<string>;
   existingCards?: Flashcard[];
   onImportBookWords: (bookTitle: string, words: BookExtractedWord[]) => void;
+  languagePreference?: MeaningLanguagePreference;
 }
 
 export const BookPrepModal: React.FC<BookPrepModalProps> = ({
@@ -47,6 +49,7 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
   existingWords,
   existingCards = [],
   onImportBookWords,
+  languagePreference = 'en',
 }) => {
   const existingCardsByWord = useMemo(() => {
     const map = new Map<string, Flashcard>();
@@ -712,9 +715,14 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                           )}
                         </div>
 
-                        <p className="text-sm text-slate-700 dark:text-slate-200 leading-relaxed">
-                          {item.mainDefinition}
-                        </p>
+                        <MeaningDisplay
+                          englishText={item.mainDefinition}
+                          translations={item.translations}
+                          preference={languagePreference}
+                          variant="compact"
+                          englishClassName="text-sm text-slate-700 dark:text-slate-200 leading-relaxed"
+                          testIdPrefix="book-word"
+                        />
 
                         {item.bookSentence && (
                           <div className="flex items-start gap-2 pt-1 text-xs italic text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/50 p-2.5 rounded-xl border border-slate-100 dark:border-slate-700/60">

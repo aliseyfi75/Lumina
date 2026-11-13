@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Flashcard, FlashcardStatus } from '../types';
+import { Flashcard, FlashcardStatus, LocalizedTranslations, MeaningLanguagePreference } from '../types';
 import { Play, BookOpen, CheckCircle, Brain, Trash2, RotateCw, Upload, Volume2, ChevronDown, ChevronRight, ChevronUp, Search, X, ArrowUpDown, Filter, Plus, Pencil, Tag, Sparkles, AlertTriangle, Folder, FolderOpen, CornerDownRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { playAudio } from '../utils/audio';
@@ -10,6 +10,7 @@ import { parseTagHierarchy, BOOKS_FOLDER_FILTER, compareChapterNames, getCardBoo
 import { TagSelectorInput } from './TagSelectorInput';
 import { useCardFlip3D } from '../utils/cardFlip';
 import { getAdaptiveWordHeadingClass } from '../utils/deviceScale';
+import { MeaningDisplay } from './MeaningDisplay';
 
 const PAGE_SIZE = 24;
 const COLLAPSED_DOCK_CHAPTER_LIMIT = 4;
@@ -22,6 +23,7 @@ export interface CustomCardFormData {
   partOfSpeech: string;
   phonetic?: string;
   mainDefinition: string;
+  translations?: LocalizedTranslations;
   example?: string;
   image?: string;
   tags?: string[];
@@ -37,6 +39,7 @@ interface FlashcardsProps {
   onUpdateCard?: (id: string, updates: CustomCardFormData) => void;
   onImportBookWords?: (bookTitle: string, words: BookExtractedWord[]) => void;
   onOpenImport: () => void;
+  languagePreference?: MeaningLanguagePreference;
 }
 
 const FlashcardItem: React.FC<{
@@ -44,7 +47,8 @@ const FlashcardItem: React.FC<{
   onDelete: (id: string) => void;
   onReview: (id: string, quality: number) => void;
   onEdit: (card: Flashcard) => void;
-}> = ({ card, onDelete, onReview, onEdit }) => {
+  languagePreference: MeaningLanguagePreference;
+}> = ({ card, onDelete, onReview, onEdit, languagePreference }) => {
   const [isFlipped, setIsFlipped] = useState(false);
   const {
     flipRotateY,
@@ -218,9 +222,21 @@ const FlashcardItem: React.FC<{
                   />
                 </div>
               )}
-              <p className="text-slate-100 text-base sm:text-lg font-medium leading-relaxed mb-auto w-full text-center">
-                {card.mainDefinition}
-              </p>
+              <div className="mb-auto w-full">
+                <MeaningDisplay
+                  englishText={card.mainDefinition}
+                  translations={card.translations}
+                  preference={languagePreference}
+                  variant="darkCard"
+                  englishClassName="text-slate-100 text-base sm:text-lg font-medium leading-relaxed w-full text-center"
+                  persianClassName={
+                    languagePreference === 'both'
+                      ? 'font-persian text-emerald-300/95 text-sm sm:text-base leading-relaxed w-full text-right pt-2.5 border-t border-slate-700/70'
+                      : 'font-persian text-slate-100 text-base sm:text-lg font-medium leading-relaxed w-full text-right'
+                  }
+                  testIdPrefix="deck-card"
+                />
+              </div>
               {card.example && (
                 <p className="text-slate-400 text-xs sm:text-sm italic border-t border-slate-700 pt-2.5 sm:pt-3 mt-auto w-full">
                   "{card.example}"
@@ -311,6 +327,7 @@ const CardEditorModal: React.FC<{
   const [partOfSpeech, setPartOfSpeech] = useState('noun');
   const [phonetic, setPhonetic] = useState('');
   const [mainDefinition, setMainDefinition] = useState('');
+  const [persianMeaning, setPersianMeaning] = useState('');
   const [example, setExample] = useState('');
   const [image, setImage] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -321,6 +338,7 @@ const CardEditorModal: React.FC<{
       setPartOfSpeech(editingCard.partOfSpeech || 'noun');
       setPhonetic(editingCard.phonetic || '');
       setMainDefinition(editingCard.mainDefinition || '');
+      setPersianMeaning(editingCard.translations?.fa || '');
       setExample(editingCard.example || '');
       setImage(editingCard.image || '');
       setSelectedTags(editingCard.tags ? [...editingCard.tags] : []);
@@ -329,6 +347,7 @@ const CardEditorModal: React.FC<{
       setPartOfSpeech('noun');
       setPhonetic('');
       setMainDefinition('');
+      setPersianMeaning('');
       setExample('');
       setImage('');
       setSelectedTags([]);
@@ -347,11 +366,13 @@ const CardEditorModal: React.FC<{
           .filter(Boolean)
       )
     );
+    const trimmedFa = persianMeaning.trim();
     onSubmit({
       word: word.trim(),
       partOfSpeech: partOfSpeech.trim() || 'noun',
       phonetic: phonetic.trim() || undefined,
       mainDefinition: mainDefinition.trim(),
+      translations: trimmedFa ? { fa: trimmedFa } : undefined,
       example: example.trim() || undefined,
       image: image.trim() || undefined,
       tags: parsedTags,
@@ -460,6 +481,22 @@ const CardEditorModal: React.FC<{
 
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+              Persian / Farsi Meaning (Optional — Auto-fetched if blank)
+            </label>
+            <textarea
+              rows={2}
+              dir="rtl"
+              lang="fa"
+              aria-label="Persian Translation"
+              value={persianMeaning}
+              onChange={(e) => setPersianMeaning(e.target.value)}
+              placeholder="معنی فارسی (در صورت خالی بودن به صورت خودکار دریافت می‌شود)..."
+              className="font-persian w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-brand-500 resize-none text-right"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
               Example Sentence (Optional)
             </label>
             <textarea
@@ -513,6 +550,7 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
   onUpdateCard,
   onImportBookWords,
   onOpenImport,
+  languagePreference = 'en',
 }) => {
   const [selectedStatus, setSelectedStatus] = useState<FlashcardStatus | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -1699,6 +1737,7 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
                 onDelete={onDeleteCard}
                 onReview={onReviewCard}
                 onEdit={handleOpenEditModal}
+                languagePreference={languagePreference}
               />
             ))}
           </div>
@@ -1745,6 +1784,7 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
         existingWords={existingWordsSet}
         existingCards={cards}
         onImportBookWords={handleBookWordsImported}
+        languagePreference={languagePreference}
       />
 
       {bookToDelete && (

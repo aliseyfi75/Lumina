@@ -12,7 +12,7 @@
     gtag('config', 'G-YTM3MZZPYK');
   </script>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta name="theme-color" content="#16a34a" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -28,17 +28,45 @@
     rel="stylesheet">
 
   <script>
-    // Apply dark class before first paint based on saved user preference or system preference
+    // Apply dark class and calibrate device root font-size before first paint
     (function () {
+      var root = document.documentElement;
       var saved = localStorage.getItem('lumina_theme');
       if (saved === 'dark' || (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-        document.documentElement.classList.add('dark');
+        root.classList.add('dark');
       } else {
-        document.documentElement.classList.remove('dark');
+        root.classList.remove('dark');
       }
+
+      var vw = Math.max(280, window.innerWidth || root.clientWidth || 390);
+      var vh = Math.max(320, window.innerHeight || root.clientHeight || 720);
+      var wPx = 16;
+      if (vw < 320) {
+        wPx = 12.5 + ((vw - 280) / 40) * 0.75;
+      } else if (vw < 390) {
+        wPx = 13.25 + ((vw - 320) / 70) * 1.75;
+      } else if (vw < 640) {
+        wPx = 15.0 + ((vw - 390) / 250) * 1.0;
+      }
+      var hCap = vh < 680 ? 13.5 + (Math.max(0, vh - 420) / 260) * 2.5 : 16;
+      var targetPx = Math.round(Math.min(16, Math.max(12.5, Math.min(wPx, hCap))) * 100) / 100;
+      root.style.fontSize = targetPx + 'px';
+      var renderedPx = parseFloat(window.getComputedStyle(root).fontSize);
+      if (renderedPx > 0 && Math.abs(renderedPx - targetPx) > 0.2) {
+        var comp = Math.min(20, Math.max(7, (targetPx * targetPx) / renderedPx));
+        root.style.fontSize = (Math.round(comp * 100) / 100) + 'px';
+      }
+      root.dataset.targetRootPx = String(targetPx);
     })();
   </script>
   <style>
+    /* Prevent mobile browsers & OS auto-text-inflation from distorting layout */
+    html {
+      -webkit-text-size-adjust: 100%;
+      -moz-text-size-adjust: 100%;
+      text-size-adjust: 100%;
+    }
+
     /* Smooth root theme transitions without forcing transitions on every DOM/SVG node */
     html,
     body {
@@ -71,13 +99,15 @@
       background: #64748b;
     }
 
-    /* 3D Card Effects */
+    /* 3D Card Effects (with WebKit prefixes for iOS Safari / PWA) */
     .perspective-1000 {
       perspective: 1000px;
+      -webkit-perspective: 1000px;
     }
 
     .preserve-3d {
       transform-style: preserve-3d;
+      -webkit-transform-style: preserve-3d;
     }
 
     .backface-hidden {
@@ -87,6 +117,7 @@
 
     .rotate-y-180 {
       transform: rotateY(180deg);
+      -webkit-transform: rotateY(180deg);
     }
 
     /* Animation Keyframes */
@@ -104,8 +135,8 @@
       animation: fade-in 0.5s ease-out forwards;
     }
   </style>
-  <script type="module" crossorigin src="./assets/index-CngXBL0U.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-eFZweFS3.css">
+  <script type="module" crossorigin src="./assets/index-mItFN0Wp.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-B-mVGj6n.css">
 <link rel="manifest" href="./manifest.webmanifest"><script id="vite-plugin-pwa:register-sw" src="./registerSW.js"></script></head>
 
 <body

@@ -1,5 +1,11 @@
 import JSZip from 'jszip';
-import { lookupWord } from './dictionaryService';
+import type { WordEntry, Meaning } from '../types';
+import {
+  lookupWord,
+  isCircularOrFormOfDefinition,
+  normalizePartOfSpeech,
+  deriveCandidateLemmas,
+} from './dictionaryService';
 
 export type ComplexityLevel = 'beginner' | 'intermediate' | 'advanced';
 export type ComplexityFilter = 'all' | ComplexityLevel;
@@ -1815,7 +1821,13 @@ export const computeLocalComplexityScore = (word: string): number => {
 
 const queryDatamuseFrequency = async (
   word: string
-): Promise<{ frequency: number; fallbackDef?: string; fallbackPos?: string; phonetic?: string }> => {
+): Promise<{
+  frequency: number;
+  fallbackDef?: string;
+  fallbackPos?: string;
+  fallbackMeanings?: Meaning[];
+  phonetic?: string;
+}> => {
   try {
     const res = await fetchWithTimeout(
       `${DATAMUSE_API_URL}?sp=${encodeURIComponent(word)}&md=fdr&ipa=1&max=1`,
@@ -1843,24 +1855,568 @@ const queryDatamuseFrequency = async (
 
     let fallbackDef: string | undefined;
     let fallbackPos: string | undefined;
+    const meaningsMap = new Map<string, { definition: string }[]>();
+
     if (Array.isArray(item.defs) && item.defs.length > 0) {
-      const defStr = String(item.defs[0]);
-      const tabIdx = defStr.indexOf('\t');
-      if (tabIdx !== -1) {
+      for (const rawDef of item.defs) {
+        const defStr = String(rawDef);
+        const tabIdx = defStr.indexOf('\t');
+        if (tabIdx === -1) continue;
         const posCode = defStr.slice(0, tabIdx);
-        fallbackDef = defStr.slice(tabIdx + 1).trim();
-        fallbackPos =
-          posCode === 'n' ? 'noun' :
-          posCode === 'v' ? 'verb' :
-          posCode === 'adj' ? 'adjective' :
-          posCode === 'adv' ? 'adverb' : 'noun';
+        const defText = defStr.slice(tabIdx + 1).trim();
+        if (!defText) continue;
+        const pos = normalizePartOfSpeech(posCode);
+        if (!fallbackDef) {
+          fallbackDef = defText;
+          fallbackPos = pos;
+        }
+        if (!meaningsMap.has(pos)) {
+          meaningsMap.set(pos, []);
+        }
+        meaningsMap.get(pos)!.push({ definition: defText });
       }
     }
 
-    return { frequency, fallbackDef, fallbackPos, phonetic };
+    const fallbackMeanings: Meaning[] | undefined =
+      meaningsMap.size > 0
+        ? Array.from(meaningsMap.entries()).map(([partOfSpeech, definitions]) => ({
+            partOfSpeech,
+            definitions,
+          }))
+        : undefined;
+
+    return { frequency, fallbackDef, fallbackPos, fallbackMeanings, phonetic };
   } catch {
     return { frequency: 2.0 };
   }
+};
+
+export interface SelectedContextualMeaning {
+  partOfSpeech: string;
+  definition: string;
+  synonyms?: string[];
+  antonyms?: string[];
+}
+
+const DETERMINERS_SET = new Set([
+  'a', 'an', 'the', 'my', 'your', 'his', 'her', 'its', 'our', 'their',
+  'this', 'that', 'these', 'those', 'each', 'every', 'either', 'neither',
+  'no', 'another', 'any', 'some', 'such', 'what', 'whose',
+]);
+
+const MODALS_SET = new Set([
+  'will', 'would', 'could', 'should', 'can', 'may', 'might', 'must', 'shall',
+  'did', 'does', 'do', 'cannot', 'wouldn', 'couldn', 'shouldn', 'didn', 'shan',
+]);
+
+const MODAL_INTERVENING_ADVERBS = new Set([
+  'not', 'never', 'ever', 'scarcely', 'hardly', 'barely', 'always', 'often',
+  'seldom', 'readily', 'gladly', 'willingly', 'easily', 'only', 'even', 'still',
+  'already', 'soon', 'well', 'also', 'just',
+]);
+
+const COPULA_VERBS_SET = new Set([
+  'is', 'am', 'are', 'was', 'were', 'be', 'been', 'being',
+  'seem', 'seemed', 'seems', 'appear', 'appeared', 'appears',
+  'become', 'became', 'becomes', 'grow', 'grew', 'grown',
+  'remain', 'remained', 'remains', 'look', 'looked', 'looks', 'feel', 'felt',
+]);
+
+const HAVE_AUX_SET = new Set(['have', 'has', 'had', 'having']);
+
+const DEGREE_ADVERBS_SET = new Set([
+  'very', 'quite', 'rather', 'somewhat', 'exceedingly', 'singularly', 'peculiarly',
+  'strangely', 'utterly', 'remarkably', 'deeply', 'profoundly', 'most', 'more',
+  'less', 'too', 'so', 'extremely', 'altogether', 'wholly', 'entirely', 'truly',
+]);
+
+const PREPOSITIONS_SET = new Set([
+  'of', 'in', 'on', 'at', 'from', 'with', 'without', 'by', 'for', 'into',
+  'upon', 'through', 'under', 'over', 'between', 'among', 'against', 'during',
+  'despite', 'amid', 'amidst', 'beyond', 'within', 'throughout', 'towards', 'toward',
+  'before', 'after', 'beneath', 'beside', 'besides', 'concerning', 'regarding',
+]);
+
+const POST_NOUN_BOUNDARY_WORDS = new Set([
+  ...PREPOSITIONS_SET,
+  ...MODALS_SET,
+  ...COPULA_VERBS_SET,
+  ...HAVE_AUX_SET,
+  'to', 'as', 'than', 'that', 'which', 'who', 'whom', 'whose', 'where', 'when',
+  'while', 'though', 'although', 'because', 'since', 'unless', 'until', 'if',
+  'but', 'nor', 'yet',
+  // Frequent literary finite verbs that follow a subject head noun
+  'said', 'came', 'went', 'made', 'took', 'gave', 'stood', 'fell', 'rose',
+  'began', 'held', 'kept', 'left', 'brought', 'thought', 'knew', 'saw', 'found',
+  'lay', 'sat', 'shone', 'spoke', 'struck', 'turned', 'proved', 'served', 'bore',
+]);
+
+const OBJECT_STARTERS_AFTER_VERB = new Set([
+  ...DETERMINERS_SET,
+  'him', 'her', 'them', 'me', 'us', 'you', 'it', 'himself', 'herself',
+  'themselves', 'myself', 'ourselves', 'yourself', 'itself', 'all', 'both', 'many',
+]);
+
+const SUBJECT_PRONOUNS_SET = new Set(['i', 'he', 'she', 'we', 'they', 'who']);
+
+const LY_ADJECTIVES_SET = new Set([
+  'melancholy', 'comely', 'homely', 'portly', 'stately', 'ghastly', 'grisly',
+  'burly', 'surly', 'seemly', 'unseemly', 'timely', 'untimely', 'worldly',
+  'unworldly', 'earthly', 'heavenly', 'princely', 'kingly', 'cowardly',
+  'miserly', 'slovenly', 'sprightly', 'elderly', 'lonely', 'lovely', 'lively',
+]);
+
+const CONTEXT_STOP_WORDS = new Set([
+  ...DETERMINERS_SET,
+  ...MODALS_SET,
+  ...COPULA_VERBS_SET,
+  ...HAVE_AUX_SET,
+  ...PREPOSITIONS_SET,
+  ...DEGREE_ADVERBS_SET,
+  ...MODAL_INTERVENING_ADVERBS,
+  'and', 'or', 'but', 'nor', 'yet', 'for', 'so', 'to', 'as', 'than',
+  'that', 'which', 'who', 'whom', 'where', 'when', 'while', 'though', 'although',
+  'because', 'since', 'unless', 'until', 'if', 'there', 'here', 'then', 'thus',
+  'him', 'them', 'she', 'they', 'himself', 'herself', 'themselves', 'itself',
+  'one', 'ones', 'person', 'something', 'anything', 'nothing', 'everything',
+  'having', 'making', 'being', 'characterized', 'relating', 'pertaining',
+]);
+
+const DOMAIN_RULES: Array<{
+  name: string;
+  tagPatterns: RegExp;
+  defPatterns: RegExp;
+  contextCues: RegExp;
+  mismatchPenalty: number;
+  matchBoost: number;
+}> = [
+  {
+    name: 'chemistry',
+    tagPatterns: /\b(?:chemistry|organic chemistry|inorganic chemistry|biochemistry|mineralogy)\b/i,
+    defPatterns: /\b(?:chemical solution|solid from a solution|vapor state|precipitate from|crystallize|chemical compound|valence|reagent)\b/i,
+    contextCues: /\b(?:chemical|chemistry|acid|alkali|solution|vapor|laboratory|alembic|vessel|experiment|chemist|sulphur|oxide|compound|crystal|liquid|fluid|distill)\b/i,
+    mismatchPenalty: 6.0,
+    matchBoost: 4.5,
+  },
+  {
+    name: 'botany_zoology',
+    tagPatterns: /\b(?:botany|mycology|entomology|ornithology|ichthyology|malacology|bryology|taxonomy|zoology)\b/i,
+    defPatterns: /\b(?:genus of|taxonomic|flowering plant|deciduous|corolla|calyx|stamens|petals|coleoptera|lepidoptera)\b/i,
+    contextCues: /\b(?:plant|flower|leaf|leaves|stem|blossom|petal|tree|shrub|botanical|species|genus|insect|beetle|bird|plumage|wing|shell|fish|flora|fauna)\b/i,
+    mismatchPenalty: 5.5,
+    matchBoost: 4.0,
+  },
+  {
+    name: 'mathematics',
+    tagPatterns: /\b(?:mathematics|geometry|algebra|calculus|topology|set theory|arithmetic|trigonometry|statistics)\b/i,
+    defPatterns: /\b(?:right-angled|hypotenuse|polynomial|integer|logarithm|vector space|quotient|isosceles)\b/i,
+    contextCues: /\b(?:angle|triangle|circle|polygon|equation|theorem|number|sum|ratio|geometry|mathematical|algebra|line|sphere|parallel|axis)\b/i,
+    mismatchPenalty: 5.5,
+    matchBoost: 4.0,
+  },
+  {
+    name: 'computing',
+    tagPatterns: /\b(?:computing|programming|software|internet|video games|gaming|networking)\b/i,
+    defPatterns: /\b(?:computer program|source code|subroutine|operating system|data structure|user interface)\b/i,
+    contextCues: /\b(?:computer|software|digital|network|server|algorithm|database|code|screen|terminal|program)\b/i,
+    mismatchPenalty: 6.5,
+    matchBoost: 4.0,
+  },
+  {
+    name: 'heraldry_linguistics',
+    tagPatterns: /\b(?:heraldry|phonetics|grammar|linguistics|prosody|scansion)\b/i,
+    defPatterns: /\b(?:coat of arms|escutcheon|shield bearing|grammatical case|vowel sound|metrical foot)\b/i,
+    contextCues: /\b(?:shield|crest|arms|banner|heraldic|syllable|vowel|consonant|verb|noun|grammar|verse|meter|stanza)\b/i,
+    mismatchPenalty: 5.0,
+    matchBoost: 3.5,
+  },
+  {
+    name: 'nautical',
+    tagPatterns: /\b(?:nautical)\b/i,
+    defPatterns: /\b(?:aboard a ship|windward|leeward|rigging|bowsprit|foremast|gunwale|mizzen)\b/i,
+    contextCues: /\b(?:ship|vessel|sail|mast|deck|helm|prow|bow|stern|sea|ocean|wave|voyage|captain|crew|anchor|harbor|port|whale|boat|mariner|gale)\b/i,
+    mismatchPenalty: 2.5,
+    matchBoost: 4.5,
+  },
+  {
+    name: 'ecclesiastical',
+    tagPatterns: /\b(?:ecclesiastical|theology|canon law)\b/i,
+    defPatterns: /\b(?:roman catholic church|diocese|papal|ecclesiastical|liturgical)\b/i,
+    contextCues: /\b(?:church|priest|bishop|pope|altar|cathedral|parish|chapel|clergy|monk|abbey|religion|faith|doctrine|prayer|sacred)\b/i,
+    mismatchPenalty: 3.0,
+    matchBoost: 3.5,
+  },
+];
+
+const stemToken = (token: string): string => {
+  let w = token.toLowerCase().replace(/[^a-z]/g, '');
+  if (w.length <= 4) return w;
+  if (w.endsWith('ingly') && w.length > 7) w = w.slice(0, -5);
+  else if (w.endsWith('edly') && w.length > 6) w = w.slice(0, -4);
+  else if (w.endsWith('ibly') || w.endsWith('ably')) w = w.slice(0, -1);
+  else if (w.endsWith('ily') && w.length > 5) w = w.slice(0, -3) + 'y';
+  else if (w.endsWith('ly') && w.length > 5 && !LY_ADJECTIVES_SET.has(w)) w = w.slice(0, -2);
+
+  if (w.endsWith('ation') && w.length > 7) w = w.slice(0, -5);
+  else if (w.endsWith('ition') && w.length > 7) w = w.slice(0, -3);
+  else if ((w.endsWith('tion') || w.endsWith('sion')) && w.length > 6) w = w.slice(0, -3);
+  else if (w.endsWith('ment') && w.length > 6) w = w.slice(0, -4);
+  else if (w.endsWith('ness') && w.length > 6) w = w.slice(0, -4);
+  else if (w.endsWith('ities') && w.length > 7) w = w.slice(0, -5);
+  else if (w.endsWith('ity') && w.length > 6) w = w.slice(0, -3);
+  else if (w.endsWith('ies') && w.length > 5) w = w.slice(0, -3) + 'y';
+  else if (w.endsWith('ied') && w.length > 5) w = w.slice(0, -3) + 'y';
+  else if (w.endsWith('ing') && w.length > 6) w = w.slice(0, -3);
+  else if (w.endsWith('ed') && w.length > 5) w = w.slice(0, -2);
+  else if (w.endsWith('es') && w.length > 5) w = w.slice(0, -2);
+  else if (w.endsWith('s') && !w.endsWith('ss') && !w.endsWith('ous') && !w.endsWith('us') && w.length > 4) {
+    w = w.slice(0, -1);
+  }
+  if (w.endsWith('e') && w.length > 4) w = w.slice(0, -1);
+  return w;
+};
+
+const extractContentStems = (text: string, excludeWordLower?: string): Set<string> => {
+  const stems = new Set<string>();
+  const excludeStem = excludeWordLower ? stemToken(excludeWordLower) : '';
+  const matches = text.toLowerCase().match(/\b[a-z]{4,}\b/g);
+  if (!matches) return stems;
+  for (const tok of matches) {
+    if (CONTEXT_STOP_WORDS.has(tok)) continue;
+    if (excludeWordLower && tok === excludeWordLower) continue;
+    const st = stemToken(tok);
+    if (st.length >= 4 && st !== excludeStem) {
+      stems.add(st);
+    }
+  }
+  return stems;
+};
+
+export const inferContextualPosWeights = (
+  rawWord: string,
+  sentence: string
+): Record<string, number> => {
+  const weights: Record<string, number> = {
+    noun: 0,
+    verb: 0,
+    adjective: 0,
+    adverb: 0,
+  };
+
+  const target = rawWord.trim().toLowerCase();
+  if (!target) return weights;
+
+  // Morphological suffix cues
+  if (target.endsWith('ly') && target.length >= 6 && !LY_ADJECTIVES_SET.has(target)) {
+    weights.adverb += 4.2;
+  } else if (LY_ADJECTIVES_SET.has(target)) {
+    weights.adjective += 2.5;
+  }
+  if (/(?:tion|sion|ment|ness|ity|itude|ism|ship|ance|ence|ancy|ency|cracy|logy)$/.test(target)) {
+    weights.noun += 2.8;
+  }
+  if (/(?:ous|ious|eous|uous|ive|able|ible|ical|ful|less|esque|ulent)$/.test(target)) {
+    weights.adjective += 2.8;
+  }
+  if (/(?:ize|ise|ify)$/.test(target)) {
+    weights.verb += 3.0;
+  }
+
+  if (!sentence) return weights;
+
+  // Locate target word in sentence and inspect surrounding syntax
+  const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = new RegExp(`\\b${escaped}\\b`, 'i').exec(sentence);
+  if (!match) return weights;
+
+  const beforeText = sentence.slice(0, match.index);
+  const afterText = sentence.slice(match.index + match[0].length);
+
+  const prevTokens = (beforeText.toLowerCase().match(/\b[a-z']+\b/g) || []).map((t) =>
+    t.replace(/^'+|'+$/g, '')
+  );
+  const nextTokens = (afterText.toLowerCase().match(/\b[a-z']+\b/g) || []).map((t) =>
+    t.replace(/^'+|'+$/g, '')
+  );
+
+  const prev1 = prevTokens[prevTokens.length - 1] || '';
+  const prev2 = prevTokens[prevTokens.length - 2] || '';
+  const next1 = nextTokens[0] || '';
+  const next2 = nextTokens[1] || '';
+  const next3 = nextTokens[2] || '';
+
+  const followedByClauseBreak = /^\s*[,.;:!?—–)\]"”']/.test(afterText) || nextTokens.length === 0;
+  const precededByClauseStart = /[,.;:!?—–(\["“']\s*$/.test(beforeText) || prevTokens.length === 0;
+
+  // Helper: check if next1 acts as a finite transitive verb (e.g. "His countenance expressed the sorrow")
+  const next1LooksLikeFiniteVerb =
+    POST_NOUN_BOUNDARY_WORDS.has(next1) ||
+    (next1.endsWith('ed') &&
+      next1.length >= 5 &&
+      (OBJECT_STARTERS_AFTER_VERB.has(next2) || PREPOSITIONS_SET.has(next2)));
+
+  // Helper: check if "and/or" coordinates two adjectives before a noun ("a pedestrian and uninspired effort")
+  const next1IsCoordinatedAdjective =
+    (next1 === 'and' || next1 === 'or') &&
+    Boolean(next2) &&
+    !POST_NOUN_BOUNDARY_WORDS.has(next2) &&
+    !DETERMINERS_SET.has(next2) &&
+    (Boolean(next3 && !POST_NOUN_BOUNDARY_WORDS.has(next3)) ||
+      /(?:ed|ing|ous|ive|able|ible|al|ic|ful|less|nt)$/.test(next2));
+
+  // 1. Preceded by determiner / possessive ("the ...", "his ...", "a ...")
+  if (DETERMINERS_SET.has(prev1) && !precededByClauseStart) {
+    weights.verb -= 4.5;
+    weights.adverb -= 2.5;
+    if (followedByClauseBreak || next1LooksLikeFiniteVerb) {
+      weights.noun += 4.8;
+    } else if (next1IsCoordinatedAdjective) {
+      weights.adjective += 4.5;
+    } else if (next1 === 'and' || next1 === 'or') {
+      weights.noun += 3.2;
+    } else {
+      weights.adjective += 4.2;
+      weights.noun += 0.6;
+    }
+  } else if (
+    DETERMINERS_SET.has(prev2) &&
+    (DEGREE_ADVERBS_SET.has(prev1) || (prev1.endsWith('ly') && !LY_ADJECTIVES_SET.has(prev1)))
+  ) {
+    // e.g. "a remarkably catholic taste"
+    weights.adjective += 4.5;
+    weights.verb -= 3.5;
+  }
+
+  // 2. Preceded by modal auxiliary ("would countenance", "could never countenance")
+  if (
+    MODALS_SET.has(prev1) ||
+    (MODALS_SET.has(prev2) && (MODAL_INTERVENING_ADVERBS.has(prev1) || prev1.endsWith('ly')))
+  ) {
+    weights.verb += 5.5;
+    weights.noun -= 3.0;
+    weights.adjective -= 3.0;
+  }
+
+  // 3. Infinitive "to" vs prepositional "to"
+  if (prev1 === 'to') {
+    const prepositionalCues = new Set(['according', 'prior', 'contrary', 'due', 'next', 'close', 'near', 'akin']);
+    if (!prepositionalCues.has(prev2) && OBJECT_STARTERS_AFTER_VERB.has(next1)) {
+      weights.verb += 4.8;
+      weights.noun -= 2.0;
+    } else if (
+      ['began', 'begun', 'tried', 'sought', 'wished', 'seemed', 'appeared', 'refused', 'ventured', 'ceased', 'continued', 'ought', 'used', 'able', 'unable', 'eager', 'reluctant', 'enough', 'order'].includes(prev2)
+    ) {
+      weights.verb += 4.2;
+    }
+  }
+
+  // 4. Preceded by have-auxiliary ("had harbored", "had secretly harbored")
+  if (
+    HAVE_AUX_SET.has(prev1) ||
+    (HAVE_AUX_SET.has(prev2) && (MODAL_INTERVENING_ADVERBS.has(prev1) || prev1.endsWith('ly')))
+  ) {
+    if (/(?:ed|en|wn|nt|pt|ght)$/.test(target)) {
+      weights.verb += 4.5;
+      weights.noun -= 2.5;
+    }
+  }
+
+  // 5. Preceded by copula / linking verb ("was arresting", "seemed singularly arresting")
+  if (
+    COPULA_VERBS_SET.has(prev1) ||
+    (COPULA_VERBS_SET.has(prev2) && (DEGREE_ADVERBS_SET.has(prev1) || prev1.endsWith('ly')))
+  ) {
+    weights.adjective += 3.6;
+    if (target.endsWith('ed') || target.endsWith('ing')) {
+      weights.verb += 1.4;
+    }
+  }
+
+  // 6. Preceded by subject pronoun ("he harbored", "she secretly harbored")
+  if (
+    SUBJECT_PRONOUNS_SET.has(prev1) ||
+    (SUBJECT_PRONOUNS_SET.has(prev2) && (MODAL_INTERVENING_ADVERBS.has(prev1) || prev1.endsWith('ly')))
+  ) {
+    weights.verb += 4.2;
+    weights.noun -= 2.5;
+  }
+
+  // 7. Preceded by preposition ("without sanction of", "in abject misery")
+  if (PREPOSITIONS_SET.has(prev1)) {
+    weights.verb -= 3.2;
+    if (followedByClauseBreak || next1LooksLikeFiniteVerb) {
+      weights.noun += 3.8;
+    } else if (next1IsCoordinatedAdjective || (!POST_NOUN_BOUNDARY_WORDS.has(next1) && next1 !== 'and' && next1 !== 'or')) {
+      weights.adjective += 3.2;
+      weights.noun += 0.8;
+    }
+  }
+
+  return weights;
+};
+
+export const selectBestMeaningForContext = (
+  entry: WordEntry,
+  sentence: string,
+  rawWord?: string
+): SelectedContextualMeaning | null => {
+  if (!entry || !Array.isArray(entry.meanings) || entry.meanings.length === 0) {
+    return null;
+  }
+
+  const targetWord = (rawWord || entry.word || '').trim().toLowerCase();
+  const posWeights = inferContextualPosWeights(targetWord, sentence);
+  const sentenceStems = extractContentStems(sentence, targetWord);
+
+  const mentalEmotionSentence =
+    /\b(?:secret|secretly|mind|thought|thoughts|feeling|feelings|resentment|grudge|doubt|suspicion|hope|fear|sorrow|grief|remorse|malice|ambition|desire|passion|heart|soul|spirit|spirits|memory|anxious|melancholy)\b/i.test(
+      sentence
+    );
+  const styleExpressionSentence =
+    /\b(?:critic|treatise|essay|prose|poem|poetry|style|speech|voice|tone|words|remark|reply|book|novel|writing|literary|argument|eloquence|effort|lecture)\b/i.test(
+      sentence
+    );
+
+  let bestCandidate: {
+    score: number;
+    partOfSpeech: string;
+    definition: string;
+    synonyms?: string[];
+    antonyms?: string[];
+  } | null = null;
+
+  entry.meanings.forEach((meaning, meaningIdx) => {
+    const rawPos = normalizePartOfSpeech(meaning.partOfSpeech);
+    if (!Array.isArray(meaning.definitions) || meaning.definitions.length === 0) return;
+
+    meaning.definitions.forEach((def, defIdx) => {
+      const defText = (def.definition || '').trim();
+      if (!defText) return;
+
+      let score = 0;
+
+      // 1. Part-of-speech alignment
+      let effectivePos = rawPos;
+      if (rawPos === 'participle') {
+        effectivePos = (posWeights.adjective ?? 0) >= (posWeights.verb ?? 0) ? 'adjective' : 'verb';
+        score += Math.max(posWeights.adjective ?? 0, posWeights.verb ?? 0);
+      } else {
+        score += posWeights[rawPos] ?? 0;
+      }
+
+      // 2. Circular / "form of" penalty
+      if (isCircularOrFormOfDefinition(defText, targetWord)) {
+        score -= 25.0;
+      } else if (/^in\s+an?\s+[a-z-]+\s+(?:manner|way|fashion)\.?$/i.test(defText)) {
+        score -= 6.0;
+      }
+
+      // 3. Register & usage tags
+      const tagStr = [...(def.tags || [])].join(' ').toLowerCase();
+      const combinedMeta = `${tagStr} ${defText.slice(0, 80).toLowerCase()}`;
+
+      if (/\b(?:obsolete|misspelling|eye dialect|nonstandard|proscribed|corruption of)\b/.test(combinedMeta)) {
+        score -= 12.0;
+      } else if (/\b(?:archaic|dated)\b/.test(combinedMeta)) {
+        score -= 1.8;
+      }
+      if (/\b(?:slang|vulgar|offensive|derogatory)\b/.test(tagStr)) {
+        score -= 6.0;
+      }
+      if (/\b(?:literary|poetic|figurative|figuratively)\b/.test(tagStr)) {
+        score += 0.9;
+      }
+
+      // 4. Domain jargon filtering vs domain context boost
+      for (const rule of DOMAIN_RULES) {
+        const isDomainSense = rule.tagPatterns.test(tagStr) || rule.defPatterns.test(defText);
+        if (isDomainSense) {
+          if (sentence && rule.contextCues.test(sentence)) {
+            score += rule.matchBoost;
+          } else {
+            score -= rule.mismatchPenalty;
+          }
+        }
+      }
+
+      // 5. Contextual keyword & stem overlap
+      if (sentenceStems.size > 0) {
+        const defStems = extractContentStems(defText, targetWord);
+        let defMatches = 0;
+        for (const st of defStems) {
+          if (sentenceStems.has(st)) defMatches += 1;
+        }
+        score += Math.min(defMatches * 2.4, 9.6);
+
+        if (def.example) {
+          const exStems = extractContentStems(def.example, targetWord);
+          let exMatches = 0;
+          for (const st of exStems) {
+            if (sentenceStems.has(st)) exMatches += 1;
+          }
+          score += Math.min(exMatches * 1.5, 4.5);
+        }
+
+        const synList = [...(def.synonyms || []), ...(meaning.synonyms || [])];
+        if (synList.length > 0) {
+          const synStems = extractContentStems(synList.join(' '), targetWord);
+          let synMatches = 0;
+          for (const st of synStems) {
+            if (sentenceStems.has(st)) synMatches += 1;
+          }
+          score += Math.min(synMatches * 2.0, 4.0);
+        }
+      }
+
+      // 6. Semantic cluster affinity for common literary metaphors/polysemy
+      if (
+        mentalEmotionSentence &&
+        /\b(?:mind|thought|thoughts|feeling|emotion|emotions|secretly|cherish|entertain|mental|spirit|mood|expression|face|visage|composure|calmness|temperament)\b/i.test(
+          defText
+        )
+      ) {
+        score += 2.2;
+      }
+      if (
+        styleExpressionSentence &&
+        /\b(?:dull|uninspired|prosaic|commonplace|ordinary|imaginative|speech|writing|style|language|expression|literary)\b/i.test(
+          defText
+        )
+      ) {
+        score += 2.2;
+      }
+
+      // 7. Lexicographic sense-frequency prior (breaks ties cleanly toward primary senses)
+      score += meaningIdx === 0 ? 0.85 : Math.max(0, 0.55 - meaningIdx * 0.2);
+      score += defIdx === 0 ? 1.15 : Math.max(0, 0.85 - defIdx * 0.25);
+
+      if (!bestCandidate || score > bestCandidate.score) {
+        const mergedSyns = Array.from(
+          new Set([...(def.synonyms || []), ...(meaning.synonyms || [])])
+        ).slice(0, 6);
+        const mergedAnts = Array.from(
+          new Set([...(def.antonyms || []), ...(meaning.antonyms || [])])
+        ).slice(0, 6);
+
+        bestCandidate = {
+          score,
+          partOfSpeech: effectivePos,
+          definition: defText,
+          synonyms: mergedSyns.length > 0 ? mergedSyns : undefined,
+          antonyms: mergedAnts.length > 0 ? mergedAnts : undefined,
+        };
+      }
+    });
+  });
+
+  if (!bestCandidate) return null;
+
+  return {
+    partOfSpeech: bestCandidate.partOfSpeech,
+    definition: bestCandidate.definition,
+    synonyms: bestCandidate.synonyms,
+    antonyms: bestCandidate.antonyms,
+  };
 };
 
 export const classifyComplexityLevel = (
@@ -2009,15 +2565,14 @@ export const extractComplexWordsFromText = async (
     totalCandidates
   );
 
-  // Enrich in concurrent batches of 24 to support unlimited words without browser/API throttling
-  const BATCH_SIZE = 24;
+  // Enrich in bounded concurrent batches so every word gets full Wiktionary/dictionary sense ranking
+  const BATCH_SIZE = 16;
   const enriched: Array<(BookExtractedWord & { rankScore: number }) | null> = [];
 
   for (let i = 0; i < totalCandidates; i += BATCH_SIZE) {
     const batch = validCandidates.slice(i, i + BATCH_SIZE);
     const batchResults = await Promise.all(
-      batch.map(async (candidate, batchIdx) => {
-        const globalIdx = i + batchIdx;
+      batch.map(async (candidate) => {
         const freqInfo = await queryDatamuseFrequency(candidate.word);
 
         // Exclude ultra-common everyday words (> 22 occurrences per million)
@@ -2025,31 +2580,68 @@ export const extractComplexWordsFromText = async (
           return null;
         }
 
-        // Query full dictionary API for top words or when Datamuse doesn't include a definition
-        const shouldQueryFullDict = globalIdx < 24 || !freqInfo.fallbackDef;
-        const dictEntry = shouldQueryFullDict ? await lookupWord(candidate.word) : null;
+        const cleanSentence = candidate.sentence.replace(/^["“']+|["”']+$/g, '').trim();
 
-        const firstMeaning = dictEntry?.meanings?.[0];
-        let firstDef = firstMeaning?.definitions?.[0]?.definition || freqInfo.fallbackDef;
-        let partOfSpeech = firstMeaning?.partOfSpeech || freqInfo.fallbackPos || 'noun';
+        // Query full Wiktionary-backed dictionary pipeline for EVERY candidate word (no 24-word cutoff)
+        const dictEntry = await lookupWord(candidate.word);
+
+        const effectiveEntry: WordEntry | null =
+          dictEntry ||
+          (freqInfo.fallbackMeanings
+            ? {
+                word: candidate.word,
+                phonetic: freqInfo.phonetic,
+                meanings: freqInfo.fallbackMeanings,
+              }
+            : null);
+
+        let selected = effectiveEntry
+          ? selectBestMeaningForContext(effectiveEntry, cleanSentence, candidate.word)
+          : null;
+
         let phonetic = dictEntry?.phonetic || freqInfo.phonetic;
+        let audio = dictEntry?.audio;
 
-        // If inflected word (e.g. plural/past/adverb) lacked a direct definition, check its base stem
-        if (!firstDef) {
-          const stem = candidate.word.replace(/(?:es|s|ed|ing|ly)$/, '');
-          if (stem.length >= 5 && stem !== candidate.word) {
-            const stemInfo = await queryDatamuseFrequency(stem);
-            if (stemInfo.fallbackDef) {
-              firstDef = stemInfo.fallbackDef;
-              partOfSpeech = stemInfo.fallbackPos || partOfSpeech;
-              phonetic = phonetic || stemInfo.phonetic;
+        // If an inflected book word still lacked a definition across all sources, check derived base lemmas
+        if (!selected || isCircularOrFormOfDefinition(selected.definition, candidate.word)) {
+          const lemmas = deriveCandidateLemmas(candidate.word);
+          for (const { lemma } of lemmas.slice(0, 2)) {
+            const lemmaDict = await lookupWord(lemma);
+            if (lemmaDict) {
+              const lemmaSelected = selectBestMeaningForContext(
+                lemmaDict,
+                cleanSentence,
+                candidate.word
+              );
+              if (lemmaSelected && !isCircularOrFormOfDefinition(lemmaSelected.definition, lemma)) {
+                selected = lemmaSelected;
+                phonetic = phonetic || lemmaDict.phonetic;
+                audio = audio || lemmaDict.audio;
+                break;
+              }
+            }
+            const stemInfo = await queryDatamuseFrequency(lemma);
+            if (stemInfo.fallbackMeanings) {
+              const stemSelected = selectBestMeaningForContext(
+                { word: lemma, meanings: stemInfo.fallbackMeanings },
+                cleanSentence,
+                candidate.word
+              );
+              if (stemSelected) {
+                selected = stemSelected;
+                phonetic = phonetic || stemInfo.phonetic;
+                break;
+              }
             }
           }
         }
 
-        if (!firstDef) {
+        const finalDef = selected?.definition || freqInfo.fallbackDef;
+        if (!finalDef) {
           return null;
         }
+
+        const partOfSpeech = selected?.partOfSpeech || freqInfo.fallbackPos || 'noun';
 
         const complexityLevel = classifyComplexityLevel(
           candidate.word,
@@ -2061,12 +2653,12 @@ export const extractComplexWordsFromText = async (
         const extracted: BookExtractedWord & { rankScore: number } = {
           word: candidate.word.charAt(0).toUpperCase() + candidate.word.slice(1),
           phonetic,
-          audio: dictEntry?.audio,
+          audio,
           partOfSpeech,
-          mainDefinition: firstDef,
-          bookSentence: candidate.sentence.replace(/^["“']+|["”']+$/g, '').trim(),
-          synonyms: firstMeaning?.synonyms?.slice(0, 6),
-          antonyms: firstMeaning?.antonyms?.slice(0, 6),
+          mainDefinition: finalDef,
+          bookSentence: cleanSentence,
+          synonyms: selected?.synonyms,
+          antonyms: selected?.antonyms,
           frequency: freqInfo.frequency,
           complexityLevel,
           complexityScore: rankScore,

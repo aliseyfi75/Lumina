@@ -5,6 +5,8 @@ import {
   deriveCandidateLemmas,
   isCircularOrFormOfDefinition,
   mergeWordEntries,
+  sanitizePhonetic,
+  isUsageFootnoteNoise,
 } from '../services/dictionaryService';
 import {
   inferContextualPosWeights,
@@ -51,6 +53,39 @@ test.describe('Option 1: Wiktionary / FreeDictionaryAPI Parsing & Lemma Resoluti
     expect(deriveCandidateLemmas('circumambulated').map((c) => c.lemma)).toContain('circumambulate');
     expect(deriveCandidateLemmas('indefatigably').map((c) => c.lemma)).toContain('indefatigable');
     expect(deriveCandidateLemmas('compelled').map((c) => c.lemma)).toContain('compel');
+  });
+
+  test('sanitizes ARPAbet phonetics, filters usage footnotes, unwraps variant brackets, and resolves multi-region/two-word/irregular lemmas', () => {
+    expect(sanitizePhonetic('S L EY1 V Z')).toBeUndefined();
+    expect(sanitizePhonetic('pron:HH AH0 L OW1')).toBeUndefined();
+    expect(sanitizePhonetic('/sleɪvz/')).toBe('/sleɪvz/');
+
+    expect(isUsageFootnoteNoise('↑ "Usage note", in Dictionary, 2022.')).toBe(true);
+    expect(stripWiktionaryHtmlAndExtractTags('↑ See citation above.').text).toBe('');
+
+    const unwrapped = stripWiktionaryHtmlAndExtractTags(
+      'Alternative form of sanatorium. [A facility for long-term medical treatment and convalescence.]'
+    );
+    expect(unwrapped.text).toBe('A facility for long-term medical treatment and convalescence.');
+    expect(unwrapped.tags).toContain('form-of-lemma:sanatorium');
+
+    const clipping = stripWiktionaryHtmlAndExtractTags(
+      '(LGBTQ) Clipping of bi-curious. [Interested in experimenting.]'
+    );
+    expect(clipping.text).toContain('Clipping of bi-curious');
+
+    expect(
+      extractFormOfLemma(
+        'British, Australia, New Zealand, and Canada standard spelling of offense.'
+      )?.lemma
+    ).toBe('offense');
+    expect(extractFormOfLemma('Alternative form of water cooler.')?.lemma).toBe('water cooler');
+    expect(extractFormOfLemma('Alternative letter-case form of Catch-22.')?.lemma).toBe('Catch-22');
+
+    expect(deriveCandidateLemmas('shone').map((c) => c.lemma)).toContain('shine');
+    expect(deriveCandidateLemmas('writes').map((c) => c.lemma)).toContain('write');
+    expect(deriveCandidateLemmas('fictionalised').map((c) => c.lemma)).toContain('fictionalize');
+    expect(deriveCandidateLemmas('behaviours').map((c) => c.lemma)).toContain('behavior');
   });
 
   test('merges tags and extra senses from Wiktionary/FreeDictionaryAPI onto primary entries', () => {
@@ -267,6 +302,81 @@ test.describe('Option 1: Context-Aware Book Sense & Part-of-Speech Ranking Unit 
     );
     expect(harborChoice?.partOfSpeech).toBe('verb');
     expect(harborChoice?.definition).toContain('secretly in one’s mind');
+  });
+
+  test('resolves passive "have been V-ed", coordinated "and V-s of", plural nouns, and filters pop-culture/narrow senses', () => {
+    // Passive "have been erased" -> verb over heraldic adjective
+    const erasedWeights = inferContextualPosWeights(
+      'erased',
+      'He thought of the countless people who have been erased from history.'
+    );
+    expect(erasedWeights.verb).toBeGreaterThan(erasedWeights.adjective);
+
+    // Plural head noun after determiner + adjective ("the early drafts of")
+    const draftsWeights = inferContextualPosWeights(
+      'drafts',
+      'She carefully preserved the early drafts of the novel.'
+    );
+    expect(draftsWeights.noun).toBeGreaterThan(draftsWeights.adjective);
+    expect(draftsWeights.noun).toBeGreaterThan(draftsWeights.verb);
+
+    // Coordinated 3sg verb ("opposes ... and dreams of") + prepositional collocation
+    const dreamsEntry: WordEntry = {
+      word: 'dreams',
+      meanings: [
+        {
+          partOfSpeech: 'noun',
+          definitions: [
+            { definition: 'Imaginary events seen in the mind while sleeping.' },
+          ],
+        },
+        {
+          partOfSpeech: 'verb',
+          definitions: [
+            { definition: 'To see imaginary events while sleeping.' },
+            {
+              definition: 'To hope or wish for something; to imagine a desired future.',
+              example: 'He dreams of freedom and a better life.',
+            },
+          ],
+        },
+      ],
+    };
+    const dreamsChoice = selectBestMeaningForContext(
+      dreamsEntry,
+      "Winston secretly opposes the Party's rule and dreams of rebellion.",
+      'dreams'
+    );
+    expect(dreamsChoice?.partOfSpeech).toBe('verb');
+    expect(dreamsChoice?.definition).toContain('hope or wish');
+
+    // Ideology/doctrine sense of "espouses" over archaic marriage, and filtering pop-culture / narrow "(of a river)"
+    const espouseEntry: WordEntry = {
+      word: 'espouses',
+      meanings: [
+        {
+          partOfSpeech: 'noun',
+          definitions: [
+            { definition: 'Espouses is a 1998 indie rock album by an Australian band.' },
+          ],
+        },
+        {
+          partOfSpeech: 'verb',
+          definitions: [
+            { definition: '(archaic) To give in marriage; to wed or betroth.', tags: ['archaic'] },
+            { definition: '(of a river) To join or merge with a tributary.' },
+            { definition: 'To accept, support, or adopt a belief, doctrine, or cause.' },
+          ],
+        },
+      ],
+    };
+    const espouseChoice = selectBestMeaningForContext(
+      espouseEntry,
+      'He publicly espouses Party doctrine while privately doubting every word.',
+      'espouses'
+    );
+    expect(espouseChoice?.partOfSpeech).toBe('verb');
+    expect(espouseChoice?.definition).toContain('accept, support, or adopt');
   });
 });
 

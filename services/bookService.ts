@@ -5,6 +5,8 @@ import {
   isCircularOrFormOfDefinition,
   normalizePartOfSpeech,
   deriveCandidateLemmas,
+  sanitizePhonetic,
+  POP_CULTURE_OR_PROPER_NOISE_REGEX,
 } from './dictionaryService';
 import { translateCardMeaningToPersian } from './translationService';
 
@@ -1849,9 +1851,18 @@ const queryDatamuseFrequency = async (
         const parsed = parseFloat(freqTag.slice(2));
         if (!Number.isNaN(parsed)) frequency = parsed;
       }
-      const pronTag = item.tags.find((t: string) => t.startsWith('pron:'));
-      if (pronTag) {
-        phonetic = pronTag.replace('pron:', '').trim();
+      const ipaTag = item.tags.find((t: string) => t.startsWith('ipa_pron:'));
+      if (ipaTag) {
+        const rawIpa = ipaTag.slice('ipa_pron:'.length).trim().replace(/^\/+|\/+$/g, '');
+        if (rawIpa) {
+          phonetic = sanitizePhonetic(`/${rawIpa}/`);
+        }
+      }
+      if (!phonetic) {
+        const pronTag = item.tags.find((t: string) => t.startsWith('pron:'));
+        if (pronTag) {
+          phonetic = sanitizePhonetic(pronTag.slice('pron:'.length).trim());
+        }
       }
     }
 
@@ -1905,6 +1916,37 @@ const DETERMINERS_SET = new Set([
   'a', 'an', 'the', 'my', 'your', 'his', 'her', 'its', 'our', 'their',
   'this', 'that', 'these', 'those', 'each', 'every', 'either', 'neither',
   'no', 'another', 'any', 'some', 'such', 'what', 'whose',
+]);
+
+const CLAUSE_TAKING_VERBS_SET = new Set([
+  'discover', 'discovered', 'discovers',
+  'believe', 'believed', 'believes',
+  'know', 'knew', 'known', 'knows',
+  'think', 'thought', 'thinks',
+  'say', 'said', 'says',
+  'suggest', 'suggested', 'suggests',
+  'find', 'found', 'finds',
+  'show', 'showed', 'shown', 'shows',
+  'realize', 'realized', 'realizes', 'realise', 'realised', 'realises',
+  'ensure', 'ensured', 'ensures',
+  'prove', 'proved', 'proven', 'proves',
+  'assume', 'assumed', 'assumes',
+  'claim', 'claimed', 'claims',
+  'argue', 'argued', 'argues',
+  'hold', 'held', 'holds',
+  'hope', 'hoped', 'hopes',
+  'fear', 'feared', 'fears',
+  'feel', 'felt', 'feels',
+  'see', 'saw', 'seen', 'sees',
+  'indicate', 'indicated', 'indicates',
+  'confirm', 'confirmed', 'confirms',
+  'mean', 'meant', 'means',
+  'notice', 'noticed', 'notices',
+  'doubt', 'doubted', 'doubts',
+  'insist', 'insisted', 'insists',
+  'warn', 'warned', 'warns',
+  'admit', 'admitted', 'admits',
+  'conclude', 'concluded', 'concludes',
 ]);
 
 const MODALS_SET = new Set([
@@ -1967,6 +2009,8 @@ const LY_ADJECTIVES_SET = new Set([
   'burly', 'surly', 'seemly', 'unseemly', 'timely', 'untimely', 'worldly',
   'unworldly', 'earthly', 'heavenly', 'princely', 'kingly', 'cowardly',
   'miserly', 'slovenly', 'sprightly', 'elderly', 'lonely', 'lovely', 'lively',
+  'early', 'daily', 'weekly', 'monthly', 'yearly', 'likely', 'unlikely',
+  'deadly', 'friendly', 'unfriendly', 'costly', 'orderly', 'disorderly', 'holy',
 ]);
 
 const CONTEXT_STOP_WORDS = new Set([
@@ -2048,6 +2092,14 @@ const DOMAIN_RULES: Array<{
     contextCues: /\b(?:church|priest|bishop|pope|altar|cathedral|parish|chapel|clergy|monk|abbey|religion|faith|doctrine|prayer|sacred)\b/i,
     mismatchPenalty: 3.0,
     matchBoost: 3.5,
+  },
+  {
+    name: 'law',
+    tagPatterns: /\b(?:patent law|property law|criminal law|civil law|tort law)\b/i,
+    defPatterns: /\b(?:patent law|writ of|court of law|tortious|chose in action)\b/i,
+    contextCues: /\b(?:court|judge|jury|lawsuit|trial|plaintiff|defendant|attorney|lawyer|statute|legal|patent|tort|writ|verdict|counsel)\b/i,
+    mismatchPenalty: 4.0,
+    matchBoost: 4.0,
   },
 ];
 
@@ -2167,8 +2219,20 @@ export const inferContextualPosWeights = (
     (Boolean(next3 && !POST_NOUN_BOUNDARY_WORDS.has(next3)) ||
       /(?:ed|ing|ous|ive|able|ible|al|ic|ful|less|nt)$/.test(next2));
 
+  // Distinguish complementizer "that" ("discover that infant conditioning...") from demonstrative "that"
+  const prev1IsComplementizerThat = prev1 === 'that' && CLAUSE_TAKING_VERBS_SET.has(prev2);
+
   // 1. Preceded by determiner / possessive ("the ...", "his ...", "a ...")
-  if (DETERMINERS_SET.has(prev1) && !precededByClauseStart) {
+  if (prev1IsComplementizerThat) {
+    if (followedByClauseBreak || next1LooksLikeFiniteVerb) {
+      weights.noun += 4.2;
+    } else if (OBJECT_STARTERS_AFTER_VERB.has(next1)) {
+      weights.verb += 3.8;
+    } else {
+      weights.noun += 2.2;
+      weights.adjective += 1.8;
+    }
+  } else if (DETERMINERS_SET.has(prev1) && !precededByClauseStart) {
     weights.verb -= 4.5;
     weights.adverb -= 2.5;
     if (followedByClauseBreak || next1LooksLikeFiniteVerb) {
@@ -2181,6 +2245,20 @@ export const inferContextualPosWeights = (
       weights.adjective += 4.2;
       weights.noun += 0.6;
     }
+  } else if (
+    DETERMINERS_SET.has(prev2) &&
+    !DETERMINERS_SET.has(prev1) &&
+    !MODALS_SET.has(prev1) &&
+    target.endsWith('s') &&
+    !target.endsWith('ss') &&
+    !target.endsWith('ous') &&
+    !target.endsWith('us') &&
+    (followedByClauseBreak || next1LooksLikeFiniteVerb || PREPOSITIONS_SET.has(next1))
+  ) {
+    // e.g. "the early drafts of the novel" -> plural head noun after adjective
+    weights.noun += 4.8;
+    weights.adjective -= 2.0;
+    weights.verb -= 3.0;
   } else if (
     DETERMINERS_SET.has(prev2) &&
     (DEGREE_ADVERBS_SET.has(prev1) || (prev1.endsWith('ly') && !LY_ADJECTIVES_SET.has(prev1)))
@@ -2213,8 +2291,16 @@ export const inferContextualPosWeights = (
     }
   }
 
-  // 4. Preceded by have-auxiliary ("had harbored", "had secretly harbored")
+  // 4. Preceded by have-auxiliary ("had harbored", "have been erased")
   if (
+    prev1 === 'been' &&
+    HAVE_AUX_SET.has(prev2) &&
+    /(?:ed|en|wn|nt|pt|ght)$/.test(target)
+  ) {
+    weights.verb += 4.8;
+    weights.adjective -= 2.2;
+    weights.noun -= 2.5;
+  } else if (
     HAVE_AUX_SET.has(prev1) ||
     (HAVE_AUX_SET.has(prev2) && (MODAL_INTERVENING_ADVERBS.has(prev1) || prev1.endsWith('ly')))
   ) {
@@ -2225,10 +2311,10 @@ export const inferContextualPosWeights = (
   }
 
   // 5. Preceded by copula / linking verb ("was arresting", "seemed singularly arresting")
-  if (
+  if (prev1 !== 'been' && (
     COPULA_VERBS_SET.has(prev1) ||
     (COPULA_VERBS_SET.has(prev2) && (DEGREE_ADVERBS_SET.has(prev1) || prev1.endsWith('ly')))
-  ) {
+  )) {
     weights.adjective += 3.6;
     if (target.endsWith('ed') || target.endsWith('ing')) {
       weights.verb += 1.4;
@@ -2244,7 +2330,55 @@ export const inferContextualPosWeights = (
     weights.noun -= 2.5;
   }
 
-  // 7. Preceded by preposition ("without sanction of", "in abject misery")
+  // 7. Coordinated finite verbs ("opposes the Party's rule and dreams of rebellion")
+  if (
+    (prev1 === 'and' || prev1 === 'or') &&
+    (OBJECT_STARTERS_AFTER_VERB.has(next1) || PREPOSITIONS_SET.has(next1) || next1 === 'to')
+  ) {
+    const earlierTokens = prevTokens.slice(0, -1);
+    const hasParallel3sgVerb =
+      target.endsWith('s') &&
+      !target.endsWith('ss') &&
+      earlierTokens.some(
+        (t) =>
+          t.length >= 4 &&
+          t.endsWith('s') &&
+          !t.endsWith('ss') &&
+          !DETERMINERS_SET.has(t) &&
+          !PREPOSITIONS_SET.has(t) &&
+          !COPULA_VERBS_SET.has(t)
+      );
+    const hasParallelPastVerb =
+      target.endsWith('ed') && earlierTokens.some((t) => t.length >= 4 && t.endsWith('ed'));
+    if (hasParallel3sgVerb || hasParallelPastVerb) {
+      weights.verb += 4.2;
+      weights.noun -= 1.8;
+    }
+  }
+
+  // 8. Compound noun modifier + plural head noun ("in rundown apartment blocks")
+  if (
+    target.endsWith('s') &&
+    !target.endsWith('ss') &&
+    !target.endsWith('ous') &&
+    !target.endsWith('us') &&
+    prev1.length >= 4 &&
+    !DETERMINERS_SET.has(prev1) &&
+    !MODALS_SET.has(prev1) &&
+    !COPULA_VERBS_SET.has(prev1) &&
+    !HAVE_AUX_SET.has(prev1) &&
+    !SUBJECT_PRONOUNS_SET.has(prev1) &&
+    !PREPOSITIONS_SET.has(prev1) &&
+    prev1 !== 'and' &&
+    prev1 !== 'or' &&
+    prev1 !== 'to' &&
+    (followedByClauseBreak || PREPOSITIONS_SET.has(next1)) &&
+    (DETERMINERS_SET.has(prev2) || PREPOSITIONS_SET.has(prev2) || prevTokens.length === 1)
+  ) {
+    weights.noun += 3.6;
+  }
+
+  // 9. Preceded by preposition ("without sanction of", "in abject misery")
   if (PREPOSITIONS_SET.has(prev1)) {
     weights.verb -= 3.2;
     if (followedByClauseBreak || next1LooksLikeFiniteVerb) {
@@ -2268,8 +2402,19 @@ export const selectBestMeaningForContext = (
   }
 
   const targetWord = (rawWord || entry.word || '').trim().toLowerCase();
+  const targetStem = stemToken(targetWord);
   const posWeights = inferContextualPosWeights(targetWord, sentence);
   const sentenceStems = extractContentStems(sentence, targetWord);
+
+  // Extract immediate following preposition in sentence for phrasal/prepositional collocation matching
+  let nextPrep = '';
+  if (sentence && targetWord) {
+    const escaped = targetWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const m = new RegExp(`\\b${escaped}\\b\\s+([a-z]+)\\b`, 'i').exec(sentence);
+    if (m && PREPOSITIONS_SET.has(m[1].toLowerCase())) {
+      nextPrep = m[1].toLowerCase();
+    }
+  }
 
   const mentalEmotionSentence =
     /\b(?:secret|secretly|mind|thought|thoughts|feeling|feelings|resentment|grudge|doubt|suspicion|hope|fear|sorrow|grief|remorse|malice|ambition|desire|passion|heart|soul|spirit|spirits|memory|anxious|melancholy)\b/i.test(
@@ -2279,11 +2424,24 @@ export const selectBestMeaningForContext = (
     /\b(?:critic|treatise|essay|prose|poem|poetry|style|speech|voice|tone|words|remark|reply|book|novel|writing|literary|argument|eloquence|effort|lecture)\b/i.test(
       sentence
     );
+  const residentialUrbanSentence =
+    /\b(?:apartment|apartments|building|buildings|street|streets|city|urban|neighborhood|housing|tower|towers|concrete|tenement|floor|rooms|rundown|lived|flats)\b/i.test(
+      sentence
+    );
+  const reputationPublicSentence =
+    /\b(?:public|reputation|visibility|prominence|career|media|attention|prestige|status|standing)\b/i.test(
+      sentence
+    );
+  const ideologyBeliefSentence =
+    /\b(?:doctrine|ideology|cause|philosophy|belief|beliefs|policy|movement|theory|principle|principles|creed|dogma|party|political|rebellion|regime)\b/i.test(
+      sentence
+    );
 
   let bestCandidate: {
     score: number;
     partOfSpeech: string;
     definition: string;
+    translations?: LocalizedTranslations;
     synonyms?: string[];
     antonyms?: string[];
   } | null = null;
@@ -2307,19 +2465,49 @@ export const selectBestMeaningForContext = (
         score += posWeights[rawPos] ?? 0;
       }
 
-      // 2. Circular / "form of" penalty
+      // 2. Circular / "form of" / pop-culture / clipping / dependent-subsense penalties
+      const tagStr = [...(def.tags || [])].join(' ').toLowerCase();
       if (isCircularOrFormOfDefinition(defText, targetWord)) {
         score -= 25.0;
       } else if (/^in\s+an?\s+[a-z-]+\s+(?:manner|way|fashion)\.?$/i.test(defText)) {
         score -= 6.0;
       }
+      if (POP_CULTURE_OR_PROPER_NOISE_REGEX.test(defText)) {
+        score -= 30.0;
+      }
+      if (/\b(?:clipping\s+of|short\s+for)\b/i.test(defText) || /\bclipping\b/.test(tagStr)) {
+        score -= 25.0;
+      }
+      if (
+        /\bsuch\s+an?\s+(?:thing|person|place|action|state|process|system|quality|summary|group|act|object)\b/i.test(
+          defText
+        )
+      ) {
+        score -= 8.0;
+      }
+
+      // Penalize narrow subject restrictions like "(of a river)" when the subject noun is absent from the sentence
+      const narrowSubjMatch = defText.match(/^\((?:[a-z,\s]+,\s*)?of\s+an?\s+([a-z]{3,16})\)/i);
+      if (narrowSubjMatch && sentence) {
+        const subjNoun = narrowSubjMatch[1].toLowerCase();
+        if (
+          !['person', 'people', 'human', 'someone', 'somebody', 'thing', 'action', 'event', 'state'].includes(
+            subjNoun
+          ) &&
+          !sentenceStems.has(stemToken(subjNoun)) &&
+          !sentence.toLowerCase().includes(subjNoun)
+        ) {
+          score -= 6.5;
+        }
+      }
 
       // 3. Register & usage tags
-      const tagStr = [...(def.tags || [])].join(' ').toLowerCase();
       const combinedMeta = `${tagStr} ${defText.slice(0, 80).toLowerCase()}`;
 
-      if (/\b(?:obsolete|misspelling|eye dialect|nonstandard|proscribed|corruption of)\b/.test(combinedMeta)) {
+      if (/\b(?:obsolete|misspelling|eye dialect|nonstandard|corruption of)\b/.test(combinedMeta)) {
         score -= 12.0;
+      } else if (/\bproscribed\b/.test(combinedMeta)) {
+        score -= 3.0;
       } else if (/\b(?:archaic|dated)\b/.test(combinedMeta)) {
         score -= 1.8;
       }
@@ -2342,7 +2530,7 @@ export const selectBestMeaningForContext = (
         }
       }
 
-      // 5. Contextual keyword & stem overlap
+      // 5. Contextual keyword & stem overlap + prepositional collocation
       if (sentenceStems.size > 0) {
         const defStems = extractContentStems(defText, targetWord);
         let defMatches = 0;
@@ -2371,10 +2559,20 @@ export const selectBestMeaningForContext = (
         }
       }
 
+      if (nextPrep && targetStem.length >= 3) {
+        const collocationRegex = new RegExp(`\\b${targetStem}[a-z]{0,4}\\s+${nextPrep}\\b`, 'i');
+        if (
+          (def.example && collocationRegex.test(def.example)) ||
+          collocationRegex.test(defText)
+        ) {
+          score += 2.4;
+        }
+      }
+
       // 6. Semantic cluster affinity for common literary metaphors/polysemy
       if (
         mentalEmotionSentence &&
-        /\b(?:mind|thought|thoughts|feeling|emotion|emotions|secretly|cherish|entertain|mental|spirit|mood|expression|face|visage|composure|calmness|temperament)\b/i.test(
+        /\b(?:mind|thought|thoughts|feeling|emotion|emotions|secretly|cherish|entertain|mental|spirit|mood|expression|face|visage|composure|calmness|temperament|imagine|hope|wish|aspiration)\b/i.test(
           defText
         )
       ) {
@@ -2387,6 +2585,37 @@ export const selectBestMeaningForContext = (
         )
       ) {
         score += 2.2;
+      }
+      if (
+        residentialUrbanSentence &&
+        /\b(?:building|buildings|residential|housing|dwellings|apartments|street|streets|urban|municipal)\b/i.test(
+          defText
+        )
+      ) {
+        score += 3.2;
+      }
+      if (
+        reputationPublicSentence &&
+        /\b(?:public\s+image|visibility|prominence|reputation|attention|notice|prestige)\b/i.test(
+          defText
+        )
+      ) {
+        score += 3.0;
+      }
+      if (ideologyBeliefSentence) {
+        if (
+          /\b(?:support|adopt|embrace|advocate|champion|uphold|accept|belief|cause|doctrine|policy|principle|idea|theory)\b/i.test(
+            defText
+          )
+        ) {
+          score += 3.2;
+        }
+        if (
+          /\b(?:marry|marriage|wed|betroth|espousal)\b/i.test(defText) &&
+          !/\b(?:marry|marriage|wedding|bride|groom|husband|wife|betroth)\b/i.test(sentence)
+        ) {
+          score -= 6.5;
+        }
       }
 
       // 7. Lexicographic sense-frequency prior (breaks ties cleanly toward primary senses)
@@ -2405,6 +2634,7 @@ export const selectBestMeaningForContext = (
           score,
           partOfSpeech: effectivePos,
           definition: defText,
+          translations: def.translations ? { ...def.translations } : undefined,
           synonyms: mergedSyns.length > 0 ? mergedSyns : undefined,
           antonyms: mergedAnts.length > 0 ? mergedAnts : undefined,
         };
@@ -2417,6 +2647,7 @@ export const selectBestMeaningForContext = (
   return {
     partOfSpeech: bestCandidate.partOfSpeech,
     definition: bestCandidate.definition,
+    translations: bestCandidate.translations,
     synonyms: bestCandidate.synonyms,
     antonyms: bestCandidate.antonyms,
   };

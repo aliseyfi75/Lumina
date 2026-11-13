@@ -202,13 +202,54 @@ const KNOWN_USAGE_TAG_KEYWORDS = new Set([
   "programming",
   "finance",
   "economics",
+  "narrower sense",
+  "broadly",
+  "strictly",
+  "british spelling",
+  "american spelling",
+  "commonwealth",
+  "australia",
+  "canada",
+  "ireland",
+  "scotland",
+  "sometimes proscribed",
+  "usually in the passive",
+  "in the passive",
+  "passive",
 ]);
+
+const ARPABET_TOKEN_REGEX = /\b[A-Z]{1,3}[012]\b/;
+
+export const sanitizePhonetic = (raw?: string): string | undefined => {
+  if (!raw) return undefined;
+  const cleaned = raw.replace(/[\u035c\u0361]/g, "").trim();
+  if (!cleaned || ARPABET_TOKEN_REGEX.test(cleaned)) return undefined;
+  return cleaned;
+};
+
+export const isUsageFootnoteNoise = (text: string): boolean => {
+  const t = text.trim();
+  if (!t) return true;
+  if (/^[↑^]/.test(t)) return true;
+  if (/^(?:see\s+usage\s+note|usage\s+note\b)/i.test(t)) return true;
+  if (/\bproscribed\s+usage\s+may\s+sometimes\s+arise\b/i.test(t)) return true;
+  return false;
+};
+
+export const POP_CULTURE_OR_PROPER_NOISE_REGEX =
+  /\b(?:american sitcom|drama film|thriller drama|studio album|television series|television drama|miniseries|pop band|rock band|metal band|punk band|aired on|broadcast by|netflix|starring|directed by|co-written and directed|video game developed|surname|given name)\b/i;
+
+const BRACKETED_FORM_OF_UNWRAP_REGEX =
+  /^(?:\([^)]{1,45}\)\s*)?(?:[a-zA-Z-]+(?:,\s*|\s+and\s+|\s+)){1,12}(?:form|spelling|variant)\s+of\s+([a-zA-Z0-9][a-zA-Z0-9' -]{1,30}?)(?:\s*\([^)]*\))?\s*[.:]\s*\[([^\]]{8,})\]\.?$/i;
 
 const looksLikeUsageLabelGroup = (groupContent: string): string[] | null => {
   const trimmed = groupContent.trim();
-  if (!trimmed || trimmed.length > 65) return null;
+  if (!trimmed || trimmed.length > 75) return null;
+  if (/^(?:of\s+|used\s+of\s+|said\s+of\s+|especially\s+of\s+)/i.test(trimmed)) {
+    return null;
+  }
   const rawParts = trimmed
-    .split(/[,;]|(?:\s+or\s+)|(?:\s+and\s+)/i)
+    .split(/[,;/]|(?:\s+or\s+)|(?:\s+and\s+)/i)
     .map((p) =>
       p
         .trim()
@@ -221,7 +262,6 @@ const looksLikeUsageLabelGroup = (groupContent: string): string[] | null => {
   if (rawParts.length === 0) return null;
   const recognized = rawParts.filter((p) => KNOWN_USAGE_TAG_KEYWORDS.has(p));
   if (recognized.length === 0) return null;
-  // Require at least half of the comma-separated items to be recognized usage/domain tags
   if (recognized.length * 2 < rawParts.length) return null;
   return Array.from(new Set(rawParts));
 };
@@ -243,18 +283,44 @@ export const stripWiktionaryHtmlAndExtractTags = (
     .replace(/<[^>]+>/g, "");
 
   cleaned = decodeHtmlEntities(cleaned)
+    .replace(/\u00a0/g, " ")
     .replace(/\s+/g, " ")
     .replace(/\s+([,.;:!?)\]])/g, "$1")
     .replace(/([(\[])\s+/g, "$1")
     .trim();
 
+  if (isUsageFootnoteNoise(cleaned)) {
+    return { text: "", tags: [] };
+  }
+
   const extractedTags: string[] = formOfClass ? ["form-of"] : [];
+
+  // Unwrap inline bracketed definitions on spelling/form variants (e.g. "Alternative form of sanatorium. [An institution...]")
+  let unwrappedVariant = false;
+  const bracketMatch = !/\bclipping\s+of\b/i.test(cleaned)
+    ? cleaned.match(BRACKETED_FORM_OF_UNWRAP_REGEX)
+    : null;
+  if (bracketMatch?.[1] && bracketMatch?.[2]) {
+    const refLemma = bracketMatch[1].trim();
+    if (refLemma && !refLemma.includes(" ")) {
+      extractedTags.push(`form-of-lemma:${refLemma}`);
+    }
+    cleaned = bracketMatch[2].trim().replace(/:$/, ".");
+    if (!/[.!?]$/.test(cleaned)) cleaned += ".";
+    unwrappedVariant = true;
+  }
+
+  // Clean "plural of person: a body of persons..." ("people")
+  if (/^plural\s+of\s+person\s*:\s*/i.test(cleaned)) {
+    cleaned = cleaned.replace(/^plural\s+of\s+person\s*:\s*/i, "").trim();
+    unwrappedVariant = true;
+  }
 
   // Extract one or more leading parenthetical usage/domain label groups: e.g. "(transitive, archaic) To..."
   let strippedLeadingLabel = false;
   while (cleaned.startsWith("(")) {
     const closeIdx = cleaned.indexOf(")");
-    if (closeIdx <= 1 || closeIdx > 70) break;
+    if (closeIdx <= 1 || closeIdx > 75) break;
     const inside = cleaned.slice(1, closeIdx);
     const parsedTags = looksLikeUsageLabelGroup(inside);
     if (!parsedTags) break;
@@ -265,7 +331,16 @@ export const stripWiktionaryHtmlAndExtractTags = (
     strippedLeadingLabel = true;
   }
 
-  if (strippedLeadingLabel && /^[a-z]/.test(cleaned) && !isCircularOrFormOfDefinition(cleaned)) {
+  cleaned = cleaned
+    .replace(/\s*\bSee\s+(?:also\s+)?usage\s+notes?(?:\s+below)?\.?\s*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (
+    (strippedLeadingLabel || unwrappedVariant) &&
+    /^[a-z]/.test(cleaned) &&
+    !isCircularOrFormOfDefinition(cleaned)
+  ) {
     cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
   }
 
@@ -276,7 +351,7 @@ export const stripWiktionaryHtmlAndExtractTags = (
 };
 
 const FORM_OF_REGEX =
-  /^(?:\([^)]{1,45}\)\s*)?(?:(?:simple\s+)?past(?:\s+tense)?(?:\s+and\s+past\s+participle)?|past\s+participle|present\s+participle(?:\s+and\s+gerund)?|gerund|plural(?:\s+form)?|third-person\s+singular(?:\s+simple\s+present(?:\s+indicative)?)?(?:\s+form)?|inflection|alternative\s+(?:spelling|form|case|typography)|archaic\s+(?:spelling|form)|obsolete\s+(?:spelling|form)|dated\s+(?:spelling|form)|eye\s+dialect\s+spelling|nonstandard\s+(?:spelling|form)|comparative(?:\s+form)?|superlative(?:\s+form)?|(?:british|american|uk|us|commonwealth|canadian|australian|standard)\s+(?:standard\s+)?(?:spelling|form))\s+of\s+["'“”‘’]?([a-zA-Z][a-zA-Z'-]{2,})["'“”‘’]?(?:[\s.:;,(]|$)/i;
+  /^(?:\([^)]{1,45}\)\s*)?(?:(?:simple\s+)?past(?:\s+tense)?(?:\s+and\s+past\s+participle)?|past\s+participle|present\s+participle(?:\s+and\s+gerund)?|gerund|plural(?:\s+form)?|third-person\s+singular(?:\s+simple\s+present(?:\s+indicative)?)?(?:\s+form)?|inflection|comparative(?:\s+form)?|superlative(?:\s+form)?|(?:[a-zA-Z-]+(?:,\s*|\s+and\s+|\s+)){1,12}(?:form|spelling|case|typography|variant))\s+of\s+["'“”‘’]?([a-zA-Z0-9][a-zA-Z0-9'-]*(?:\s+[a-zA-Z0-9][a-zA-Z0-9'-]*)?)["'“”‘’]?(?:[.:;,(\[]|\s*$)/i;
 
 const MANNER_ADVERB_STUB_REGEX =
   /^in\s+an?\s+([a-zA-Z][a-zA-Z-]{3,})\s+(?:manner|way|fashion|style|wise)\.?$/i;
@@ -285,8 +360,31 @@ export const extractFormOfLemma = (
   definition: string,
   tags?: string[]
 ): { lemma: string; inflectedPos?: string; isMannerStub?: boolean } | null => {
+  if (tags) {
+    const tagLemma = tags.find((t) => t.startsWith("form-of-lemma:"));
+    if (tagLemma) {
+      return { lemma: tagLemma.slice("form-of-lemma:".length).trim() };
+    }
+  }
+
   const trimmed = definition.trim();
   if (!trimmed) return null;
+
+  // Chained colon redirects like "Alternative letter-case form of X: non-Oxford British English standard spelling of Y."
+  const chainedColonMatch = trimmed.match(
+    /:\s*([^:\[\]]+\b(?:form|spelling|variant)\s+of\s+[a-zA-Z0-9][a-zA-Z0-9'-]+)\.?$/i
+  );
+  if (chainedColonMatch?.[1]) {
+    const inner = extractFormOfLemma(chainedColonMatch[1]);
+    if (inner) return inner;
+  }
+
+  const bracketMatch = !/\bclipping\s+of\b/i.test(trimmed)
+    ? trimmed.match(BRACKETED_FORM_OF_UNWRAP_REGEX)
+    : null;
+  if (bracketMatch?.[1]) {
+    return { lemma: bracketMatch[1].trim() };
+  }
 
   const match = trimmed.match(FORM_OF_REGEX);
   if (match && match[1]) {
@@ -319,9 +417,11 @@ export const extractFormOfLemma = (
   }
 
   if (tags?.includes("form-of")) {
-    const fallbackOf = trimmed.match(/\bof\s+([a-zA-Z][a-zA-Z'-]{2,})\.?$/i);
+    const fallbackOf = trimmed.match(
+      /\bof\s+([a-zA-Z0-9][a-zA-Z0-9'-]*(?:\s+[a-zA-Z0-9][a-zA-Z0-9'-]*)?)\.?$/i
+    );
     if (fallbackOf?.[1]) {
-      return { lemma: fallbackOf[1] };
+      return { lemma: fallbackOf[1].trim() };
     }
   }
 
@@ -330,7 +430,8 @@ export const extractFormOfLemma = (
 
 export const isCircularOrFormOfDefinition = (definition: string, queriedWord?: string): boolean => {
   const trimmed = definition.trim();
-  if (!trimmed) return true;
+  if (isUsageFootnoteNoise(trimmed)) return true;
+  if (BRACKETED_FORM_OF_UNWRAP_REGEX.test(trimmed)) return false;
   const extracted = extractFormOfLemma(trimmed);
   if (extracted && !extracted.isMannerStub) return true;
   if (queriedWord) {
@@ -341,24 +442,70 @@ export const isCircularOrFormOfDefinition = (definition: string, queriedWord?: s
   return false;
 };
 
+const IRREGULAR_VERB_LEMMAS: Record<string, string> = {
+  shone: "shine",
+  woke: "wake",
+  woken: "wake",
+  spoke: "speak",
+  spoken: "speak",
+  wrote: "write",
+  written: "write",
+  chose: "choose",
+  chosen: "choose",
+  broke: "break",
+  broken: "break",
+  tore: "tear",
+  torn: "tear",
+  wore: "wear",
+  worn: "wear",
+  swore: "swear",
+  sworn: "swear",
+  fought: "fight",
+  sought: "seek",
+  taught: "teach",
+  caught: "catch",
+  bought: "buy",
+  brought: "bring",
+};
+
 export const deriveCandidateLemmas = (
   word: string
 ): Array<{ lemma: string; expectedPos?: string }> => {
   const lower = word.trim().toLowerCase();
-  if (lower.length < 5) return [];
+  if (lower.length < 4) return [];
 
   const results: Array<{ lemma: string; expectedPos?: string }> = [];
   const pushUnique = (lemma: string, expectedPos?: string) => {
     const clean = lemma.trim().toLowerCase();
-    if (clean.length >= 4 && clean !== lower && !results.some((r) => r.lemma === clean)) {
+    if (clean.length >= 3 && clean !== lower && !results.some((r) => r.lemma === clean)) {
       results.push({ lemma: clean, expectedPos });
     }
   };
 
-  if (lower.endsWith("ies") && lower.length >= 6) {
+  if (IRREGULAR_VERB_LEMMAS[lower]) {
+    pushUnique(IRREGULAR_VERB_LEMMAS[lower], "verb");
+  }
+
+  if (lower.length < 5) return results;
+
+  // British -ise/-isation/-isable/-our -> standard -ize/-ization/-izable/-or
+  if (/isations?$/i.test(lower)) {
+    pushUnique(lower.replace(/isations?$/i, "ization"), "noun");
+  }
+  if (/is(?:ed|es|ing)$/i.test(lower)) {
+    pushUnique(lower.replace(/is(?:ed|es|ing)$/i, "ize"), "verb");
+  }
+  if (/is(?:e|able)$/i.test(lower)) {
+    pushUnique(lower.replace(/is(e|able)$/i, "iz$1"));
+  }
+  if (/ours$/i.test(lower)) {
+    pushUnique(lower.replace(/ours$/i, "or"), "noun");
+  }
+
+  if (lower.endsWith("ies") && lower.length >= 5) {
     pushUnique(lower.slice(0, -3) + "y", "noun");
   }
-  if (lower.endsWith("ied") && lower.length >= 6) {
+  if (lower.endsWith("ied") && lower.length >= 5) {
     pushUnique(lower.slice(0, -3) + "y", "verb");
   }
   if (lower.endsWith("bly") && lower.length >= 6) {
@@ -374,7 +521,7 @@ export const deriveCandidateLemmas = (
   if (lower.endsWith("ly") && lower.length >= 6) {
     pushUnique(lower.slice(0, -2), "adjective");
   }
-  if (lower.endsWith("ing") && lower.length >= 7) {
+  if (lower.endsWith("ing") && lower.length >= 6) {
     const stem = lower.slice(0, -3);
     pushUnique(stem + "e", "verb");
     pushUnique(stem, "verb");
@@ -382,26 +529,26 @@ export const deriveCandidateLemmas = (
       pushUnique(stem.slice(0, -1), "verb");
     }
   }
-  if (lower.endsWith("ed") && lower.length >= 6) {
-    pushUnique(lower.slice(0, -1), "verb"); // e.g. circumambulated -> circumambulate
+  if (lower.endsWith("ed") && lower.length >= 5) {
+    pushUnique(lower.slice(0, -1), "verb"); // e.g. erased -> erase, circumambulated -> circumambulate
     const stem = lower.slice(0, -2);
     pushUnique(stem, "verb"); // e.g. harbored -> harbor
     if (/([^aeiou])\1$/.test(stem)) {
       pushUnique(stem.slice(0, -1), "verb"); // e.g. compelled -> compel
     }
   }
-  if (lower.endsWith("es") && lower.length >= 6) {
-    pushUnique(lower.slice(0, -1), "noun"); // e.g. precipices -> precipice
-    pushUnique(lower.slice(0, -2), "noun"); // e.g. marshes -> marsh
+  if (lower.endsWith("es") && lower.length >= 5) {
+    pushUnique(lower.slice(0, -1)); // e.g. writes -> write, slaves -> slave, precipices -> precipice
+    pushUnique(lower.slice(0, -2)); // e.g. marshes -> marsh
   } else if (
     lower.endsWith("s") &&
     !lower.endsWith("ss") &&
     !lower.endsWith("ous") &&
     !lower.endsWith("us") &&
     !lower.endsWith("is") &&
-    lower.length >= 6
+    lower.length >= 5
   ) {
-    pushUnique(lower.slice(0, -1), "noun"); // e.g. vicissitudes -> vicissitude
+    pushUnique(lower.slice(0, -1)); // e.g. dreams -> dream, blocks -> block, vicissitudes -> vicissitude
   }
   if (lower.endsWith("iest") && lower.length >= 7) {
     pushUnique(lower.slice(0, -4) + "y", "adjective");
@@ -438,11 +585,13 @@ const lookupPrimary = async (word: string): Promise<WordEntry | null> => {
     );
     if (rawMeanings.length === 0) return null;
 
+    const rawPhonetic =
+      entry.phonetic ||
+      data.flatMap((item: any) => item?.phonetics || []).find((p: any) => p?.text)?.text;
+
     const wordEntry: WordEntry = {
       word: entry.word,
-      phonetic:
-        entry.phonetic ||
-        data.flatMap((item: any) => item?.phonetics || []).find((p: any) => p?.text)?.text,
+      phonetic: sanitizePhonetic(rawPhonetic),
       audio: data.flatMap((item: any) => item?.phonetics || []).find((p: any) => p?.audio)?.audio,
       origin: entry.origin || data.find((item: any) => item?.origin)?.origin || undefined,
       meanings: rawMeanings.map((m: any) => {
@@ -477,11 +626,16 @@ const lookupPrimary = async (word: string): Promise<WordEntry | null> => {
           synonyms: mergedSyns.length > 0 ? mergedSyns : undefined,
           antonyms: mergedAnts.length > 0 ? mergedAnts : undefined,
           definitions: (Array.isArray(m.definitions) ? m.definitions : [])
-            .filter((d: any) => typeof d?.definition === "string" && d.definition.trim())
+            .filter(
+              (d: any) =>
+                typeof d?.definition === "string" &&
+                d.definition.trim() &&
+                !isUsageFootnoteNoise(d.definition)
+            )
             .map((d: any) => {
               // Extract any leading parenthetical labels as tags without mutating primary text
               const tags: string[] = [];
-              const trimmedDef = String(d.definition).trim();
+              const trimmedDef = String(d.definition).trim().replace(/:\s*$/, ".");
               if (trimmedDef.startsWith("(")) {
                 const closeIdx = trimmedDef.indexOf(")");
                 if (closeIdx > 1 && closeIdx <= 65) {
@@ -490,7 +644,7 @@ const lookupPrimary = async (word: string): Promise<WordEntry | null> => {
                 }
               }
               return {
-                definition: d.definition,
+                definition: trimmedDef,
                 example: d.example,
                 synonyms:
                   Array.isArray(d.synonyms) && d.synonyms.length > 0
@@ -514,206 +668,267 @@ const lookupPrimary = async (word: string): Promise<WordEntry | null> => {
 };
 
 const lookupFreeDictionaryApi = async (word: string): Promise<WordEntry | null> => {
-  try {
-    const response = await fetchWithTimeout(
-      `${FREE_DICT_API_URL}/${encodeURIComponent(word.toLowerCase())}`,
-      FREE_DICT_TIMEOUT_MS
-    );
+  const candidates =
+    word !== word.toLowerCase() ? [word, word.toLowerCase()] : [word.toLowerCase()];
 
-    if (!response.ok) return null;
+  for (const queryWord of candidates) {
+    try {
+      const response = await fetchWithTimeout(
+        `${FREE_DICT_API_URL}/${encodeURIComponent(queryWord)}`,
+        FREE_DICT_TIMEOUT_MS
+      );
 
-    const data = await response.json();
-    if (!data || !Array.isArray(data.entries) || data.entries.length === 0) return null;
+      if (!response.ok) continue;
 
-    const englishEntries = data.entries.filter((e: any) => {
-      const code = e?.language?.code?.toLowerCase();
-      const name = e?.language?.name?.toLowerCase();
-      return !code || code === "en" || code === "eng" || name === "english";
-    });
+      const data = await response.json();
+      if (!data || !Array.isArray(data.entries) || data.entries.length === 0) continue;
 
-    if (englishEntries.length === 0) return null;
-
-    let phonetic: string | undefined;
-    for (const entry of englishEntries) {
-      if (Array.isArray(entry.pronunciations)) {
-        const ipa = entry.pronunciations.find(
-          (p: any) =>
-            typeof p?.text === "string" &&
-            p.text.trim() &&
-            (!p.type || String(p.type).toLowerCase() === "ipa")
-        );
-        if (ipa?.text) {
-          phonetic = ipa.text.trim();
-          break;
-        }
-      }
-    }
-
-    const meanings: Meaning[] = [];
-
-    for (const entry of englishEntries) {
-      const partOfSpeech = normalizePartOfSpeech(entry.partOfSpeech);
-      const rawSenses = Array.isArray(entry.senses) ? entry.senses : [];
-      const definitions: Definition[] = [];
-
-      const collectSense = (sense: any, inheritedTags: string[] = []) => {
-        if (!sense) return;
-        const senseTags = Array.from(
-          new Set<string>([
-            ...inheritedTags,
-            ...(Array.isArray(sense.tags)
-              ? sense.tags.map((t: any) => String(t).trim().toLowerCase()).filter(Boolean)
-              : []),
-          ])
-        );
-
-        if (typeof sense.definition === "string" && sense.definition.trim()) {
-          const parsed = stripWiktionaryHtmlAndExtractTags(sense.definition);
-          const allTags = Array.from(new Set([...senseTags, ...parsed.tags]));
-          const example =
-            (Array.isArray(sense.examples) &&
-              typeof sense.examples[0] === "string" &&
-              sense.examples[0].trim()) ||
-            (Array.isArray(sense.quotes) &&
-              typeof sense.quotes[0]?.text === "string" &&
-              sense.quotes[0].text.trim()) ||
-            undefined;
-
-          const syns = Array.isArray(sense.synonyms)
-            ? sense.synonyms.map((s: any) => String(s).trim()).filter(Boolean).slice(0, 6)
-            : [];
-          const ants = Array.isArray(sense.antonyms)
-            ? sense.antonyms.map((s: any) => String(s).trim()).filter(Boolean).slice(0, 6)
-            : [];
-
-          if (parsed.text) {
-            definitions.push({
-              definition: parsed.text,
-              example,
-              synonyms: syns.length > 0 ? syns : undefined,
-              antonyms: ants.length > 0 ? ants : undefined,
-              tags: allTags.length > 0 ? allTags : undefined,
-            });
-          }
-        }
-
-        if (Array.isArray(sense.subsenses)) {
-          for (const sub of sense.subsenses) {
-            collectSense(sub, senseTags);
-          }
-        }
-      };
-
-      for (const sense of rawSenses) {
-        collectSense(sense);
-      }
-
-      if (definitions.length === 0) continue;
-
-      const entrySyns = Array.from(
-        new Set<string>([
-          ...(Array.isArray(entry.synonyms) ? entry.synonyms : []),
-          ...definitions.flatMap((d) => d.synonyms || []),
-        ].map((s: any) => String(s).trim()).filter(Boolean))
-      ).slice(0, 10);
-
-      const entryAnts = Array.from(
-        new Set<string>([
-          ...(Array.isArray(entry.antonyms) ? entry.antonyms : []),
-          ...definitions.flatMap((d) => d.antonyms || []),
-        ].map((s: any) => String(s).trim()).filter(Boolean))
-      ).slice(0, 10);
-
-      meanings.push({
-        partOfSpeech,
-        definitions,
-        synonyms: entrySyns.length > 0 ? entrySyns : undefined,
-        antonyms: entryAnts.length > 0 ? entryAnts : undefined,
+      const englishEntries = data.entries.filter((e: any) => {
+        const code = e?.language?.code?.toLowerCase();
+        const name = e?.language?.name?.toLowerCase();
+        return !code || code === "en" || code === "eng" || name === "english";
       });
-    }
 
-    if (meanings.length === 0) return null;
+      if (englishEntries.length === 0) continue;
 
-    return {
-      word: typeof data.word === "string" && data.word.trim() ? data.word : word.toLowerCase(),
-      phonetic,
-      meanings,
-    };
-  } catch {
-    return null;
-  }
-};
-
-const lookupWiktionaryRest = async (word: string): Promise<WordEntry | null> => {
-  try {
-    const queryWord = word.toLowerCase();
-    const response = await fetchWithTimeout(
-      `${WIKTIONARY_REST_API_URL}/${encodeURIComponent(queryWord)}`,
-      WIKTIONARY_TIMEOUT_MS
-    );
-
-    if (!response.ok) return null;
-
-    const data = await response.json();
-    const englishSections = Array.isArray(data?.en)
-      ? data.en.filter(
-          (sec: any) => !sec?.language || String(sec.language).toLowerCase() === "english"
-        )
-      : [];
-
-    if (englishSections.length === 0) return null;
-
-    const meanings: Meaning[] = [];
-
-    for (const sec of englishSections) {
-      const partOfSpeech = normalizePartOfSpeech(sec.partOfSpeech);
-      const rawDefs = Array.isArray(sec.definitions) ? sec.definitions : [];
-      const definitions: Definition[] = [];
-
-      for (const rawDef of rawDefs) {
-        if (typeof rawDef?.definition !== "string" || !rawDef.definition.trim()) continue;
-        const { text, tags } = stripWiktionaryHtmlAndExtractTags(rawDef.definition);
-        if (!text) continue;
-
-        let example: string | undefined;
-        if (Array.isArray(rawDef.parsedExamples) && rawDef.parsedExamples.length > 0) {
-          const rawEx = rawDef.parsedExamples.find((ex: any) => typeof ex?.example === "string");
-          if (rawEx?.example) {
-            const parsedEx = stripWiktionaryHtmlAndExtractTags(rawEx.example);
-            if (parsedEx.text) example = parsedEx.text;
+      let phonetic: string | undefined;
+      for (const entry of englishEntries) {
+        if (Array.isArray(entry.pronunciations)) {
+          for (const p of entry.pronunciations) {
+            if (
+              typeof p?.text === "string" &&
+              p.text.trim() &&
+              (!p.type || String(p.type).toLowerCase() === "ipa")
+            ) {
+              const cleanIpa = sanitizePhonetic(p.text);
+              if (cleanIpa) {
+                phonetic = cleanIpa;
+                break;
+              }
+            }
           }
-        } else if (Array.isArray(rawDef.examples) && rawDef.examples.length > 0) {
-          const rawEx = rawDef.examples.find((ex: any) => typeof ex === "string");
-          if (rawEx) {
-            const parsedEx = stripWiktionaryHtmlAndExtractTags(rawEx);
-            if (parsedEx.text) example = parsedEx.text;
-          }
+          if (phonetic) break;
         }
-
-        definitions.push({
-          definition: text,
-          example,
-          tags: tags.length > 0 ? tags : undefined,
-        });
       }
 
-      if (definitions.length > 0) {
+      const meanings: Meaning[] = [];
+      const wordLevelFa = new Set<string>();
+
+      for (const entry of englishEntries) {
+        for (const faWord of extractPersianFromSenseTranslations(entry.translations)) {
+          wordLevelFa.add(faWord);
+        }
+
+        const partOfSpeech = normalizePartOfSpeech(entry.partOfSpeech);
+        const rawSenses = Array.isArray(entry.senses) ? entry.senses : [];
+        const topLevelDefs: Definition[] = [];
+        const subsenseDefs: Definition[] = [];
+
+        const collectSense = (
+          sense: any,
+          inheritedTags: string[] = [],
+          isSubsense = false
+        ) => {
+          if (!sense) return;
+          const senseTags = Array.from(
+            new Set<string>([
+              ...inheritedTags,
+              ...(Array.isArray(sense.tags)
+                ? sense.tags.map((t: any) => String(t).trim().toLowerCase()).filter(Boolean)
+                : []),
+            ])
+          );
+
+          const hasSubsenses = Array.isArray(sense.subsenses) && sense.subsenses.length > 0;
+
+          if (typeof sense.definition === "string" && sense.definition.trim()) {
+            const parsed = stripWiktionaryHtmlAndExtractTags(sense.definition);
+            const allTags = Array.from(new Set([...senseTags, ...parsed.tags]));
+
+            // Umbrella category headers ending in ":" (e.g. "Not recognized:", "(Preliminary) written work:")
+            // introduce concrete subsenses rather than standing alone as definitions.
+            if (!isSubsense && hasSubsenses && /:\s*$/.test(parsed.text)) {
+              for (const sub of sense.subsenses) {
+                collectSense(sub, allTags, false);
+              }
+              return;
+            }
+
+            const cleanText = parsed.text.replace(/:\s*$/, ".");
+            if (cleanText) {
+              const example =
+                (Array.isArray(sense.examples) &&
+                  typeof sense.examples[0] === "string" &&
+                  sense.examples[0].trim()) ||
+                (Array.isArray(sense.quotes) &&
+                  typeof sense.quotes[0]?.text === "string" &&
+                  sense.quotes[0].text.trim()) ||
+                undefined;
+
+              const syns = Array.isArray(sense.synonyms)
+                ? sense.synonyms.map((s: any) => String(s).trim()).filter(Boolean).slice(0, 6)
+                : [];
+              const ants = Array.isArray(sense.antonyms)
+                ? sense.antonyms.map((s: any) => String(s).trim()).filter(Boolean).slice(0, 6)
+                : [];
+              const senseFa = extractPersianFromSenseTranslations(sense.translations);
+              senseFa.forEach((w) => wordLevelFa.add(w));
+
+              const defObj: Definition = {
+                definition: cleanText,
+                example,
+                synonyms: syns.length > 0 ? syns : undefined,
+                antonyms: ants.length > 0 ? ants : undefined,
+                tags: allTags.length > 0 ? allTags : undefined,
+                translations:
+                  senseFa.length > 0 ? { fa: senseFa.slice(0, 3).join("، ") } : undefined,
+              };
+
+              if (isSubsense) {
+                subsenseDefs.push(defObj);
+              } else {
+                topLevelDefs.push(defObj);
+              }
+            }
+          }
+
+          if (hasSubsenses) {
+            for (const sub of sense.subsenses) {
+              collectSense(sub, senseTags, true);
+            }
+          }
+        };
+
+        for (const sense of rawSenses) {
+          collectSense(sense, [], false);
+        }
+
+        const definitions = [...topLevelDefs, ...subsenseDefs];
+        if (definitions.length === 0) continue;
+
+        const entrySyns = Array.from(
+          new Set<string>(
+            [
+              ...(Array.isArray(entry.synonyms) ? entry.synonyms : []),
+              ...definitions.flatMap((d) => d.synonyms || []),
+            ]
+              .map((s: any) => String(s).trim())
+              .filter(Boolean)
+          )
+        ).slice(0, 10);
+
+        const entryAnts = Array.from(
+          new Set<string>(
+            [
+              ...(Array.isArray(entry.antonyms) ? entry.antonyms : []),
+              ...definitions.flatMap((d) => d.antonyms || []),
+            ]
+              .map((s: any) => String(s).trim())
+              .filter(Boolean)
+          )
+        ).slice(0, 10);
+
         meanings.push({
           partOfSpeech,
           definitions,
+          synonyms: entrySyns.length > 0 ? entrySyns : undefined,
+          antonyms: entryAnts.length > 0 ? entryAnts : undefined,
         });
       }
+
+      if (meanings.length === 0) continue;
+
+      return {
+        word: typeof data.word === "string" && data.word.trim() ? data.word : queryWord,
+        phonetic,
+        meanings,
+        wordTranslations: wordLevelFa.size > 0 ? { fa: Array.from(wordLevelFa) } : undefined,
+      };
+    } catch {
+      // Try next casing candidate if any
     }
-
-    if (meanings.length === 0) return null;
-
-    return {
-      word: queryWord,
-      meanings,
-    };
-  } catch {
-    return null;
   }
+
+  return null;
+};
+
+const lookupWiktionaryRest = async (word: string): Promise<WordEntry | null> => {
+  const candidates =
+    word !== word.toLowerCase() ? [word, word.toLowerCase()] : [word.toLowerCase()];
+
+  for (const queryWord of candidates) {
+    try {
+      const response = await fetchWithTimeout(
+        `${WIKTIONARY_REST_API_URL}/${encodeURIComponent(queryWord)}`,
+        WIKTIONARY_TIMEOUT_MS
+      );
+
+      if (!response.ok) continue;
+
+      const data = await response.json();
+      const englishSections = Array.isArray(data?.en)
+        ? data.en.filter(
+            (sec: any) => !sec?.language || String(sec.language).toLowerCase() === "english"
+          )
+        : [];
+
+      if (englishSections.length === 0) continue;
+
+      const meanings: Meaning[] = [];
+
+      for (const sec of englishSections) {
+        const partOfSpeech = normalizePartOfSpeech(sec.partOfSpeech);
+        const rawDefs = Array.isArray(sec.definitions) ? sec.definitions : [];
+        const definitions: Definition[] = [];
+
+        for (const rawDef of rawDefs) {
+          if (typeof rawDef?.definition !== "string" || !rawDef.definition.trim()) continue;
+          const { text, tags } = stripWiktionaryHtmlAndExtractTags(rawDef.definition);
+          const cleanText = text.replace(/:\s*$/, ".");
+          if (!cleanText) continue;
+
+          let example: string | undefined;
+          if (Array.isArray(rawDef.parsedExamples) && rawDef.parsedExamples.length > 0) {
+            const rawEx = rawDef.parsedExamples.find((ex: any) => typeof ex?.example === "string");
+            if (rawEx?.example) {
+              const parsedEx = stripWiktionaryHtmlAndExtractTags(rawEx.example);
+              if (parsedEx.text) example = parsedEx.text;
+            }
+          } else if (Array.isArray(rawDef.examples) && rawDef.examples.length > 0) {
+            const rawEx = rawDef.examples.find((ex: any) => typeof ex === "string");
+            if (rawEx) {
+              const parsedEx = stripWiktionaryHtmlAndExtractTags(rawEx);
+              if (parsedEx.text) example = parsedEx.text;
+            }
+          }
+
+          definitions.push({
+            definition: cleanText,
+            example,
+            tags: tags.length > 0 ? tags : undefined,
+          });
+        }
+
+        if (definitions.length > 0) {
+          meanings.push({
+            partOfSpeech,
+            definitions,
+          });
+        }
+      }
+
+      if (meanings.length === 0) continue;
+
+      return {
+        word: queryWord,
+        meanings,
+      };
+    } catch {
+      // Try next casing candidate if any
+    }
+  }
+
+  return null;
 };
 
 const lookupDatamuse = async (word: string): Promise<WordEntry | null> => {
@@ -735,12 +950,21 @@ const lookupDatamuse = async (word: string): Promise<WordEntry | null> => {
     // Only accept exact case-insensitive match so typos still trigger "Did you mean...?"
     if (entry.word.toLowerCase() !== word.toLowerCase()) return null;
 
-    // Extract phonetic from tags (e.g., "pron:/ˈæpəl/")
+    // Extract IPA phonetic from tags (prefer ipa_pron: over pron: which may contain raw ARPAbet)
     let phonetic: string | undefined;
     if (entry.tags) {
-      const pronTag = entry.tags.find((t) => t.startsWith("pron:"));
-      if (pronTag) {
-        phonetic = pronTag.replace("pron:", "").trim();
+      const ipaTag = entry.tags.find((t) => t.startsWith("ipa_pron:"));
+      if (ipaTag) {
+        const rawIpa = ipaTag.slice("ipa_pron:".length).trim().replace(/^\/+|\/+$/g, "");
+        if (rawIpa) {
+          phonetic = sanitizePhonetic(`/${rawIpa}/`);
+        }
+      }
+      if (!phonetic) {
+        const pronTag = entry.tags.find((t) => t.startsWith("pron:"));
+        if (pronTag) {
+          phonetic = sanitizePhonetic(pronTag.slice("pron:".length).trim());
+        }
       }
     }
 
@@ -754,7 +978,7 @@ const lookupDatamuse = async (word: string): Promise<WordEntry | null> => {
 
       const posCode = defStr.substring(0, tabIndex);
       const definition = defStr.substring(tabIndex + 1).trim();
-      if (!definition) return;
+      if (!definition || isUsageFootnoteNoise(definition)) return;
 
       const partOfSpeech = normalizePartOfSpeech(posCode);
 
@@ -919,10 +1143,30 @@ export const mergeWordEntries = (
   };
 };
 
-const hasSubstantiveDefinition = (entry: WordEntry | null | undefined, word: string): boolean => {
+const hasCleanSubstantiveDefinition = (
+  entry: WordEntry | null | undefined,
+  word: string
+): boolean => {
   if (!entry || !entry.meanings?.length) return false;
   return entry.meanings.some((m) =>
-    m.definitions.some((d) => !isCircularOrFormOfDefinition(d.definition, word))
+    m.definitions.some(
+      (d) =>
+        !isCircularOrFormOfDefinition(d.definition, word) &&
+        !POP_CULTURE_OR_PROPER_NOISE_REGEX.test(d.definition)
+    )
+  );
+};
+
+const hasExplicitFormOfSense = (
+  entry: WordEntry | null | undefined,
+  word: string
+): boolean => {
+  if (!entry || !entry.meanings?.length) return false;
+  return entry.meanings.some((m) =>
+    m.definitions.some((d) => {
+      const ref = extractFormOfLemma(d.definition, d.tags);
+      return Boolean(ref?.lemma && !ref.isMannerStub && ref.lemma !== word);
+    })
   );
 };
 
@@ -971,19 +1215,23 @@ export const fetchImageForWord = async (word: string): Promise<string | null> =>
 
 const lookupWordCore = async (
   cleanWord: string,
-  allowLemmaResolution: boolean
+  lemmaDepth = 0,
+  visitedWords: Set<string> = new Set()
 ): Promise<WordEntry | null> => {
+  visitedWords.add(cleanWord);
+
   const primaryPromise = lookupPrimary(cleanWord);
   const freeDictPromise = lookupFreeDictionaryApi(cleanWord);
   const wiktionaryPromise = lookupWiktionaryRest(cleanWord);
   const datamusePromise = lookupDatamuse(cleanWord);
 
   const primary = await primaryPromise;
+  const primaryHasCleanDefs = hasCleanSubstantiveDefinition(primary, cleanWord);
 
   let freeDict: WordEntry | null = null;
   let wiktionary: WordEntry | null = null;
 
-  if (hasSubstantiveDefinition(primary, cleanWord)) {
+  if (primaryHasCleanDefs) {
     // Primary resolved cleanly; give Wiktionary & FreeDictionaryAPI a fast merge window
     // so mocked/offline environments never block while real sessions get enriched tags & senses.
     const settled = await Promise.race([
@@ -994,25 +1242,25 @@ const lookupWordCore = async (
       [freeDict, wiktionary] = settled;
     }
   } else {
-    // Primary 404'd or only returned circular "form of" glosses — await Wiktionary & FreeDictionaryAPI fully
+    // Primary 404'd or only returned circular/noise glosses — await Wiktionary & FreeDictionaryAPI fully
     [freeDict, wiktionary] = await Promise.all([freeDictPromise, wiktionaryPromise]);
   }
 
   // Order: keep primary first when it has substantive definitions; otherwise prefer structured Wiktionary sources
-  const orderedSources = hasSubstantiveDefinition(primary, cleanWord)
+  const orderedSources = primaryHasCleanDefs
     ? [primary, freeDict, wiktionary]
     : [freeDict, wiktionary, primary];
 
   let result = mergeWordEntries(orderedSources, cleanWord);
 
   // Enrich circular "-ly" manner stubs (e.g. "In an ignominious manner.") with the base adjective's meaning
-  if (allowLemmaResolution && result) {
+  if (lemmaDepth === 0 && result) {
     for (const meaning of result.meanings) {
       if (meaning.partOfSpeech !== "adverb") continue;
       for (const def of meaning.definitions) {
         const extracted = extractFormOfLemma(def.definition, def.tags);
-        if (extracted?.isMannerStub && extracted.lemma) {
-          const baseEntry = await lookupWordCore(extracted.lemma, false);
+        if (extracted?.isMannerStub && extracted.lemma && !visitedWords.has(extracted.lemma)) {
+          const baseEntry = await lookupWordCore(extracted.lemma, 2, new Set(visitedWords));
           const adjMeaning =
             baseEntry?.meanings.find((m) => m.partOfSpeech === "adjective") ||
             baseEntry?.meanings[0];
@@ -1033,33 +1281,47 @@ const lookupWordCore = async (
     }
   }
 
-  // Resolve inflected forms / circular "form of" entries (e.g. "harbored", "vicissitudes") via base lemma
-  if (allowLemmaResolution && !hasSubstantiveDefinition(result, cleanWord)) {
+  // Resolve inflected forms, multi-hop British/variant spellings, and entries with explicit "form of" senses
+  const cleanSubstantive = hasCleanSubstantiveDefinition(result, cleanWord);
+  const explicitFormOf = hasExplicitFormOfSense(result, cleanWord);
+
+  if (lemmaDepth < 2 && (!cleanSubstantive || explicitFormOf)) {
     const lemmaCandidates: Array<{ lemma: string; expectedPos?: string }> = [];
 
     if (result) {
       for (const m of result.meanings) {
         for (const d of m.definitions) {
           const ref = extractFormOfLemma(d.definition, d.tags);
-          if (ref?.lemma && ref.lemma.toLowerCase() !== cleanWord.toLowerCase()) {
-            lemmaCandidates.push({
-              lemma: ref.lemma,
-              expectedPos: ref.inflectedPos || m.partOfSpeech,
-            });
+          if (ref?.lemma && !ref.isMannerStub && !visitedWords.has(ref.lemma)) {
+            if (!lemmaCandidates.some((c) => c.lemma === ref.lemma)) {
+              lemmaCandidates.push({
+                lemma: ref.lemma,
+                expectedPos: ref.inflectedPos || m.partOfSpeech,
+              });
+            }
           }
         }
       }
     }
 
-    for (const derived of deriveCandidateLemmas(cleanWord)) {
-      if (!lemmaCandidates.some((c) => c.lemma.toLowerCase() === derived.lemma.toLowerCase())) {
-        lemmaCandidates.push(derived);
+    if (!cleanSubstantive || lemmaCandidates.length === 0) {
+      for (const derived of deriveCandidateLemmas(cleanWord)) {
+        if (
+          !visitedWords.has(derived.lemma) &&
+          !lemmaCandidates.some((c) => c.lemma.toLowerCase() === derived.lemma.toLowerCase())
+        ) {
+          lemmaCandidates.push(derived);
+        }
       }
     }
 
     for (const candidate of lemmaCandidates.slice(0, 3)) {
-      const lemmaEntry = await lookupWordCore(candidate.lemma, false);
-      if (lemmaEntry && hasSubstantiveDefinition(lemmaEntry, candidate.lemma)) {
+      const lemmaEntry = await lookupWordCore(
+        candidate.lemma,
+        lemmaDepth + 1,
+        new Set(visitedWords)
+      );
+      if (lemmaEntry && hasCleanSubstantiveDefinition(lemmaEntry, candidate.lemma)) {
         const substantiveMeanings: Meaning[] = lemmaEntry.meanings
           .map((m) => ({
             ...m,
@@ -1070,7 +1332,6 @@ const lookupWordCore = async (
           .filter((m) => m.definitions.length > 0);
 
         if (substantiveMeanings.length > 0) {
-          // Prioritize meanings matching the inflected part of speech when known
           if (candidate.expectedPos) {
             substantiveMeanings.sort((a, b) => {
               const aMatch = a.partOfSpeech === candidate.expectedPos ? 1 : 0;
@@ -1079,15 +1340,42 @@ const lookupWordCore = async (
             });
           }
 
-          result = {
-            word: result?.word || cleanWord,
-            phonetic: result?.phonetic || lemmaEntry.phonetic,
-            audio: result?.audio || lemmaEntry.audio,
-            origin: result?.origin || lemmaEntry.origin,
+          const cleanedLemmaEntry: WordEntry = {
+            ...lemmaEntry,
             meanings: substantiveMeanings,
-            wordTranslations: lemmaEntry.wordTranslations,
           };
-          break;
+
+          const cleanedExistingMeanings = result
+            ? result.meanings
+                .map((m) => ({
+                  ...m,
+                  definitions: m.definitions.filter(
+                    (d) => !isCircularOrFormOfDefinition(d.definition, cleanWord)
+                  ),
+                }))
+                .filter((m) => m.definitions.length > 0)
+            : [];
+
+          const cleanedExistingEntry: WordEntry | null =
+            result && cleanedExistingMeanings.length > 0
+              ? { ...result, meanings: cleanedExistingMeanings }
+              : null;
+
+          const mergedLemma = mergeWordEntries(
+            [cleanedLemmaEntry, cleanedExistingEntry],
+            cleanWord
+          );
+
+          if (mergedLemma) {
+            result = {
+              ...mergedLemma,
+              word: result?.word || cleanWord,
+              phonetic: result?.phonetic || lemmaEntry.phonetic,
+              audio: result?.audio || lemmaEntry.audio,
+              origin: result?.origin || lemmaEntry.origin,
+            };
+            break;
+          }
         }
       }
     }
@@ -1128,7 +1416,7 @@ export const lookupWord = async (word: string): Promise<WordEntry | null> => {
 
   const lookupPromise = (async (): Promise<WordEntry | null> => {
     const imagePromise = fetchImageForWord(cleanWord);
-    const result = await lookupWordCore(cleanWord, true);
+    const result = await lookupWordCore(cleanWord, 0);
 
     if (!result) {
       return null;

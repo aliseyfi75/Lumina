@@ -351,15 +351,15 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
     try {
       if (action === 'pull') {
         await onCloudPull(setCloudProgress);
-        showMessage('success', 'Flashcards loaded from Cloud!');
+        showMessage('success', 'Flashcards loaded from Cloud! Latest study statuses synced.');
       } else {
         await onCloudPush(setCloudProgress);
-        showMessage('success', 'Flashcards saved to Cloud!');
+        showMessage('success', 'Flashcards saved to Cloud! Latest study statuses synced.');
       }
     } catch (error: any) {
       const msg = error.message || `Failed to ${action} cloud data`;
       showMessage('error', msg);
-      if (msg.toLowerCase().includes('not found')) {
+      if (msg.toLowerCase().includes('not found') && !isGistConnected) {
         setIsMigratingCloud(true);
       }
     } finally {

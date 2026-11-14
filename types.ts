@@ -67,6 +67,7 @@ export interface Flashcard {
   easinessFactor?: number;
   nextReviewDate?: number;
   lastQuality?: number;
+  statusUpdatedAt?: number;
   updatedAt?: number;
 }
 

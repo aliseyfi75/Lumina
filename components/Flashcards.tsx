@@ -1364,6 +1364,7 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
             return (
               <div
                 key={category.status}
+                data-testid={`status-filter-${category.label.toLowerCase()}`}
                 onClick={() => handleStatusClick(category.status)}
                 className={`p-4 rounded-2xl flex items-center justify-between cursor-pointer transition-all duration-200 border group
                   ${isOthersSelected

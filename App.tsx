@@ -26,6 +26,7 @@ import {
   cardNeedsPersianBackfill,
   LANGUAGE_PREFERENCE_OPTIONS,
 } from './utils/languageUtils';
+import { mergeFlashcardDecks, MergeDeckOptions } from './utils/cardMerge';
 import { translateCardMeaningToPersian } from './services/translationService';
 import { Book, Layers, Database, Save, Cloud, BarChart2, Home, Sun, Moon, RefreshCw, Settings } from 'lucide-react';
 import Confetti from 'react-confetti';
@@ -93,7 +94,9 @@ const App: React.FC = () => {
   // without needing the map in its useCallback deps (which would re-trigger initData).
   const deletedCardsRef = useRef<Map<string, number>>(new Map());
   const [studyHistory, setStudyHistory] = useState<Record<string, number>>({});
+  const studyHistoryRef = useRef<Record<string, number>>({});
   const [longestStreak, setLongestStreak] = useState(0);
+  const longestStreakRef = useRef<number>(0);
 
   // Keep root typography & spacing calibrated to the active device viewport
   useEffect(() => {
@@ -140,6 +143,14 @@ const App: React.FC = () => {
   useEffect(() => {
     deletedCardsRef.current = deletedCards;
   }, [deletedCards]);
+
+  useEffect(() => {
+    studyHistoryRef.current = studyHistory;
+  }, [studyHistory]);
+
+  useEffect(() => {
+    longestStreakRef.current = longestStreak;
+  }, [longestStreak]);
 
   // Language Preference & Settings Modal State
   const [languagePreference, setLanguagePreference] = useState<MeaningLanguagePreference>(
@@ -281,6 +292,10 @@ const App: React.FC = () => {
     }
   };
   const [isCloudSaving, setIsCloudSaving] = useState(false);
+  const isCloudSavingRef = useRef(false);
+  useEffect(() => {
+    isCloudSavingRef.current = isCloudSaving;
+  }, [isCloudSaving]);
   const [isSyncingOffline, setIsSyncingOffline] = useState(false);
   const [cloudSyncProgress, setCloudSyncProgress] = useState<{
     percent: number;
@@ -295,6 +310,8 @@ const App: React.FC = () => {
   const [isDataLoaded, setIsDataLoaded] = useState(false);
   const skipNextCloudAutoSaveRef = useRef(false);
   const hasInitializedCloudRef = useRef(false);
+  const hasSyncedInitialCloudPullRef = useRef(false);
+  const lastCloudPullAtRef = useRef<number>(0);
   const isMigratingCloudRef = useRef(false);
   const lastKeepAliveRef = useRef<number>(0);
 
@@ -323,119 +340,17 @@ const App: React.FC = () => {
     return result;
   };
 
-  // Pure helper: merge two card arrays while honoring tombstones (unless ignoreTombstones is set)
+  // Pure helper: merge two card arrays while honoring tombstones and decoupling SRS status from content updatedAt
   const mergeCardArrays = (
     baseCards: Flashcard[],
     incoming: Flashcard[],
     tombstones: Record<string, number>,
-    options?: { ignoreTombstones?: boolean }
-  ): Flashcard[] => {
-    const ignoreTombstones = options?.ignoreTombstones ?? false;
-    const liveMap = deletedCardsRef.current;
-    const isDeleted = (card: Flashcard) => {
-      if (ignoreTombstones) return false;
-      const deletedAt = Math.max(liveMap.get(card.id) ?? 0, tombstones[card.id] ?? 0);
-      if (!deletedAt) return false;
-      const cardTs = Math.max(card.updatedAt ?? 0, card.lastReviewed ?? 0, card.createdAt ?? 0);
-      return deletedAt >= cardTs;
-    };
-
-    const statusRank: Record<FlashcardStatus, number> = {
-      [FlashcardStatus.New]: 0,
-      [FlashcardStatus.Learning]: 1,
-      [FlashcardStatus.Mastered]: 2,
-    };
-
-    const mergeTwoCards = (existing: Flashcard, inc: Flashcard, targetId: string): Flashcard => {
-      const incTs = inc.updatedAt ?? inc.lastReviewed ?? 0;
-      const extTs = existing.updatedAt ?? existing.lastReviewed ?? 0;
-      const incProgress = (inc.repetition ?? 0) * 10 + (statusRank[inc.status] ?? 0);
-      const extProgress = (existing.repetition ?? 0) * 10 + (statusRank[existing.status] ?? 0);
-
-      const useIncoming =
-        incTs > extTs || (incTs === extTs && incProgress > extProgress);
-      const winner = useIncoming ? inc : existing;
-      const fallback = useIncoming ? existing : inc;
-
-      return {
-        ...fallback,
-        ...winner,
-        id: targetId,
-        word: winner.word || fallback.word,
-        mainDefinition:
-          winner.mainDefinition && winner.mainDefinition !== '—'
-            ? winner.mainDefinition
-            : fallback.mainDefinition || winner.mainDefinition,
-        translations: mergeTranslations(fallback.translations, winner.translations, true),
-        partOfSpeech: winner.partOfSpeech || fallback.partOfSpeech || '',
-        phonetic: winner.phonetic || fallback.phonetic,
-        audio: winner.audio || fallback.audio,
-        image: winner.image || fallback.image,
-        example: winner.example || fallback.example,
-        tags:
-          winner.tags && winner.tags.length > 0
-            ? winner.tags
-            : fallback.tags && fallback.tags.length > 0
-              ? fallback.tags
-              : undefined,
-        synonyms:
-          winner.synonyms && winner.synonyms.length > 0
-            ? winner.synonyms
-            : fallback.synonyms && fallback.synonyms.length > 0
-              ? fallback.synonyms
-              : undefined,
-        antonyms:
-          winner.antonyms && winner.antonyms.length > 0
-            ? winner.antonyms
-            : fallback.antonyms && fallback.antonyms.length > 0
-              ? fallback.antonyms
-              : undefined,
-        complexityLevel: winner.complexityLevel || fallback.complexityLevel,
-        complexityScore: winner.complexityScore ?? fallback.complexityScore,
-        bookChapter: winner.bookChapter || fallback.bookChapter,
-        createdAt: Math.min(
-          existing.createdAt || Date.now(),
-          inc.createdAt || Date.now()
-        ),
-        lastReviewed: Math.max(existing.lastReviewed || 0, inc.lastReviewed || 0),
-        updatedAt:
-          existing.updatedAt !== undefined || inc.updatedAt !== undefined
-            ? Math.max(existing.updatedAt ?? 0, inc.updatedAt ?? 0)
-            : undefined,
-      };
-    };
-
-    const cardMap = new Map<string, Flashcard>();
-    baseCards.forEach(c => {
-      if (!isDeleted(c)) cardMap.set(c.id, c);
+    options?: MergeDeckOptions
+  ): Flashcard[] =>
+    mergeFlashcardDecks(baseCards, incoming, tombstones, {
+      ...options,
+      liveDeletedMap: deletedCardsRef.current,
     });
-
-    incoming
-      .filter(c => !isDeleted(c))
-      .forEach(c => {
-        const normWord = c.word.trim().toLowerCase();
-        const normDef = c.mainDefinition.trim().toLowerCase();
-
-        const duplicateId = cardMap.has(c.id)
-          ? c.id
-          : Array.from(cardMap.keys()).find(key => {
-              const existing = cardMap.get(key)!;
-              return (
-                existing.word.trim().toLowerCase() === normWord &&
-                existing.mainDefinition.trim().toLowerCase() === normDef
-              );
-            });
-
-        if (duplicateId) {
-          const existing = cardMap.get(duplicateId)!;
-          cardMap.set(duplicateId, mergeTwoCards(existing, c, duplicateId));
-        } else {
-          cardMap.set(c.id, c);
-        }
-      });
-
-    return Array.from(cardMap.values()).sort((a, b) => b.createdAt - a.createdAt);
-  };
 
   const mergeHistoryRecords = (
     ...histories: (Record<string, number> | undefined)[]
@@ -453,7 +368,8 @@ const App: React.FC = () => {
   // Helper: Merge incoming cards with existing state, honouring the tombstone map
   const performMerge = useCallback((
     incoming: Flashcard[],
-    incomingDeletedCards: Record<string, number> = {}
+    incomingDeletedCards: Record<string, number> = {},
+    options?: MergeDeckOptions
   ) => {
     // Union the incoming tombstones synchronously on the ref first so mergeCardArrays sees them immediately
     const cutoff = Date.now() - TOMBSTONE_TTL;
@@ -466,10 +382,15 @@ const App: React.FC = () => {
     deletedCardsRef.current = mergedTombstones;
     setDeletedCards(mergedTombstones);
 
+    const next = mergeCardArrays(cardsRef.current, incoming, incomingDeletedCards, options);
+    cardsRef.current = next;
     setCards(prev => {
-      const next = mergeCardArrays(prev, incoming, incomingDeletedCards);
-      cardsRef.current = next;
-      return next;
+      const mergedFromPrev =
+        prev === cardsRef.current
+          ? next
+          : mergeCardArrays(prev, incoming, incomingDeletedCards, options);
+      cardsRef.current = mergedFromPrev;
+      return mergedFromPrev;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // intentionally empty — reads tombstones via ref, not closure
@@ -558,9 +479,11 @@ const App: React.FC = () => {
       }
 
       if (initialStudyHistory && Object.keys(initialStudyHistory).length > 0) {
+        studyHistoryRef.current = initialStudyHistory;
         setStudyHistory(initialStudyHistory);
       }
       if (initialLongestStreak > 0) {
+        longestStreakRef.current = initialLongestStreak;
         setLongestStreak(initialLongestStreak);
       }
 
@@ -575,9 +498,11 @@ const App: React.FC = () => {
               initialCards = defaultData.cards;
             }
             if (Object.keys(initialStudyHistory).length === 0 && defaultData.studyHistory) {
+              studyHistoryRef.current = defaultData.studyHistory;
               setStudyHistory(defaultData.studyHistory);
             }
             if (initialLongestStreak === 0 && defaultData.longestStreak) {
+              longestStreakRef.current = defaultData.longestStreak;
               setLongestStreak(defaultData.longestStreak);
             }
             if (defaultData.languagePreference) {
@@ -620,7 +545,8 @@ const App: React.FC = () => {
         initializeTracking(resolvedCloudConfig.pantryId);
 
         try {
-          const cloudData = isGistCloud(resolvedCloudConfig)
+          const usingGistOnInit = isGistCloud(resolvedCloudConfig);
+          const cloudData = usingGistOnInit
             ? await getGistDeck(resolvedCloudConfig.gistToken!, resolvedCloudConfig.gistId!)
             : await getDeck(resolvedCloudConfig.pantryId, undefined, {
                 localCards: initialCards,
@@ -642,7 +568,12 @@ const App: React.FC = () => {
               });
           const cloudHadDeletedCards = (cloudData.cards ?? []).some(c => {
             const delAt = deletedCardsRef.current.get(c.id) ?? 0;
-            const cardTs = Math.max(c.updatedAt ?? 0, c.lastReviewed ?? 0, c.createdAt ?? 0);
+            const cardTs = Math.max(
+              c.updatedAt ?? 0,
+              c.statusUpdatedAt ?? 0,
+              c.lastReviewed ?? 0,
+              c.createdAt ?? 0
+            );
             return delAt > 0 && delAt >= cardTs;
           });
 
@@ -661,24 +592,38 @@ const App: React.FC = () => {
           }
 
           if (cloudData.studyHistory) {
-            setStudyHistory(prev => {
-              const merged = { ...prev };
-              for (const [date, count] of Object.entries(cloudData.studyHistory!)) {
-                merged[date] = Math.max(merged[date] || 0, count);
-              }
-              return merged;
-            });
+            const mergedHist = mergeHistoryRecords(studyHistoryRef.current, cloudData.studyHistory);
+            studyHistoryRef.current = mergedHist;
+            setStudyHistory(mergedHist);
           }
 
           if (cloudData.longestStreak) {
-            setLongestStreak(prev => Math.max(prev, cloudData.longestStreak!));
+            const mergedStreakVal = Math.max(longestStreakRef.current, cloudData.longestStreak);
+            longestStreakRef.current = mergedStreakVal;
+            setLongestStreak(mergedStreakVal);
           }
 
-          // Only skip auto-save if cloud did NOT still hold locally-deleted cards
-          skipNextCloudAutoSaveRef.current = !cloudHadDeletedCards;
+          hasSyncedInitialCloudPullRef.current = true;
+          lastCloudPullAtRef.current = Date.now();
+
+          if (usingGistOnInit) {
+            // If local IndexedDB held newer card reviews/edits not yet uploaded to Gist, allow Auto-Save to push the merged delta!
+            const hasLocalDeltaAfterPull = hasPendingGistSyncChanges(resolvedCloudConfig.gistId!, {
+              cards: cardsRef.current,
+              studyHistory: studyHistoryRef.current,
+              longestStreak: longestStreakRef.current,
+              deletedCards: prunedDeletedCards(),
+              languagePreference: languagePreferenceRef.current,
+              languagePreferenceUpdatedAt: languagePreferenceUpdatedAtRef.current,
+            });
+            skipNextCloudAutoSaveRef.current = !hasLocalDeltaAfterPull && !cloudHadDeletedCards;
+          } else {
+            // Only skip auto-save if cloud did NOT still hold locally-deleted cards
+            skipNextCloudAutoSaveRef.current = !cloudHadDeletedCards;
+          }
 
           // Schedule the Pantry keep-alive write 20 seconds after startup (GitHub Gist never expires)
-          if (!isGistCloud(resolvedCloudConfig) && navigator.onLine && !cloudHadDeletedCards) {
+          if (!usingGistOnInit && navigator.onLine && !cloudHadDeletedCards) {
             const startupKeepAliveTargetId = resolvedCloudConfig.pantryId;
             const startupChunkCount = cloudData.chunkCount ?? 1;
             const scheduledAt = Date.now();
@@ -798,6 +743,57 @@ const App: React.FC = () => {
     }, 1000);
     return () => clearTimeout(timeoutId);
   }, [cards, studyHistory, longestStreak, deletedCards, languagePreference, languagePreferenceUpdatedAt, fileHandle, isDataLoaded]);
+
+  const applyPulledSnapshotToState = useCallback(
+    (
+      partialOrFull: {
+        cards?: Flashcard[];
+        deletedCards?: Record<string, number>;
+        studyHistory?: Record<string, number>;
+        longestStreak?: number;
+        languagePreference?: MeaningLanguagePreference;
+        languagePreferenceUpdatedAt?: number;
+      },
+      mergeOpts?: MergeDeckOptions
+    ) => {
+      if (partialOrFull.languagePreference) {
+        applyIncomingLanguagePreference(
+          partialOrFull.languagePreference,
+          partialOrFull.languagePreferenceUpdatedAt
+        );
+      }
+      if (
+        (partialOrFull.cards && partialOrFull.cards.length > 0) ||
+        (partialOrFull.deletedCards && Object.keys(partialOrFull.deletedCards).length > 0)
+      ) {
+        performMerge(partialOrFull.cards ?? [], partialOrFull.deletedCards ?? {}, mergeOpts);
+      }
+      if (partialOrFull.studyHistory) {
+        const mergedHist = mergeHistoryRecords(studyHistoryRef.current, partialOrFull.studyHistory);
+        studyHistoryRef.current = mergedHist;
+        setStudyHistory(mergedHist);
+      }
+      if (partialOrFull.longestStreak) {
+        const mergedStreakVal = Math.max(longestStreakRef.current, partialOrFull.longestStreak);
+        longestStreakRef.current = mergedStreakVal;
+        setLongestStreak(mergedStreakVal);
+      }
+    },
+    [applyIncomingLanguagePreference, performMerge]
+  );
+
+  // Safeguard: if this session hasn't successfully pulled from Gist yet (e.g. startup was offline),
+  // pull & merge remote Gist BEFORE pushing so we never overwrite another device's study progress!
+  const ensureInitialGistPullBeforePush = useCallback(
+    async (cfg: CloudConfig) => {
+      if (!isGistCloud(cfg) || hasSyncedInitialCloudPullRef.current) return;
+      const remoteData = await getGistDeck(cfg.gistToken!, cfg.gistId!, { forceRefresh: true });
+      applyPulledSnapshotToState(remoteData);
+      hasSyncedInitialCloudPullRef.current = true;
+      lastCloudPullAtRef.current = Date.now();
+    },
+    [applyPulledSnapshotToState]
+  );
 
   const beginCloudSyncProgress = useCallback(
     (cardsToSyncCount: number, mode: 'push' | 'pull' = 'push', dirtyStepsOverride?: number) => {
@@ -937,9 +933,9 @@ const App: React.FC = () => {
       if (usingGist) {
         if (
           !hasPendingGistSyncChanges(cloudConfig.gistId!, {
-            cards,
-            studyHistory,
-            longestStreak,
+            cards: cardsRef.current,
+            studyHistory: studyHistoryRef.current,
+            longestStreak: longestStreakRef.current,
             deletedCards: latestDeleted,
             languagePreference: latestPref,
             languagePreferenceUpdatedAt: latestPrefTs,
@@ -948,19 +944,20 @@ const App: React.FC = () => {
           setPendingCloudSync(false);
           return;
         }
-        beginCloudSyncProgress(cards.length, 'push', 1);
+        beginCloudSyncProgress(cardsRef.current.length, 'push', 1);
         setIsCloudSaving(true);
         try {
+          await ensureInitialGistPullBeforePush(cloudConfig);
           await updateGistDeck(
             cloudConfig.gistToken!,
             cloudConfig.gistId!,
             {
-              cards,
-              studyHistory,
-              longestStreak,
-              deletedCards: latestDeleted,
-              languagePreference: latestPref,
-              languagePreferenceUpdatedAt: latestPrefTs,
+              cards: cardsRef.current,
+              studyHistory: studyHistoryRef.current,
+              longestStreak: longestStreakRef.current,
+              deletedCards: prunedDeletedCards(),
+              languagePreference: languagePreferenceRef.current,
+              languagePreferenceUpdatedAt: languagePreferenceUpdatedAtRef.current,
             },
             { onProgress: handleBackgroundCloudProgress }
           );
@@ -1025,19 +1022,74 @@ const App: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cards, studyHistory, longestStreak, deletedCards, languagePreference, languagePreferenceUpdatedAt, cloudConfig, isDataLoaded]);
 
-  // 4b. Keep Pantry alive when user re-opens / focuses an already-open tab or PWA window (not needed for GitHub Gist)
+  // 4b. Auto-pull latest card statuses when returning to an already-open tab / installed iOS PWA
+  // (plus keep Pantry's 30-day TTL alive when Pantry is the active provider)
   useEffect(() => {
-    if (!cloudConfig?.pantryId || isGistCloud(cloudConfig)) return;
+    if (!isDataLoaded || !cloudConfig) return;
+    const GIST_FOCUS_PULL_THROTTLE_MS = 15 * 1000; // 15 seconds (uses fast 304 ETag conditional GET)
+    const PANTRY_FOCUS_PULL_THROTTLE_MS = 2 * 60 * 1000; // 2 minutes
     const KEEP_ALIVE_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
+    let isAutoPullingOnFocus = false;
 
-    const handleVisibilityOrFocus = () => {
-      if (document.visibilityState !== 'visible' || !navigator.onLine || isMigratingCloudRef.current) {
+    const handleVisibilityOrFocus = async () => {
+      if (
+        document.visibilityState !== 'visible' ||
+        !navigator.onLine ||
+        isMigratingCloudRef.current ||
+        isCloudSavingRef.current ||
+        isAutoPullingOnFocus
+      ) {
         return;
       }
+
+      const activeCfg = cloudConfigRef.current;
+      if (!activeCfg) return;
       const now = Date.now();
+
+      if (isGistCloud(activeCfg)) {
+        if (
+          hasSyncedInitialCloudPullRef.current &&
+          now - lastCloudPullAtRef.current < GIST_FOCUS_PULL_THROTTLE_MS
+        ) {
+          return;
+        }
+        isAutoPullingOnFocus = true;
+        try {
+          const remoteData = await getGistDeck(activeCfg.gistToken!, activeCfg.gistId!);
+          applyPulledSnapshotToState(remoteData);
+          hasSyncedInitialCloudPullRef.current = true;
+          lastCloudPullAtRef.current = Date.now();
+        } catch (err) {
+          console.warn('Background Gist sync on focus failed:', err);
+        } finally {
+          isAutoPullingOnFocus = false;
+        }
+        return;
+      }
+
       if (now - lastKeepAliveRef.current >= KEEP_ALIVE_INTERVAL_MS) {
         lastKeepAliveRef.current = now;
-        void keepAlivePantry(cloudConfig.pantryId, getKnownChunkCount(cloudConfig.pantryId));
+        void keepAlivePantry(activeCfg.pantryId, getKnownChunkCount(activeCfg.pantryId));
+      }
+
+      if (
+        !hasSyncedInitialCloudPullRef.current ||
+        now - lastCloudPullAtRef.current >= PANTRY_FOCUS_PULL_THROTTLE_MS
+      ) {
+        isAutoPullingOnFocus = true;
+        try {
+          const remoteData = await getDeck(activeCfg.pantryId, undefined, {
+            localCards: cardsRef.current,
+          });
+          skipNextCloudAutoSaveRef.current = true;
+          applyPulledSnapshotToState(remoteData);
+          hasSyncedInitialCloudPullRef.current = true;
+          lastCloudPullAtRef.current = Date.now();
+        } catch (err) {
+          console.warn('Background Pantry sync on focus failed:', err);
+        } finally {
+          isAutoPullingOnFocus = false;
+        }
       }
     };
 
@@ -1047,7 +1099,7 @@ const App: React.FC = () => {
       document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
       window.removeEventListener('focus', handleVisibilityOrFocus);
     };
-  }, [cloudConfig]);
+  }, [cloudConfig, isDataLoaded, applyPulledSnapshotToState]);
 
   // 5. Flush pending sync when coming back online (or cloud config is restored)
   useEffect(() => {
@@ -1061,9 +1113,9 @@ const App: React.FC = () => {
       if (usingGist) {
         if (
           !hasPendingGistSyncChanges(cloudConfig.gistId!, {
-            cards,
-            studyHistory,
-            longestStreak,
+            cards: cardsRef.current,
+            studyHistory: studyHistoryRef.current,
+            longestStreak: longestStreakRef.current,
             deletedCards: latestDeleted,
             languagePreference: latestPref,
             languagePreferenceUpdatedAt: latestPrefTs,
@@ -1072,19 +1124,20 @@ const App: React.FC = () => {
           if (!cancelled) setPendingCloudSync(false);
           return;
         }
-        beginCloudSyncProgress(cards.length, 'push', 1);
+        beginCloudSyncProgress(cardsRef.current.length, 'push', 1);
         setIsSyncingOffline(true);
         try {
+          await ensureInitialGistPullBeforePush(cloudConfig);
           await updateGistDeck(
             cloudConfig.gistToken!,
             cloudConfig.gistId!,
             {
-              cards,
-              studyHistory,
-              longestStreak,
-              deletedCards: latestDeleted,
-              languagePreference: latestPref,
-              languagePreferenceUpdatedAt: latestPrefTs,
+              cards: cardsRef.current,
+              studyHistory: studyHistoryRef.current,
+              longestStreak: longestStreakRef.current,
+              deletedCards: prunedDeletedCards(),
+              languagePreference: languagePreferenceRef.current,
+              languagePreferenceUpdatedAt: languagePreferenceUpdatedAtRef.current,
             },
             { onProgress: handleBackgroundCloudProgress }
           );
@@ -1262,9 +1315,22 @@ const App: React.FC = () => {
         importedData.languagePreferenceUpdatedAt
       );
     }
-    performMerge(importedData.cards, importedData.deletedCards ?? {});
-    if (importedData.studyHistory) setStudyHistory(prev => ({ ...prev, ...importedData.studyHistory }));
-    if (importedData.longestStreak) setLongestStreak(prev => Math.max(prev, importedData.longestStreak!));
+    const importNow = Date.now();
+    const stampedCards = importedData.cards.map(c => ({
+      ...c,
+      updatedAt: Math.max(c.updatedAt ?? 0, importNow),
+    }));
+    performMerge(stampedCards, importedData.deletedCards ?? {}, { preferIncomingContent: true });
+    if (importedData.studyHistory) {
+      const mergedHist = mergeHistoryRecords(studyHistoryRef.current, importedData.studyHistory);
+      studyHistoryRef.current = mergedHist;
+      setStudyHistory(mergedHist);
+    }
+    if (importedData.longestStreak) {
+      const mergedStreakVal = Math.max(longestStreakRef.current, importedData.longestStreak);
+      longestStreakRef.current = mergedStreakVal;
+      setLongestStreak(mergedStreakVal);
+    }
     trackEvent(TRACKING_ACTION.IMPORT_CSV, TRACKING_CATEGORY.DATA, 'card_count', importedData.cards.length);
   };
 
@@ -1433,12 +1499,20 @@ const App: React.FC = () => {
       setLanguagePreference(mergedLangPref.preference);
       setLanguagePreferenceUpdatedAt(mergedLangPref.updatedAt);
       saveLanguagePreferenceToStorage(mergedLangPref.preference, mergedLangPref.updatedAt);
-      setDeletedCards(new Map(Object.entries(mergedDeletedRecord)));
+      const nextDeletedMap = new Map(Object.entries(mergedDeletedRecord));
+      deletedCardsRef.current = nextDeletedMap;
+      cardsRef.current = mergedCards;
+      studyHistoryRef.current = mergedHistory;
+      longestStreakRef.current = mergedStreak;
+      setDeletedCards(nextDeletedMap);
       setCards(mergedCards);
       setStudyHistory(mergedHistory);
       setLongestStreak(mergedStreak);
       setPendingCloudSync(false);
-      lastKeepAliveRef.current = Date.now();
+      const completedAt = Date.now();
+      lastKeepAliveRef.current = completedAt;
+      hasSyncedInitialCloudPullRef.current = true;
+      lastCloudPullAtRef.current = completedAt;
 
       skipNextCloudAutoSaveRef.current = true;
       const config = { pantryId: cleanNewId };
@@ -1661,11 +1735,15 @@ const App: React.FC = () => {
       const nextDeletedMap = new Map(Object.entries(mergedDeletedRecord));
       deletedCardsRef.current = nextDeletedMap;
       cardsRef.current = mergedCards;
+      studyHistoryRef.current = mergedHistory;
+      longestStreakRef.current = mergedStreak;
       setDeletedCards(nextDeletedMap);
       setCards(mergedCards);
       setStudyHistory(mergedHistory);
       setLongestStreak(mergedStreak);
       setPendingCloudSync(false);
+      hasSyncedInitialCloudPullRef.current = true;
+      lastCloudPullAtRef.current = Date.now();
 
       skipNextCloudAutoSaveRef.current = true;
       const config: CloudConfig = {
@@ -1725,6 +1803,8 @@ const App: React.FC = () => {
 
   const handleDisconnectCloud = () => {
     cloudConfigRef.current = null;
+    hasSyncedInitialCloudPullRef.current = false;
+    lastCloudPullAtRef.current = 0;
     setCloudConfig(null);
     setPendingCloudSync(false);
     setIsCloudSaving(false);
@@ -1732,8 +1812,8 @@ const App: React.FC = () => {
     persistCloudConfigToLocalStorage(null);
     saveAppDataToIDB({
       cards: cardsRef.current,
-      studyHistory,
-      longestStreak,
+      studyHistory: studyHistoryRef.current,
+      longestStreak: longestStreakRef.current,
       deletedCards: prunedDeletedCards(),
       cloudConfig: null,
       languagePreference: languagePreferenceRef.current,
@@ -1755,9 +1835,10 @@ const App: React.FC = () => {
 
   const handleCloudPull = async (onProgress?: (progress: CloudSyncProgress) => void) => {
     if (!cloudConfig) return;
-    beginCloudSyncProgress(cards.length, 'pull');
+    beginCloudSyncProgress(cardsRef.current.length, 'pull');
     setIsCloudSaving(true);
     try {
+      const usingGist = isGistCloud(cloudConfig);
       const applyPulledCloudData = (partialOrFull: {
         cards?: Flashcard[];
         deletedCards?: Record<string, number>;
@@ -1767,27 +1848,10 @@ const App: React.FC = () => {
         languagePreferenceUpdatedAt?: number;
       }) => {
         skipNextCloudAutoSaveRef.current = true;
-        if (partialOrFull.languagePreference) {
-          applyIncomingLanguagePreference(
-            partialOrFull.languagePreference,
-            partialOrFull.languagePreferenceUpdatedAt
-          );
-        }
-        if (
-          (partialOrFull.cards && partialOrFull.cards.length > 0) ||
-          (partialOrFull.deletedCards && Object.keys(partialOrFull.deletedCards).length > 0)
-        ) {
-          performMerge(partialOrFull.cards ?? [], partialOrFull.deletedCards ?? {});
-        }
-        if (partialOrFull.studyHistory) {
-          setStudyHistory(prev => mergeHistoryRecords(prev, partialOrFull.studyHistory));
-        }
-        if (partialOrFull.longestStreak) {
-          setLongestStreak(prev => Math.max(prev, partialOrFull.longestStreak!));
-        }
+        applyPulledSnapshotToState(partialOrFull, { preferIncomingContent: true });
       };
 
-      const cloudData = isGistCloud(cloudConfig)
+      const cloudData = usingGist
         ? await getGistDeck(cloudConfig.gistToken!, cloudConfig.gistId!, {
             forceRefresh: true,
             onProgress: (info) => {
@@ -1815,15 +1879,31 @@ const App: React.FC = () => {
             },
           });
       applyPulledCloudData(cloudData);
-      lastKeepAliveRef.current = Date.now();
+      const pulledAt = Date.now();
+      hasSyncedInitialCloudPullRef.current = true;
+      lastCloudPullAtRef.current = pulledAt;
+      lastKeepAliveRef.current = pulledAt;
+
+      if (usingGist) {
+        const hasLocalDeltaAfterPull = hasPendingGistSyncChanges(cloudConfig.gistId!, {
+          cards: cardsRef.current,
+          studyHistory: studyHistoryRef.current,
+          longestStreak: longestStreakRef.current,
+          deletedCards: prunedDeletedCards(),
+          languagePreference: languagePreferenceRef.current,
+          languagePreferenceUpdatedAt: languagePreferenceUpdatedAtRef.current,
+        });
+        skipNextCloudAutoSaveRef.current = !hasLocalDeltaAfterPull;
+      }
+
       trackEvent(TRACKING_ACTION.CLOUD_PULL, TRACKING_CATEGORY.CLOUD);
       // Immediately flush to local file so both are in sync
       if (fileHandle) {
         try {
           await saveToLocalFile(fileHandle, {
             cards: cardsRef.current,
-            studyHistory,
-            longestStreak,
+            studyHistory: studyHistoryRef.current,
+            longestStreak: longestStreakRef.current,
             deletedCards: prunedDeletedCards(),
             languagePreference: languagePreferenceRef.current,
             languagePreferenceUpdatedAt: languagePreferenceUpdatedAtRef.current,
@@ -1840,17 +1920,18 @@ const App: React.FC = () => {
 
   const handleCloudPush = async (onProgress?: (progress: CloudSyncProgress) => void) => {
     if (!cloudConfig) return;
-    beginCloudSyncProgress(cards.length, 'push');
+    beginCloudSyncProgress(cardsRef.current.length, 'push');
     setIsCloudSaving(true);
     try {
       if (isGistCloud(cloudConfig)) {
+        await ensureInitialGistPullBeforePush(cloudConfig);
         await updateGistDeck(
           cloudConfig.gistToken!,
           cloudConfig.gistId!,
           {
-            cards,
-            studyHistory,
-            longestStreak,
+            cards: cardsRef.current,
+            studyHistory: studyHistoryRef.current,
+            longestStreak: longestStreakRef.current,
             deletedCards: prunedDeletedCards(),
             languagePreference: languagePreferenceRef.current,
             languagePreferenceUpdatedAt: languagePreferenceUpdatedAtRef.current,
@@ -1871,9 +1952,9 @@ const App: React.FC = () => {
         await updateDeck(
           cloudConfig.pantryId,
           {
-            cards,
-            studyHistory,
-            longestStreak,
+            cards: cardsRef.current,
+            studyHistory: studyHistoryRef.current,
+            longestStreak: longestStreakRef.current,
             deletedCards: prunedDeletedCards(),
             languagePreference: languagePreferenceRef.current,
             languagePreferenceUpdatedAt: languagePreferenceUpdatedAtRef.current,
@@ -1901,6 +1982,8 @@ const App: React.FC = () => {
   // --- App Logic ---
 
   // Helper to attach an asynchronous Persian translation onto a specific card once resolved
+  // NOTE: Do NOT mutate `updatedAt` on automatic background translation enrichment so we never
+  // overshadow user edits or cross-device study timestamps; cloud hash functions hash `translations` directly.
   const populateSingleCardTranslationAsync = useCallback(
     (cardId: string, word: string, mainDefinition: string, partOfSpeech?: string) => {
       if (!word.trim() || !mainDefinition.trim()) return;
@@ -1917,7 +2000,6 @@ const App: React.FC = () => {
               return {
                 ...c,
                 translations: merged,
-                updatedAt: Date.now(),
               };
             });
             if (changed) {
@@ -1978,7 +2060,6 @@ const App: React.FC = () => {
         }
 
         if (resolvedMap.size > 0) {
-          const ts = Date.now();
           setCards(prev => {
             let changed = false;
             const next = prev.map(card => {
@@ -1990,7 +2071,6 @@ const App: React.FC = () => {
               return {
                 ...card,
                 translations: merged,
-                updatedAt: ts,
               };
             });
             if (changed) {
@@ -2065,7 +2145,11 @@ const App: React.FC = () => {
       nextReviewDate: Date.now(),
       updatedAt: Date.now(),
     };
-    setCards(prev => [newCard, ...prev]);
+    setCards(prev => {
+      const next = [newCard, ...prev];
+      cardsRef.current = next;
+      return next;
+    });
     if (!cleanTranslations?.fa) {
       populateSingleCardTranslationAsync(cardId, entry.word, definition, partOfSpeech);
     }
@@ -2080,8 +2164,13 @@ const App: React.FC = () => {
         ...prev,
         [today]: (prev[today] || 0) + 1
       };
+      studyHistoryRef.current = updatedHistory;
       const newCurrentStreak = calculateCurrentStreak(updatedHistory);
-      setLongestStreak(prevStreak => Math.max(prevStreak, newCurrentStreak));
+      setLongestStreak(prevStreak => {
+        const nextStreak = Math.max(prevStreak, newCurrentStreak);
+        longestStreakRef.current = nextStreak;
+        return nextStreak;
+      });
       return updatedHistory;
     });
   };
@@ -2106,62 +2195,70 @@ const App: React.FC = () => {
   };
 
   const handleReviewCard = (id: string, quality: number) => {
-    setCards(prev => prev.map(card => {
-      if (card.id !== id) return card;
+    const now = Date.now();
+    setCards(prev => {
+      const next = prev.map(card => {
+        if (card.id !== id) return card;
 
-      let { repetition = 0 } = card;
-      let nextReviewDate = Date.now();
-      let status = FlashcardStatus.Learning;
+        let { repetition = 0 } = card;
+        let nextReviewDate = now;
+        let status = FlashcardStatus.Learning;
 
-      if (quality === 1) { // Again
-        repetition = 0;
-        nextReviewDate = Date.now();
-        status = FlashcardStatus.Learning;
-      } else if (quality === 3) { // Learned
-        repetition += 1;
-        status = FlashcardStatus.Learning;
+        if (quality === 1) { // Again
+          repetition = 0;
+          nextReviewDate = now;
+          status = FlashcardStatus.Learning;
+        } else if (quality === 3) { // Learned
+          repetition += 1;
+          status = FlashcardStatus.Learning;
 
-        const now = Date.now();
-        const ONE_DAY = 24 * 60 * 60 * 1000;
+          const ONE_DAY = 24 * 60 * 60 * 1000;
 
-        if (repetition === 1) {
-          nextReviewDate = now + ONE_DAY;
-        } else if (repetition === 2) {
-          nextReviewDate = now + ONE_DAY * 7;
-        } else if (repetition === 3) {
-          nextReviewDate = now + ONE_DAY * 14;
-        } else if (repetition === 4) {
-          nextReviewDate = now + ONE_DAY * 30;
-        } else {
+          if (repetition === 1) {
+            nextReviewDate = now + ONE_DAY;
+          } else if (repetition === 2) {
+            nextReviewDate = now + ONE_DAY * 7;
+          } else if (repetition === 3) {
+            nextReviewDate = now + ONE_DAY * 14;
+          } else if (repetition === 4) {
+            nextReviewDate = now + ONE_DAY * 30;
+          } else {
+            status = FlashcardStatus.Mastered;
+            nextReviewDate = now + ONE_DAY * 365;
+          }
+        } else if (quality === 5) { // Mastered
           status = FlashcardStatus.Mastered;
-          nextReviewDate = now + ONE_DAY * 365;
         }
-      } else if (quality === 5) { // Mastered
-        status = FlashcardStatus.Mastered;
-      }
 
-      return {
-        ...card,
-        repetition,
-        nextReviewDate,
-        status,
-        lastQuality: quality,
-        lastReviewed: Date.now(),
-        updatedAt: Date.now()
-      };
-    }));
+        return {
+          ...card,
+          repetition,
+          nextReviewDate,
+          status,
+          lastQuality: quality,
+          lastReviewed: now,
+          statusUpdatedAt: now,
+          updatedAt: now
+        };
+      });
+      cardsRef.current = next;
+      return next;
+    });
     recordActivity();
     trackEvent(TRACKING_ACTION.UPDATE_STATUS, TRACKING_CATEGORY.FLASHCARDS, `quality_${quality}`);
   };
 
   const handleRestoreCard = (previousCard: Flashcard) => {
-    setCards(prev =>
-      prev.map(card =>
+    const now = Date.now();
+    setCards(prev => {
+      const next = prev.map(card =>
         card.id === previousCard.id
-          ? { ...previousCard, updatedAt: Date.now() }
+          ? { ...previousCard, statusUpdatedAt: now, updatedAt: now }
           : card
-      )
-    );
+      );
+      cardsRef.current = next;
+      return next;
+    });
   };
 
   const handleCreateCustomCard = (data: CustomCardFormData) => {

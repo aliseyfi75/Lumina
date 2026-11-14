@@ -456,6 +456,7 @@ const sanitizeCardsForCloud = (cards: Flashcard[]): Flashcard[] =>
     if (card.easinessFactor && card.easinessFactor !== 2.5) clean.easinessFactor = card.easinessFactor;
     if (card.nextReviewDate) clean.nextReviewDate = card.nextReviewDate;
     if (card.lastQuality) clean.lastQuality = card.lastQuality;
+    if (card.statusUpdatedAt) clean.statusUpdatedAt = card.statusUpdatedAt;
     if (card.updatedAt) clean.updatedAt = card.updatedAt;
     return clean;
   });
@@ -465,6 +466,7 @@ const normalizeCardsFromCloud = (cards: Flashcard[]): Flashcard[] =>
     ...card,
     partOfSpeech: card.partOfSpeech ?? '',
     status: card.status ?? FlashcardStatus.New,
+    repetition: card.repetition ?? 0,
     lastReviewed: card.lastReviewed ?? 0,
     createdAt: card.createdAt ?? Date.now(),
   }));
@@ -1162,7 +1164,9 @@ export const getPendingCloudSyncPlan = (
       cloudData.longestStreak,
       cloudData.deletedCards,
       allChunks.length,
-      cardChunkHashes
+      cardChunkHashes,
+      cloudData.languagePreference,
+      cloudData.languagePreferenceUpdatedAt
     );
     const metaChanged = knownHashes.meta !== metaHash;
     const hasChanges = dirtyChunkCount > 0 || metaChanged || staleChunksToDelete > 0;
@@ -1222,6 +1226,10 @@ const pushDeckWithChunkLimit = async (
     studyHistory: cloudData.studyHistory,
     longestStreak: cloudData.longestStreak,
     deletedCards: cloudData.deletedCards,
+    ...(cloudData.languagePreference ? { languagePreference: cloudData.languagePreference } : {}),
+    ...(cloudData.languagePreferenceUpdatedAt
+      ? { languagePreferenceUpdatedAt: cloudData.languagePreferenceUpdatedAt }
+      : {}),
     chunkCount: 1,
     chunkHashes: { 0: singleCardChunkHash },
     lastAccessedAt: now,
@@ -1243,7 +1251,9 @@ const pushDeckWithChunkLimit = async (
       cloudData.longestStreak,
       cloudData.deletedCards,
       1,
-      { 0: singleCardChunkHash }
+      { 0: singleCardChunkHash },
+      cloudData.languagePreference,
+      cloudData.languagePreferenceUpdatedAt
     );
     const knownHashes = { ...loadUploadedChunkHashes(cleanId) };
 
@@ -1292,6 +1302,10 @@ const pushDeckWithChunkLimit = async (
             studyHistory: cloudData.studyHistory,
             longestStreak: cloudData.longestStreak,
             deletedCards: cloudData.deletedCards,
+            ...(cloudData.languagePreference ? { languagePreference: cloudData.languagePreference } : {}),
+            ...(cloudData.languagePreferenceUpdatedAt
+              ? { languagePreferenceUpdatedAt: cloudData.languagePreferenceUpdatedAt }
+              : {}),
             chunkCount: 1,
             chunkHashes: { 0: singleCardChunkHash },
             lastAccessedAt: now,
@@ -1351,6 +1365,8 @@ const pushDeckWithChunkLimit = async (
         studyHistory: cloudData.studyHistory,
         longestStreak: cloudData.longestStreak,
         deletedCards: cloudData.deletedCards,
+        languagePreference: cloudData.languagePreference,
+        languagePreferenceUpdatedAt: cloudData.languagePreferenceUpdatedAt,
         chunkCount: 1,
         chunkHashes: { 0: singleCardChunkHash },
       }),
@@ -1406,7 +1422,9 @@ const pushDeckWithChunkLimit = async (
     cloudData.longestStreak,
     cloudData.deletedCards,
     allChunks.length,
-    cardChunkHashes
+    cardChunkHashes,
+    cloudData.languagePreference,
+    cloudData.languagePreferenceUpdatedAt
   );
 
   const dirtyChunkIndices: number[] = [];
@@ -1451,6 +1469,10 @@ const pushDeckWithChunkLimit = async (
       studyHistory: cloudData.studyHistory,
       longestStreak: cloudData.longestStreak,
       deletedCards: cloudData.deletedCards,
+      ...(cloudData.languagePreference ? { languagePreference: cloudData.languagePreference } : {}),
+      ...(cloudData.languagePreferenceUpdatedAt
+        ? { languagePreferenceUpdatedAt: cloudData.languagePreferenceUpdatedAt }
+        : {}),
       chunkCount: allChunks.length,
       chunkHashes: cardChunkHashes,
       lastAccessedAt: now,
@@ -1557,6 +1579,10 @@ const pushDeckWithChunkLimit = async (
           studyHistory: cloudData.studyHistory,
           longestStreak: cloudData.longestStreak,
           deletedCards: cloudData.deletedCards,
+          ...(cloudData.languagePreference ? { languagePreference: cloudData.languagePreference } : {}),
+          ...(cloudData.languagePreferenceUpdatedAt
+            ? { languagePreferenceUpdatedAt: cloudData.languagePreferenceUpdatedAt }
+            : {}),
           chunkCount: allChunks.length,
           chunkHashes: cardChunkHashes,
           lastAccessedAt: now,
@@ -1583,6 +1609,8 @@ const pushDeckWithChunkLimit = async (
       studyHistory: cloudData.studyHistory,
       longestStreak: cloudData.longestStreak,
       deletedCards: cloudData.deletedCards,
+      languagePreference: cloudData.languagePreference,
+      languagePreferenceUpdatedAt: cloudData.languagePreferenceUpdatedAt,
       chunkCount: allChunks.length,
       chunkHashes: cardChunkHashes,
     }),

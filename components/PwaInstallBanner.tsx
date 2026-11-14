@@ -45,7 +45,7 @@ export const PwaInstallBanner: React.FC = () => {
     if (!show) return null;
 
     return (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-md animate-in fade-in slide-in-from-bottom-4 duration-300">
+        <div className="fixed safe-floating-bottom left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-md animate-in fade-in slide-in-from-bottom-4 duration-300">
             <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl shadow-slate-900/10 dark:shadow-slate-900/50 flex items-center gap-4 p-4">
                 <div className="w-10 h-10 bg-brand-600 rounded-xl flex items-center justify-center text-white font-serif font-bold text-xl shrink-0 shadow-md shadow-brand-500/30">
                     L

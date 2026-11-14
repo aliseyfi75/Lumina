@@ -180,8 +180,8 @@ export const AnkiImportModal: React.FC<AnkiImportModalProps> = ({ file, onClose,
   const canImport = !!schema && schema.models.some(m => enabled[m.id] && mappings[m.id]?.word);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-2xl flex flex-col max-h-[90dvh] border border-slate-100 dark:border-slate-700">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center modal-safe-overlay bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-2xl flex flex-col modal-safe-panel border border-slate-100 dark:border-slate-700">
 
         {/* Header */}
         <div className="px-4 sm:px-6 py-4 sm:py-5 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between bg-orange-50/60 dark:bg-orange-950/30 rounded-t-2xl shrink-0 gap-2">

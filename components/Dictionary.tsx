@@ -772,7 +772,10 @@ export const Dictionary: React.FC<DictionaryProps> = ({
 
       {/* Toast Message */}
       {toastMessage && (
-        <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 bg-slate-900 text-white px-6 py-3 rounded-full shadow-lg z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
+        <div
+          style={{ bottom: 'calc(2rem + var(--safe-bottom, 0px))' }}
+          className="fixed left-1/2 transform -translate-x-1/2 bg-slate-900 text-white px-6 py-3 rounded-full shadow-lg z-50 animate-in fade-in slide-in-from-bottom-4 duration-300"
+        >
           {toastMessage}
         </div>
       )}

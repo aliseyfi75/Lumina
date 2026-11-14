@@ -113,6 +113,10 @@ const App: React.FC = () => {
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', isDark);
+    const themeMeta = document.querySelector('meta[name="theme-color"]');
+    if (themeMeta) {
+      themeMeta.setAttribute('content', isDark ? '#0f172a' : '#ffffff');
+    }
   }, [isDark]);
 
   // Keep in sync whenever the OS switches light/dark (unless user set a manual override)
@@ -2671,7 +2675,7 @@ const App: React.FC = () => {
 
   // Nav link active class helper
   const navLinkClass = ({ isActive }: { isActive: boolean }) =>
-    `flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg text-sm font-medium transition-all duration-200 ${isActive
+    `flex items-center justify-center gap-1.5 sm:gap-2 min-h-[38px] min-w-[38px] px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg text-sm font-medium touch-manipulation select-none transition-all duration-200 ${isActive
       ? 'bg-white dark:bg-slate-700 text-brand-600 dark:text-brand-400 shadow-sm'
       : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-700/50'
     }`;
@@ -2686,7 +2690,7 @@ const App: React.FC = () => {
 
       {/* Re-grant permission banner */}
       {pendingHandle && !fileHandle && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-md">
+        <div className="fixed safe-floating-top left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-md">
           <div className="bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded-xl shadow-lg px-4 py-3 flex items-center gap-3">
             <RefreshCw className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
             <p className="text-xs text-amber-800 dark:text-amber-200 flex-1">
@@ -2720,9 +2724,23 @@ const App: React.FC = () => {
         </div>
       )}
 
-      <header className="sticky top-0 z-50 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-700">
-        <div className="max-w-5xl mx-auto px-3 sm:px-4 h-14 sm:h-16 flex items-center justify-between gap-2">
-          <NavLink to="/" className="flex items-center gap-2 cursor-pointer shrink-0">
+      <header
+        data-testid="app-top-header"
+        className="sticky top-0 z-50 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-700"
+      >
+        <div
+          data-testid="ios-safe-top-spacer"
+          aria-hidden="true"
+          className="ios-safe-top-spacer w-full shrink-0"
+        />
+        <div
+          data-testid="app-top-header-bar"
+          className="max-w-5xl mx-auto safe-px h-14 sm:h-16 flex items-center justify-between gap-1.5 sm:gap-2"
+        >
+          <NavLink
+            to="/"
+            className="flex items-center gap-2 cursor-pointer shrink-0 min-h-[38px] min-w-[38px] touch-manipulation select-none"
+          >
             <div className="w-8 h-8 bg-brand-600 rounded-lg flex items-center justify-center text-white font-serif font-bold text-lg sm:text-xl shadow-lg shadow-brand-500/30">
               L
             </div>
@@ -2733,11 +2751,11 @@ const App: React.FC = () => {
             <nav className="flex items-center gap-0.5 sm:gap-1 bg-slate-100/50 dark:bg-slate-800/80 p-1 rounded-xl mr-0.5 sm:mr-2">
               <NavLink to="/" end className={navLinkClass}>
                 <Home className="h-4 w-4 shrink-0" />
-                <span className="hidden sm:inline">Home</span>
+                <span className="sr-only sm:not-sr-only">Home</span>
               </NavLink>
               <NavLink to="/dictionary" className={navLinkClass}>
                 <Book className="h-4 w-4 shrink-0" />
-                <span className="hidden sm:inline">Dictionary</span>
+                <span className="sr-only sm:not-sr-only">Dictionary</span>
               </NavLink>
               <NavLink
                 to="/flashcards"
@@ -2746,7 +2764,7 @@ const App: React.FC = () => {
                 }
               >
                 <Layers className="h-4 w-4 shrink-0" />
-                <span className="hidden sm:inline">Flashcards</span>
+                <span className="sr-only sm:not-sr-only">Flashcards</span>
                 {cards.length > 0 && (
                   <span className="bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] px-1.5 py-0.5 rounded-full min-w-[20px] text-center">
                     {cards.length}
@@ -2755,13 +2773,13 @@ const App: React.FC = () => {
               </NavLink>
               <NavLink to="/statistics" className={navLinkClass}>
                 <BarChart2 className="h-4 w-4 shrink-0" />
-                <span className="hidden sm:inline">Statistics</span>
+                <span className="sr-only sm:not-sr-only">Statistics</span>
               </NavLink>
             </nav>
 
             <button
               onClick={handleToggleDark}
-              className="p-2 sm:p-2.5 rounded-xl transition-all bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-700 dark:hover:text-slate-200 shrink-0"
+              className="inline-flex items-center justify-center min-h-[38px] min-w-[38px] p-2 sm:p-2.5 rounded-xl transition-all touch-manipulation bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-700 dark:hover:text-slate-200 shrink-0"
               title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
               aria-label="Toggle dark mode"
             >
@@ -2772,7 +2790,7 @@ const App: React.FC = () => {
               data-testid="open-settings-button"
               aria-label="Open settings"
               title="Settings & Language"
-              className={`inline-flex items-center gap-1 p-2 sm:px-2.5 sm:py-2 rounded-xl transition-all shrink-0 ${
+              className={`inline-flex items-center justify-center gap-1 min-h-[38px] min-w-[38px] p-2 sm:px-2.5 sm:py-2 rounded-xl transition-all touch-manipulation shrink-0 ${
                 languagePreference !== 'en'
                   ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/70 hover:bg-emerald-100 dark:hover:bg-emerald-900/50'
                   : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-700 dark:hover:text-slate-200'
@@ -2787,7 +2805,8 @@ const App: React.FC = () => {
             </button>
             <button
               onClick={() => setIsDataModalOpen(true)}
-              className={`p-2 sm:p-2.5 rounded-xl transition-all hover:bg-slate-200 dark:hover:bg-slate-700 shrink-0 ${fileHandle || cloudConfig ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-400 border border-brand-200 dark:border-brand-800' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-brand-600 dark:hover:text-brand-400'}`}
+              aria-label="Manage Data"
+              className={`inline-flex items-center justify-center min-h-[38px] min-w-[38px] p-2 sm:p-2.5 rounded-xl transition-all touch-manipulation hover:bg-slate-200 dark:hover:bg-slate-700 shrink-0 ${fileHandle || cloudConfig ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-400 border border-brand-200 dark:border-brand-800' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-brand-600 dark:hover:text-brand-400'}`}
               title="Manage Data"
             >
               {cloudConfig ? <Cloud className="h-4 w-4 sm:h-5 sm:w-5" /> : (fileHandle ? <Save className="h-4 w-4 sm:h-5 sm:w-5" /> : <Database className="h-4 w-4 sm:h-5 sm:w-5" />)}
@@ -2796,7 +2815,7 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      <main className="flex-1 max-w-5xl mx-auto w-full px-3 sm:px-4 py-4 sm:py-8">
+      <main className="flex-1 max-w-5xl mx-auto w-full safe-px pt-4 sm:pt-8 safe-main-pb">
         <Routes>
           <Route
             path="/"
@@ -2900,7 +2919,7 @@ const App: React.FC = () => {
 
       {/* Auto-Save Indicators */}
       {(isFileSaving || isCloudSaving || isSyncingOffline || (!isOnline && cloudConfig)) && (
-        <div className="fixed bottom-4 right-4 flex flex-col gap-2 items-end z-50">
+        <div className="fixed safe-floating-bottom-right flex flex-col gap-2 items-end z-50">
           {isFileSaving && !isCloudSaving && !isSyncingOffline && (
             <div className="bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 text-xs px-3 py-1.5 rounded-full shadow-lg animate-pulse flex items-center gap-2">
               <Save className="h-3 w-3" />

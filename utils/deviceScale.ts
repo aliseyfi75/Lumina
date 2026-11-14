@@ -55,6 +55,39 @@ export function computeTargetRootFontSize(width: number, height: number): number
 }
 
 /**
+ * Synchronizes the iOS Home Screen PWA (`navigator.standalone === true`) safe-area
+ * top fallback across portrait & landscape rotations so the top navigation bar never
+ * renders behind the iPhone notch / Dynamic Island / status bar.
+ */
+export function syncIosSafeAreaFallback(
+  doc: Document = document,
+  win: Window = window
+): void {
+  const root = doc.documentElement;
+  if (!root) return;
+
+  const rawWidth = win.innerWidth || root.clientWidth || 390;
+  const rawHeight = win.innerHeight || root.clientHeight || 720;
+  const isIosStandalone = Boolean((win.navigator as Navigator & { standalone?: boolean })?.standalone === true);
+
+  if (isIosStandalone) {
+    root.classList.add('ios-standalone');
+    const isLandscape = rawWidth > rawHeight;
+    const maxScreenDim = Math.max(
+      win.screen?.height || 0,
+      win.screen?.width || 0,
+      rawHeight,
+      rawWidth
+    );
+    const fallbackPx = isLandscape ? '0px' : maxScreenDim >= 812 ? '48px' : '24px';
+    root.style.setProperty('--ios-standalone-top-fallback', fallbackPx);
+  } else {
+    root.classList.remove('ios-standalone');
+    root.style.setProperty('--ios-standalone-top-fallback', '0px');
+  }
+}
+
+/**
  * Applies the calibrated root `font-size` to `<html>` and compensates if the OS
  * or WebView applies an extra font-scale multiplier on top of explicit CSS `px`.
  */
@@ -64,6 +97,8 @@ export function applyDeviceRootScale(
 ): number {
   const root = doc.documentElement;
   if (!root) return MAX_ROOT_PX;
+
+  syncIosSafeAreaFallback(doc, win);
 
   const rawWidth = win.innerWidth || root.clientWidth || 390;
   const rawHeight = win.innerHeight || root.clientHeight || 720;

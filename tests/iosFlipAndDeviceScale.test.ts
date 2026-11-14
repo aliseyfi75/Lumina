@@ -260,4 +260,94 @@ test.describe('iOS 3D Flashcard Flip Isolation & Device-Adaptive Scaling', () =>
       expect(overflow.scrollWidth, `Horizontal overflow on ${route}`).toBeLessThanOrEqual(overflow.innerWidth + 1);
     }
   });
+
+  test('keeps top navigation bar and modal headers below iOS notch/status bar in standalone PWA mode so all items are selectable', async ({
+    page,
+  }) => {
+    // Emulate an iPhone 13/14 (390x844) running Lumina as an installed iOS Home Screen PWA (navigator.standalone = true)
+    await page.addInitScript(() => {
+      Object.defineProperty(window.navigator, 'standalone', {
+        get: () => true,
+        configurable: true,
+      });
+    });
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('http://localhost:5173/#/');
+    await seedDeck(page);
+    await page.reload();
+
+    const spacer = page.getByTestId('ios-safe-top-spacer');
+    const headerBar = page.getByTestId('app-top-header-bar');
+    await expect(headerBar).toBeVisible();
+
+    const spacerBox = await spacer.boundingBox();
+    const barBox = await headerBar.boundingBox();
+    expect(spacerBox).not.toBeNull();
+    expect(barBox).not.toBeNull();
+    expect(spacerBox!.height).toBeGreaterThanOrEqual(48);
+    expect(barBox!.y).toBeGreaterThanOrEqual(48);
+
+    // Every interactive link and button in the top bar must sit below the 47px notch/status bar and pass center hit-testing
+    const topBarLocators = [
+      page.getByRole('link', { name: /^Home$/i }),
+      page.getByRole('link', { name: /^Dictionary$/i }),
+      page.getByRole('link', { name: /^Flashcards/i }),
+      page.getByRole('link', { name: /^Statistics$/i }),
+      page.getByRole('button', { name: 'Toggle dark mode' }),
+      page.getByRole('button', { name: 'Open settings' }),
+      page.getByRole('button', { name: 'Manage Data' }),
+    ];
+
+    for (const item of topBarLocators) {
+      await expect(item).toBeVisible();
+      const box = await item.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.y).toBeGreaterThanOrEqual(48);
+      expect(box!.height).toBeGreaterThanOrEqual(36);
+      expect(box!.width).toBeGreaterThanOrEqual(36);
+    }
+
+    // Verify every top-bar item is actually clickable/selectable on iOS viewport
+    await page.getByRole('link', { name: /^Dictionary$/i }).click();
+    await expect(page).toHaveURL(/#\/dictionary$/);
+
+    await page.getByRole('link', { name: /^Flashcards/i }).click();
+    await expect(page).toHaveURL(/#\/flashcards$/);
+    await expect(page.getByRole('heading', { name: 'My Deck' })).toBeVisible();
+
+    await page.getByRole('link', { name: /^Statistics$/i }).click();
+    await expect(page).toHaveURL(/#\/statistics$/);
+
+    await page.getByRole('link', { name: /^Home$/i }).click();
+    await expect(page).toHaveURL(/#\/$/);
+
+    // Verify Settings & Data Manager modals open cleanly and also clear the top notch safe area
+    await page.getByRole('button', { name: 'Open settings' }).click();
+    const settingsDialog = page.getByTestId('settings-modal');
+    await expect(settingsDialog).toBeVisible();
+    const settingsHeadingBox = await settingsDialog
+      .getByRole('heading', { name: /Settings/i })
+      .boundingBox();
+    expect(settingsHeadingBox!.y).toBeGreaterThanOrEqual(48);
+    await settingsDialog.getByRole('button', { name: /Close|Done/i }).first().click();
+
+    await page.getByRole('button', { name: 'Manage Data' }).click();
+    const dataManagerHeading = page.getByRole('heading', { name: 'Data Manager' });
+    await expect(dataManagerHeading).toBeVisible();
+    const dmHeadingBox = await dataManagerHeading.boundingBox();
+    expect(dmHeadingBox!.y).toBeGreaterThanOrEqual(48);
+    await page.locator('button').filter({ has: page.locator('svg.lucide-x') }).first().click();
+
+    // Rotating to landscape (844x390) removes top notch fallback; rotating back to portrait restores it
+    await page.setViewportSize({ width: 844, height: 390 });
+    await page.waitForTimeout(100);
+    const landscapeSpacerBox = await spacer.boundingBox();
+    expect(landscapeSpacerBox!.height).toBe(0);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForTimeout(100);
+    const portraitAgainBox = await spacer.boundingBox();
+    expect(portraitAgainBox!.height).toBeGreaterThanOrEqual(48);
+  });
 });

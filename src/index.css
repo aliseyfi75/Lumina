@@ -2,18 +2,80 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --ios-standalone-top-fallback: 0px;
+  --safe-top: max(env(safe-area-inset-top, 0px), var(--ios-standalone-top-fallback, 0px));
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+/* Top safe-area spacer inside sticky <header> so navigation clears the iPhone notch & status bar */
+.ios-safe-top-spacer {
+  height: var(--safe-top, 0px);
+  transition: background-color 0.2s ease;
+}
+
+/* Keep white iOS `black-translucent` status-bar clock/battery legible even in Light Mode PWA */
+html.ios-standalone:not(.dark) .ios-safe-top-spacer {
+  background-color: rgba(15, 23, 42, 0.88);
+}
+
 @layer utilities {
+  .safe-px {
+    padding-left: max(0.75rem, calc(var(--safe-left, 0px) + 0.5rem));
+    padding-right: max(0.75rem, calc(var(--safe-right, 0px) + 0.5rem));
+  }
+
+  .safe-main-pb {
+    padding-bottom: calc(1rem + var(--safe-bottom, 0px));
+  }
+
+  .modal-safe-overlay {
+    padding-top: max(0.75rem, calc(var(--safe-top, 0px) + 0.5rem));
+    padding-bottom: max(0.75rem, calc(var(--safe-bottom, 0px) + 0.5rem));
+    padding-left: max(0.75rem, calc(var(--safe-left, 0px) + 0.75rem));
+    padding-right: max(0.75rem, calc(var(--safe-right, 0px) + 0.75rem));
+  }
+
+  .modal-safe-panel {
+    max-height: calc(100vh - var(--safe-top, 0px) - var(--safe-bottom, 0px) - 1.5rem);
+    max-height: calc(100dvh - var(--safe-top, 0px) - var(--safe-bottom, 0px) - 1.5rem);
+  }
+
+  .safe-floating-top {
+    top: calc(4.25rem + var(--safe-top, 0px));
+  }
+
+  .safe-floating-bottom {
+    bottom: calc(1rem + var(--safe-bottom, 0px));
+  }
+
+  .safe-floating-bottom-right {
+    bottom: calc(1rem + var(--safe-bottom, 0px));
+    right: calc(1rem + var(--safe-right, 0px));
+  }
+
   .study-viewport-height {
-    height: calc(100vh - 6.5rem);
-    height: calc(100dvh - 6.5rem);
-    min-height: 24rem;
+    height: calc(100vh - 6.5rem - var(--safe-top, 0px) - var(--safe-bottom, 0px));
+    height: calc(100dvh - 6.5rem - var(--safe-top, 0px) - var(--safe-bottom, 0px));
+    min-height: 22rem;
     max-height: 44rem;
   }
 
   @media (min-width: 640px) {
+    .safe-px {
+      padding-left: max(1rem, calc(var(--safe-left, 0px) + 0.75rem));
+      padding-right: max(1rem, calc(var(--safe-right, 0px) + 0.75rem));
+    }
+
+    .safe-main-pb {
+      padding-bottom: calc(2rem + var(--safe-bottom, 0px));
+    }
+
     .study-viewport-height {
-      height: calc(100vh - 8.5rem);
-      height: calc(100dvh - 8.5rem);
+      height: calc(100vh - 8.5rem - var(--safe-top, 0px) - var(--safe-bottom, 0px));
+      height: calc(100dvh - 8.5rem - var(--safe-top, 0px) - var(--safe-bottom, 0px));
       min-height: 28rem;
       max-height: 46rem;
     }

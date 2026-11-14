@@ -140,7 +140,7 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
     };
 
     return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center modal-safe-overlay">
             <div
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
                 onClick={onClose}
@@ -150,7 +150,7 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 20 }}
                 transition={{ duration: 0.2 }}
-                className="relative w-full max-w-md max-h-[90dvh] flex flex-col bg-white dark:bg-slate-800 rounded-2xl sm:rounded-3xl shadow-2xl overflow-hidden border border-slate-100 dark:border-slate-700"
+                className="relative w-full max-w-md modal-safe-panel flex flex-col bg-white dark:bg-slate-800 rounded-2xl sm:rounded-3xl shadow-2xl overflow-hidden border border-slate-100 dark:border-slate-700"
             >
                 {/* Header */}
                 <div className="px-4 sm:px-6 py-4 sm:py-5 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between bg-slate-50 dark:bg-slate-800/50 shrink-0">

@@ -5,6 +5,7 @@ import {
   updateGistDeck,
   hasPendingGistSyncChanges,
   clearGistSyncCacheForTests,
+  cleanGitHubToken,
   LUMINA_GIST_FILENAME,
   LUMINA_GIST_PART_PREFIX,
 } from '../services/gistService';
@@ -768,3 +769,343 @@ test('Load from Cloud succeeds on truncated >1 MB GitHub Gist without Failed to 
     page.getByText('Reserved or uncommunicative in speech; saying little.')
   ).toBeVisible();
 });
+
+test('gistService distinguishes 403 secondary rate limits from 401/missing-scope errors, auto-retries short Retry-After, cleans tokens, and omits unchanged overflow parts on PATCH', async () => {
+  clearGistSyncCacheForTests();
+
+  // 1. Token sanitization strips accidental quotes, zero-width spaces, and Bearer/token prefixes
+  expect(cleanGitHubToken('  "Bearer ghp_exampleToken123\u200B"  ')).toBe('ghp_exampleToken123');
+  expect(cleanGitHubToken("'token ghp_anotherToken456'")).toBe('ghp_anotherToken456');
+
+  let shortRetryAttempts = 0;
+  const patchFilesHistory: Record<string, { content: string } | null>[] = [];
+  const storedFiles: Record<string, { filename: string; content: string }> = {};
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method ?? 'GET';
+    const headers = (init?.headers || {}) as Record<string, string>;
+    const authHeader = headers['Authorization'] || '';
+
+    // Case A: Short secondary rate limit (Retry-After: 1) -> auto-retried transparently!
+    if (url === 'https://api.github.com/gists/rate-short-1') {
+      shortRetryAttempts += 1;
+      if (shortRetryAttempts === 1) {
+        return new Response(
+          JSON.stringify({
+            message:
+              'You have exceeded a secondary rate limit. Please wait a few moments before you try again.',
+          }),
+          {
+            status: 403,
+            headers: {
+              'Retry-After': '1',
+              'X-OAuth-Scopes': 'gist',
+            },
+          }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          id: 'rate-short-1',
+          files: {
+            [LUMINA_GIST_FILENAME]: {
+              filename: LUMINA_GIST_FILENAME,
+              content: JSON.stringify({
+                cards: [makeCard(1)],
+                studyHistory: { '2026-11-15': 10 },
+                longestStreak: 5,
+                deletedCards: {},
+              }),
+            },
+          },
+        }),
+        { status: 200, headers: { ETag: '"etag-short-ok"' } }
+      );
+    }
+
+    // Case B: Longer secondary rate limit cooldown (Retry-After: 45) -> truthful rate-limit message
+    if (url === 'https://api.github.com/gists?per_page=100' && authHeader.includes('rate_limited_tok')) {
+      return new Response(
+        JSON.stringify({
+          message:
+            'You have exceeded a secondary rate limit and have been temporarily blocked from content creation.',
+        }),
+        {
+          status: 403,
+          headers: {
+            'Retry-After': '45',
+            'X-OAuth-Scopes': 'gist',
+          },
+        }
+      );
+    }
+
+    // Case C: Truly invalid/revoked token (401)
+    if (url === 'https://api.github.com/gists?per_page=100' && authHeader.includes('revoked_tok')) {
+      return new Response(JSON.stringify({ message: 'Bad credentials' }), { status: 401 });
+    }
+
+    // Case D: Valid token missing "gist" OAuth scope (403 with X-OAuth-Scopes: repo)
+    if (url === 'https://api.github.com/gists?per_page=100' && authHeader.includes('noscope_tok')) {
+      return new Response(
+        JSON.stringify({ message: 'Resource not accessible by personal access token' }),
+        {
+          status: 403,
+          headers: { 'X-OAuth-Scopes': 'repo, read:user' },
+        }
+      );
+    }
+
+    // Case E: Differential multi-part PATCH verification
+    if (method === 'PATCH' && url === 'https://api.github.com/gists/diff-parts-gist') {
+      const body = JSON.parse(String(init?.body || '{}'));
+      patchFilesHistory.push(body.files || {});
+      for (const [fname, spec] of Object.entries(body.files || {})) {
+        if (spec === null) {
+          delete storedFiles[fname];
+        } else if (spec && typeof (spec as any).content === 'string') {
+          storedFiles[fname] = { filename: fname, content: (spec as any).content };
+        }
+      }
+      return new Response(JSON.stringify({ id: 'diff-parts-gist', files: storedFiles }), {
+        status: 200,
+        headers: { ETag: `"etag-diff-${patchFilesHistory.length}"` },
+      });
+    }
+
+    return new Response('{}', { status: 200 });
+  }) as typeof fetch;
+
+  try {
+    // Verify Case A: Short Retry-After succeeds automatically
+    const recovered = await getGistDeck('  "Bearer ghp_valid_short"  ', 'rate-short-1');
+    expect(shortRetryAttempts).toBe(2);
+    expect(recovered.cards.length).toBe(1);
+
+    // Verify Case B: Longer 403 secondary rate limit NEVER claims token is invalid
+    await expect(findOrCreateLuminaGist('ghp_rate_limited_tok')).rejects.toThrow(
+      /rate limit reached due to rapid updates \(your token is valid\).*45s/i
+    );
+
+    // Verify Case C: 401 reports invalid/expired/revoked token
+    await expect(findOrCreateLuminaGist('ghp_revoked_tok')).rejects.toThrow(
+      /invalid, expired, or revoked/i
+    );
+
+    // Verify Case D: 403 without gist scope reports missing "gist" permission
+    await expect(findOrCreateLuminaGist('ghp_noscope_tok')).rejects.toThrow(
+      /missing "gist" permission/i
+    );
+
+    // Verify Case E: Reviewing 1 card in part 1 does NOT re-upload unchanged lumina_flashcards_part_2.json!
+    const cards200 = Array.from({ length: 200 }, (_, i) => ({
+      ...makeCard(i),
+      mainDefinition: `Detailed definition text for vocabulary entry number ${i} to exceed part threshold.`,
+    }));
+    await updateGistDeck(
+      'ghp_diff_tok',
+      'diff-parts-gist',
+      {
+        cards: cards200,
+        studyHistory: { '2026-11-15': 1 },
+        longestStreak: 3,
+        deletedCards: {},
+      },
+      { maxBytesPerPart: 18 * 1024 }
+    );
+    expect(patchFilesHistory.length).toBe(1);
+    expect(Object.keys(patchFilesHistory[0])).toContain(`${LUMINA_GIST_PART_PREFIX}2.json`);
+
+    // Now grade ONLY card 0 (which lives in lumina_flashcards_backup.json)
+    const updatedCards = cards200.map((c, idx) =>
+      idx === 0
+        ? {
+            ...c,
+            status: FlashcardStatus.Mastered,
+            repetition: 5,
+            lastReviewed: 1700099999000,
+            statusUpdatedAt: 1700099999000,
+            updatedAt: 1700099999000,
+          }
+        : c
+    );
+    await updateGistDeck(
+      'ghp_diff_tok',
+      'diff-parts-gist',
+      {
+        cards: updatedCards,
+        studyHistory: { '2026-11-15': 2 },
+        longestStreak: 3,
+        deletedCards: {},
+      },
+      { maxBytesPerPart: 18 * 1024 }
+    );
+    expect(patchFilesHistory.length).toBe(2);
+    // Only the primary file was transmitted in the second PATCH — overflow part 2 was omitted!
+    expect(Object.keys(patchFilesHistory[1])).toEqual([LUMINA_GIST_FILENAME]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('StudySession coalesces rapid Gist auto-saves during active card grading and flushes once on session exit', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  const patchBodies: any[] = [];
+  let simulateRateLimitOnManualPull = false;
+
+  const initialCards: Flashcard[] = [
+    {
+      id: 'study-c1',
+      word: 'Alacrity',
+      partOfSpeech: 'noun',
+      mainDefinition: 'Brisk and cheerful readiness.',
+      status: FlashcardStatus.New,
+      repetition: 0,
+      lastReviewed: 0,
+      createdAt: 1700000001000,
+      updatedAt: 1700000001000,
+    },
+    {
+      id: 'study-c2',
+      word: 'Equanimity',
+      partOfSpeech: 'noun',
+      mainDefinition: 'Mental calmness and composure in a difficult situation.',
+      status: FlashcardStatus.New,
+      repetition: 0,
+      lastReviewed: 0,
+      createdAt: 1700000002000,
+      updatedAt: 1700000002000,
+    },
+    {
+      id: 'study-c3',
+      word: 'Lucid',
+      partOfSpeech: 'adjective',
+      mainDefinition: 'Expressed clearly; easy to understand.',
+      status: FlashcardStatus.New,
+      repetition: 0,
+      lastReviewed: 0,
+      createdAt: 1700000003000,
+      updatedAt: 1700000003000,
+    },
+  ];
+
+  let latestCloudPayload: any = {
+    cards: initialCards,
+    studyHistory: {},
+    longestStreak: 0,
+    deletedCards: {},
+  };
+
+  await page.route('https://api.github.com/gists/gist-study-coalesce', async (route) => {
+    const method = route.request().method();
+    if (method === 'GET') {
+      if (simulateRateLimitOnManualPull) {
+        await route.fulfill({
+          status: 403,
+          contentType: 'application/json',
+          headers: {
+            'Retry-After': '30',
+            'X-OAuth-Scopes': 'gist',
+          },
+          body: JSON.stringify({
+            message: 'You have exceeded a secondary rate limit. Please wait a few moments.',
+          }),
+        });
+        return;
+      }
+
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: { ETag: `"etag-study-${patchBodies.length}"` },
+        body: JSON.stringify({
+          id: 'gist-study-coalesce',
+          files: {
+            [LUMINA_GIST_FILENAME]: {
+              filename: LUMINA_GIST_FILENAME,
+              content: JSON.stringify(latestCloudPayload),
+            },
+          },
+        }),
+      });
+      return;
+    }
+
+    if (method === 'PATCH') {
+      const body = JSON.parse(route.request().postData() || '{}');
+      const content = JSON.parse(body.files?.[LUMINA_GIST_FILENAME]?.content || '{}');
+      patchBodies.push(content);
+      latestCloudPayload = content;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: { ETag: `"etag-study-${patchBodies.length}"` },
+        body: JSON.stringify({
+          id: 'gist-study-coalesce',
+          files: {
+            [LUMINA_GIST_FILENAME]: {
+              filename: LUMINA_GIST_FILENAME,
+              content: JSON.stringify(content),
+            },
+          },
+        }),
+      });
+      return;
+    }
+
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+  });
+
+  await page.addInitScript((seededCards) => {
+    Object.defineProperty(navigator, 'onLine', { get: () => true, configurable: true });
+    localStorage.setItem(
+      'lumina_cloud_config',
+      JSON.stringify({
+        provider: 'gist',
+        gistToken: 'ghp_study_coalesce_tok',
+        gistId: 'gist-study-coalesce',
+        pantryId: 'gist-study-coalesce',
+      })
+    );
+    localStorage.setItem('lumina_cards_v1', JSON.stringify(seededCards));
+  }, initialCards);
+
+  await page.goto('/#/study');
+  await expect(page.getByText('1 / 3')).toBeVisible();
+
+  // Rapidly grade 2 cards back-to-back (~1.5s apart, just like real studying)
+  await page.keyboard.press('Space');
+  await page.getByRole('button', { name: /Mastered/i }).click();
+  await expect(page.getByText('2 / 3')).toBeVisible();
+
+  await page.keyboard.press('Space');
+  await page.getByRole('button', { name: /Mastered/i }).click();
+  await expect(page.getByText('3 / 3')).toBeVisible();
+
+  // Wait 2.2s (longer than the old 1000ms timer!) — verify NO Gist PATCH spam fired mid-study!
+  await page.waitForTimeout(2200);
+  expect(patchBodies.length).toBe(0);
+
+  // Now exit the study session -> immediately flushes both graded cards in ONE single PATCH!
+  await page.getByRole('button', { name: 'Exit study session' }).click();
+  await expect(page.getByRole('heading', { name: 'My Deck' })).toBeVisible();
+  await expect.poll(() => patchBodies.length, { timeout: 5000 }).toBe(1);
+
+  const masteredInSingleCommit = patchBodies[0].cards.filter((c: any) => c.status === 'Mastered');
+  expect(masteredInSingleCommit.length).toBe(2);
+
+  // Also verify Data Manager shows truthful rate-limit message (NOT "invalid token") if GitHub returns 403 cooldown
+  simulateRateLimitOnManualPull = true;
+  await page.getByTitle('Manage Data').click();
+  await page.getByRole('button', { name: 'Load from Cloud' }).click();
+  await expect(
+    page.getByText(/rate limit reached due to rapid updates \(your token is valid\)/i)
+  ).toBeVisible({ timeout: 5000 });
+  await expect(page.getByText(/invalid or lacks/i)).toHaveCount(0);
+});
+

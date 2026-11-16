@@ -359,7 +359,13 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
     } catch (error: any) {
       const msg = error.message || `Failed to ${action} cloud data`;
       showMessage('error', msg);
-      if (msg.toLowerCase().includes('not found') && !isGistConnected) {
+      const lower = msg.toLowerCase();
+      if (lower.includes('not found') && !isGistConnected) {
+        setIsMigratingCloud(true);
+      } else if (
+        isGistConnected &&
+        (lower.includes('invalid, expired, or revoked') || lower.includes('missing "gist" permission'))
+      ) {
         setIsMigratingCloud(true);
       }
     } finally {

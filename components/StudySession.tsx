@@ -551,6 +551,7 @@ export const StudySession: React.FC<StudySessionProps> = ({
       <div className="flex items-center justify-between mb-4 sm:mb-6 px-1 sm:px-4 shrink-0">
         <button
           onClick={onExit}
+          aria-label="Exit study session"
           className="p-2 -ml-1 sm:-ml-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"
         >
           <ArrowLeft className="h-5 w-5 sm:h-6 sm:w-6" />

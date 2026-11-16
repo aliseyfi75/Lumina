@@ -16,16 +16,19 @@ interface GistSyncCacheState {
   etag?: string;
   payloadHash: string;
   partCount?: number;
+  partHashes?: Record<string, string>;
   cachedData?: CloudData;
   updatedAt: number;
 }
 
 const gistSyncMemoryCache = new Map<string, GistSyncCacheState>();
+const gistWriteChains = new Map<string, Promise<unknown>>();
 
 const getGistCacheStorageKey = (gistId: string) => `lumina_gist_sync_cache_${gistId.trim()}`;
 
 export const clearGistSyncCacheForTests = () => {
   gistSyncMemoryCache.clear();
+  gistWriteChains.clear();
   try {
     if (typeof localStorage !== 'undefined') {
       const keysToRemove: string[] = [];
@@ -42,15 +45,114 @@ export const clearGistSyncCacheForTests = () => {
   }
 };
 
+export const cleanGitHubToken = (rawToken?: string): string =>
+  (rawToken || '')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .trim()
+    .replace(/^["']+|["']+$/g, '')
+    .replace(/^(?:Bearer|token)\s+/i, '')
+    .trim();
+
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+const extractRateLimitWaitSeconds = (res: Response, bodyText: string): number | null => {
+  const retryAfterHeader = res.headers.get('retry-after');
+  if (retryAfterHeader) {
+    const parsed = Number(retryAfterHeader.trim());
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.ceil(parsed);
+    }
+  }
+
+  const remaining = res.headers.get('x-ratelimit-remaining');
+  const reset = res.headers.get('x-ratelimit-reset');
+  const isRateLimitStatus =
+    res.status === 429 ||
+    remaining === '0' ||
+    /rate limit|secondary rate limit|abuse detection/i.test(bodyText);
+
+  if (!isRateLimitStatus) return null;
+
+  if (reset && remaining === '0') {
+    const resetEpochSec = Number(reset.trim());
+    if (Number.isFinite(resetEpochSec) && resetEpochSec > 0) {
+      const diffSec = Math.ceil(resetEpochSec - Date.now() / 1000);
+      if (diffSec > 0) return diffSec;
+    }
+  }
+
+  // GitHub secondary rate limits typically cool down within 30–60 seconds
+  return 45;
+};
+
+const throwDescriptiveGitHubAuthOrRateError = async (
+  res: Response,
+  fallbackAction: string
+): Promise<never> => {
+  const rawText = await res.text().catch(() => '');
+  let apiMessage = '';
+  try {
+    const parsed = JSON.parse(rawText);
+    if (parsed && typeof parsed.message === 'string') {
+      apiMessage = parsed.message.trim();
+    }
+  } catch {
+    apiMessage = rawText.trim();
+  }
+
+  if (res.status === 401) {
+    throw new Error(
+      'GitHub token is invalid, expired, or revoked. Please check your token or generate a new Classic Personal Access Token with the "gist" scope.'
+    );
+  }
+
+  const rateLimitWaitSec = extractRateLimitWaitSeconds(res, apiMessage || rawText);
+  if (rateLimitWaitSec !== null) {
+    throw new Error(
+      `GitHub Gist rate limit reached due to rapid updates (your token is valid). Please wait ~${rateLimitWaitSec}s and try again.`
+    );
+  }
+
+  if (res.status === 403) {
+    const oauthScopes = res.headers.get('x-oauth-scopes');
+    const hasGistScope =
+      oauthScopes !== null &&
+      oauthScopes
+        .split(',')
+        .map(s => s.trim().toLowerCase())
+        .includes('gist');
+
+    if (
+      (oauthScopes !== null && !hasGistScope) ||
+      /not accessible by personal access token|insufficient|scope/i.test(apiMessage)
+    ) {
+      throw new Error(
+        'GitHub token is missing "gist" permission. Please generate a Classic Personal Access Token (ghp_...) with the "gist" scope checked.'
+      );
+    }
+
+    throw new Error(
+      apiMessage
+        ? `GitHub Gist access temporarily blocked (403): ${apiMessage}`
+        : `Unable to ${fallbackAction} (403 Forbidden). Please wait a moment and try again.`
+    );
+  }
+
+  throw new Error(
+    apiMessage
+      ? `Failed to ${fallbackAction} (${res.status}): ${apiMessage}`
+      : `Failed to ${fallbackAction} (${res.status}): ${res.statusText}`
+  );
+};
 
 const gistFetch = async (
   url: string,
   init: RequestInit,
-  options?: { retries?: number; timeoutMs?: number }
+  options?: { retries?: number; timeoutMs?: number; maxRateLimitWaitMs?: number }
 ): Promise<Response> => {
   const retries = options?.retries ?? 2;
   const timeoutMs = options?.timeoutMs ?? 25_000;
+  const maxRateLimitWaitMs = options?.maxRateLimitWaitMs ?? 8_000;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
@@ -72,6 +174,19 @@ const gistFetch = async (
         await sleep(350 * (attempt + 1));
         continue;
       }
+
+      if ((res.status === 429 || res.status === 403) && attempt < retries) {
+        const clonedText = await res
+          .clone()
+          .text()
+          .catch(() => '');
+        const waitSec = extractRateLimitWaitSeconds(res, clonedText);
+        if (waitSec !== null && waitSec * 1000 <= maxRateLimitWaitMs) {
+          await sleep(waitSec * 1000 + 150);
+          continue;
+        }
+      }
+
       return res;
     } catch (err: any) {
       if (timer) clearTimeout(timer);
@@ -245,7 +360,7 @@ export const hasPendingGistSyncChanges = (gistId: string, cloudData: CloudData):
 
 const buildHeaders = (token: string, extra?: Record<string, string>): Record<string, string> => ({
   Accept: 'application/vnd.github+json',
-  Authorization: `Bearer ${token.trim()}`,
+  Authorization: `Bearer ${cleanGitHubToken(token)}`,
   'X-GitHub-Api-Version': '2022-11-28',
   ...extra,
 });
@@ -357,7 +472,7 @@ const splitCardsForGistParts = (
 const extractDeckFromGistObject = async (
   gist: GitHubGistResponse,
   token: string
-): Promise<{ cloudData: CloudData; partCount: number }> => {
+): Promise<{ cloudData: CloudData; partCount: number; partHashes: Record<string, string> }> => {
   const files = gist.files || {};
   let targetFile: GitHubGistFile | undefined;
 
@@ -378,6 +493,7 @@ const extractDeckFromGistObject = async (
     return {
       cloudData: { cards: [], chunkCount: 1, basketExists: false },
       partCount: 1,
+      partHashes: {},
     };
   }
 
@@ -387,6 +503,7 @@ const extractDeckFromGistObject = async (
     return {
       cloudData: { cards: [], chunkCount: 1, basketExists: false },
       partCount: 1,
+      partHashes: {},
     };
   }
 
@@ -396,15 +513,25 @@ const extractDeckFromGistObject = async (
   const declaredPartCount =
     typeof parsed.partCount === 'number' && parsed.partCount > 1 ? Math.floor(parsed.partCount) : 1;
 
+  const partHashes: Record<string, string> = {};
   if (declaredPartCount > 1) {
     for (let partNum = 2; partNum <= declaredPartCount; partNum++) {
-      const partFile = files[getPartFilename(partNum)];
+      const partFilename = getPartFilename(partNum);
+      const partFile = files[partFilename];
       if (!partFile) continue;
       const partText = await downloadFullGistFileContent(partFile, token);
       if (!partText.trim()) continue;
       const parsedPart = JSON.parse(partText);
       if (Array.isArray(parsedPart.cards)) {
         rawCards = rawCards.concat(parsedPart.cards);
+        const canonicalPartContent = JSON.stringify({
+          partIndex: partNum,
+          cards: sanitizeCardsForGist(normalizeCardsFromGist(parsedPart.cards)),
+        });
+        // Only mark cached part hash as clean if remote file already matches canonical format (no legacy updatedAt)
+        if (parsedPart.updatedAt === undefined) {
+          partHashes[partFilename] = computeFastHash(canonicalPartContent);
+        }
       }
     }
   }
@@ -412,6 +539,7 @@ const extractDeckFromGistObject = async (
   const cards = normalizeCardsFromGist(rawCards);
   return {
     partCount: declaredPartCount,
+    partHashes,
     cloudData: {
       cards,
       studyHistory: parsed.studyHistory && typeof parsed.studyHistory === 'object' ? parsed.studyHistory : {},
@@ -440,7 +568,7 @@ export const findOrCreateLuminaGist = async (
   preferredGistId?: string,
   onProgress?: (info: ChunkProgressInfo) => void
 ): Promise<{ gistId: string; created: boolean; createdNewGist: boolean; existingData: CloudData }> => {
-  const cleanToken = token.trim();
+  const cleanToken = cleanGitHubToken(token);
   if (!cleanToken) {
     throw new Error('GitHub Personal Access Token is required.');
   }
@@ -461,22 +589,25 @@ export const findOrCreateLuminaGist = async (
       cache: 'no-store',
       headers: buildHeaders(cleanToken),
     });
-    if (res.status === 401 || res.status === 403) {
-      throw new Error('Invalid GitHub token or missing "gist" permission.');
-    }
     if (res.status === 404) {
-      throw new Error(`Gist ID "${cleanPreferredId}" was not found. Leave Gist ID blank to auto-detect or create a new one.`);
+      throw new Error(
+        `Gist ID "${cleanPreferredId}" was not found. Leave Gist ID blank to auto-detect or create a new one.`
+      );
     }
     if (!res.ok) {
-      throw new Error(`GitHub API error (${res.status}): ${res.statusText}`);
+      await throwDescriptiveGitHubAuthOrRateError(res, 'verify GitHub Gist');
     }
     const etag = res.headers.get('etag') || undefined;
     const gist = (await res.json()) as GitHubGistResponse;
-    const { cloudData: existingData, partCount } = await extractDeckFromGistObject(gist, cleanToken);
+    const { cloudData: existingData, partCount, partHashes } = await extractDeckFromGistObject(
+      gist,
+      cleanToken
+    );
     saveGistSyncCache(gist.id, {
       etag,
       payloadHash: computeGistPayloadHash(existingData),
       partCount,
+      partHashes,
       cachedData: existingData,
       updatedAt: Date.now(),
     });
@@ -498,11 +629,8 @@ export const findOrCreateLuminaGist = async (
     headers: buildHeaders(cleanToken),
   });
 
-  if (listRes.status === 401 || listRes.status === 403) {
-    throw new Error('Invalid GitHub token or missing "gist" permission. Please generate a token with the "gist" scope.');
-  }
   if (!listRes.ok) {
-    throw new Error(`Unable to reach GitHub Gist API (${listRes.status}).`);
+    await throwDescriptiveGitHubAuthOrRateError(listRes, 'check GitHub Gist account');
   }
 
   const gists = (await listRes.json()) as GitHubGistResponse[];
@@ -558,8 +686,7 @@ export const findOrCreateLuminaGist = async (
   });
 
   if (!createRes.ok) {
-    const errText = await createRes.text().catch(() => createRes.statusText);
-    throw new Error(`Failed to create GitHub Gist (${createRes.status}): ${errText}`);
+    await throwDescriptiveGitHubAuthOrRateError(createRes, 'create GitHub Gist');
   }
 
   const created = (await createRes.json()) as GitHubGistResponse;
@@ -568,6 +695,7 @@ export const findOrCreateLuminaGist = async (
     etag: createRes.headers.get('etag') || undefined,
     payloadHash: computeGistPayloadHash(emptyDeck),
     partCount: 1,
+    partHashes: {},
     cachedData: emptyDeck,
     updatedAt: Date.now(),
   });
@@ -592,7 +720,7 @@ export const getGistDeck = async (
     onProgress?: (info: ChunkProgressInfo) => void;
   }
 ): Promise<CloudData> => {
-  const cleanToken = token.trim();
+  const cleanToken = cleanGitHubToken(token);
   const cleanId = normalizeGistId(gistId);
   if (!cleanToken || !cleanId) {
     throw new Error('GitHub token and Gist ID are required.');
@@ -633,24 +761,22 @@ export const getGistDeck = async (
     return cached.cachedData;
   }
 
-  if (res.status === 401 || res.status === 403) {
-    throw new Error('GitHub token is invalid or lacks "gist" permission.');
-  }
   if (res.status === 404) {
     throw new Error(`GitHub Gist "${cleanId}" not found.`);
   }
   if (!res.ok) {
-    throw new Error(`Failed to load from GitHub Gist (${res.status}): ${res.statusText}`);
+    await throwDescriptiveGitHubAuthOrRateError(res, 'load from GitHub Gist');
   }
 
   const etag = res.headers.get('etag') || undefined;
   const gist = (await res.json()) as GitHubGistResponse;
-  const { cloudData, partCount } = await extractDeckFromGistObject(gist, cleanToken);
+  const { cloudData, partCount, partHashes } = await extractDeckFromGistObject(gist, cleanToken);
 
   saveGistSyncCache(cleanId, {
     etag,
     payloadHash: computeGistPayloadHash(cloudData),
     partCount,
+    partHashes,
     cachedData: cloudData,
     updatedAt: Date.now(),
   });
@@ -668,10 +794,24 @@ export const getGistDeck = async (
   return cloudData;
 };
 
+const runSerializedGistWrite = async <T>(gistId: string, fn: () => Promise<T>): Promise<T> => {
+  const prev = gistWriteChains.get(gistId) ?? Promise.resolve();
+  const next = prev.catch(() => undefined).then(fn);
+  gistWriteChains.set(
+    gistId,
+    next.finally(() => {
+      if (gistWriteChains.get(gistId) === next) {
+        gistWriteChains.delete(gistId);
+      }
+    })
+  );
+  return next;
+};
+
 /**
  * Saves the complete flashcard deck to a GitHub Gist in a single PATCH request (< 1s).
- * Automatically uses compact JSON and splits >750 KB decks across multi-part files within the same Gist
- * so no file ever crosses GitHub's 1 MB inline truncation threshold.
+ * Automatically uses compact JSON, splits >750 KB decks across multi-part files within the same Gist,
+ * and omits unchanged overflow part files so rapid updates stay lightweight and avoid GitHub secondary rate limits.
  */
 export const updateGistDeck = async (
   token: string,
@@ -684,125 +824,70 @@ export const updateGistDeck = async (
     onProgress?: (info: ChunkProgressInfo) => void;
   }
 ): Promise<{ skippedUnchanged: boolean }> => {
-  const cleanToken = token.trim();
+  const cleanToken = cleanGitHubToken(token);
   const cleanId = normalizeGistId(gistId);
   if (!cleanToken || !cleanId) {
     throw new Error('GitHub token and Gist ID are required.');
   }
 
-  const payloadHash = computeGistPayloadHash(cloudData);
-  const cached = loadGistSyncCache(cleanId);
-  if (!options?.force && cached && cached.payloadHash === payloadHash) {
+  return runSerializedGistWrite(cleanId, async () => {
+    const payloadHash = computeGistPayloadHash(cloudData);
+    const cached = loadGistSyncCache(cleanId);
+    if (!options?.force && cached && cached.payloadHash === payloadHash) {
+      options?.onProgress?.({
+        currentChunk: 1,
+        totalChunks: 1,
+        completedSteps: 1,
+        totalSteps: 1,
+        percent: 100,
+        step: 'All flashcards already synced to GitHub Gist!',
+        estimatedRemainingSec: 0,
+      });
+      return { skippedUnchanged: true };
+    }
+
+    const sanitizedCards = sanitizeCardsForGist(cloudData.cards || []);
+    const orderedCards = [...sanitizedCards].sort(
+      (a, b) => (a.createdAt || 0) - (b.createdAt || 0) || (a.id || '').localeCompare(b.id || '')
+    );
+
     options?.onProgress?.({
       currentChunk: 1,
       totalChunks: 1,
-      completedSteps: 1,
+      completedSteps: 0,
       totalSteps: 1,
-      percent: 100,
-      step: 'All flashcards already synced to GitHub Gist!',
-      estimatedRemainingSec: 0,
+      percent: 45,
+      step: `Saving ${orderedCards.length} flashcards to GitHub Gist...`,
+      estimatedRemainingSec: 1,
     });
-    return { skippedUnchanged: true };
-  }
 
-  const sanitizedCards = sanitizeCardsForGist(cloudData.cards || []);
-  const orderedCards = [...sanitizedCards].sort(
-    (a, b) => (a.createdAt || 0) - (b.createdAt || 0) || (a.id || '').localeCompare(b.id || '')
-  );
+    const maxPartBytes = options?.maxBytesPerPart ?? MAX_GIST_PART_BYTES;
+    const now = Date.now();
+    const metadataEnvelopeBytes =
+      new Blob([
+        JSON.stringify({
+          cards: [],
+          studyHistory: cloudData.studyHistory || {},
+          longestStreak: cloudData.longestStreak || 0,
+          deletedCards: cloudData.deletedCards || {},
+          languagePreference: cloudData.languagePreference,
+          languagePreferenceUpdatedAt: cloudData.languagePreferenceUpdatedAt,
+          partCount: 99,
+          updatedAt: now,
+        }),
+      ]).size + 128;
 
-  options?.onProgress?.({
-    currentChunk: 1,
-    totalChunks: 1,
-    completedSteps: 0,
-    totalSteps: 1,
-    percent: 45,
-    step: `Saving ${orderedCards.length} flashcards to GitHub Gist...`,
-    estimatedRemainingSec: 1,
-  });
+    const firstFileMaxCardBytes = Math.max(4 * 1024, maxPartBytes - metadataEnvelopeBytes);
+    const overflowFileMaxCardBytes = Math.max(4 * 1024, maxPartBytes - 256);
+    const cardParts = splitCardsForGistParts(
+      orderedCards,
+      firstFileMaxCardBytes,
+      overflowFileMaxCardBytes
+    );
+    const partCount = cardParts.length;
 
-  const maxPartBytes = options?.maxBytesPerPart ?? MAX_GIST_PART_BYTES;
-  const now = Date.now();
-  const metadataEnvelopeBytes =
-    new Blob([
-      JSON.stringify({
-        cards: [],
-        studyHistory: cloudData.studyHistory || {},
-        longestStreak: cloudData.longestStreak || 0,
-        deletedCards: cloudData.deletedCards || {},
-        languagePreference: cloudData.languagePreference,
-        languagePreferenceUpdatedAt: cloudData.languagePreferenceUpdatedAt,
-        partCount: 99,
-        updatedAt: now,
-      }),
-    ]).size + 128;
-
-  const firstFileMaxCardBytes = Math.max(4 * 1024, maxPartBytes - metadataEnvelopeBytes);
-  const overflowFileMaxCardBytes = Math.max(4 * 1024, maxPartBytes - 256);
-  const cardParts = splitCardsForGistParts(orderedCards, firstFileMaxCardBytes, overflowFileMaxCardBytes);
-  const partCount = cardParts.length;
-
-  const mainFileContent = JSON.stringify({
-    cards: cardParts[0] || [],
-    studyHistory: cloudData.studyHistory || {},
-    longestStreak: cloudData.longestStreak || 0,
-    deletedCards: cloudData.deletedCards || {},
-    ...(cloudData.languagePreference ? { languagePreference: cloudData.languagePreference } : {}),
-    ...(cloudData.languagePreferenceUpdatedAt
-      ? { languagePreferenceUpdatedAt: cloudData.languagePreferenceUpdatedAt }
-      : {}),
-    ...(partCount > 1 ? { partCount } : {}),
-    updatedAt: now,
-  });
-
-  const gistFilesPayload: Record<string, { content: string } | null> = {
-    [GIST_FILENAME]: {
-      content: mainFileContent,
-    },
-  };
-
-  for (let i = 1; i < partCount; i++) {
-    gistFilesPayload[getPartFilename(i + 1)] = {
-      content: JSON.stringify({
-        partIndex: i + 1,
-        cards: cardParts[i],
-        updatedAt: now,
-      }),
-    };
-  }
-
-  // Delete any obsolete higher-numbered overflow part files from a previously larger deck
-  const previousPartCount = Math.max(cached?.partCount ?? 1, cloudData.chunkCount ?? 1);
-  for (let obsoletePart = partCount + 1; obsoletePart <= previousPartCount; obsoletePart++) {
-    gistFilesPayload[getPartFilename(obsoletePart)] = null;
-  }
-
-  const res = await gistFetch(`${GIST_API_BASE}/${cleanId}`, {
-    method: 'PATCH',
-    headers: buildHeaders(cleanToken, { 'Content-Type': 'application/json' }),
-    body: JSON.stringify({
-      description: GIST_DESCRIPTION,
-      files: gistFilesPayload,
-    }),
-  });
-
-  if (res.status === 401 || res.status === 403) {
-    throw new Error('GitHub token is invalid or lacks "gist" permission.');
-  }
-  if (res.status === 404) {
-    throw new Error(`GitHub Gist "${cleanId}" not found.`);
-  }
-  if (!res.ok) {
-    const errText = await res.text().catch(() => res.statusText);
-    throw new Error(`Failed to save to GitHub Gist (${res.status}): ${errText}`);
-  }
-
-  const etag = res.headers.get('etag') || undefined;
-  saveGistSyncCache(cleanId, {
-    etag,
-    payloadHash,
-    partCount,
-    cachedData: {
-      cards: orderedCards,
+    const mainFileContent = JSON.stringify({
+      cards: cardParts[0] || [],
       studyHistory: cloudData.studyHistory || {},
       longestStreak: cloudData.longestStreak || 0,
       deletedCards: cloudData.deletedCards || {},
@@ -810,20 +895,89 @@ export const updateGistDeck = async (
       ...(cloudData.languagePreferenceUpdatedAt
         ? { languagePreferenceUpdatedAt: cloudData.languagePreferenceUpdatedAt }
         : {}),
-      chunkCount: partCount,
-      basketExists: true,
-    },
-    updatedAt: Date.now(),
-  });
+      ...(partCount > 1 ? { partCount } : {}),
+      updatedAt: now,
+    });
 
-  options?.onProgress?.({
-    currentChunk: partCount,
-    totalChunks: partCount,
-    completedSteps: 1,
-    totalSteps: 1,
-    percent: 100,
-    step: 'Saved to GitHub Gist!',
-    estimatedRemainingSec: 0,
+    const gistFilesPayload: Record<string, { content: string } | null> = {
+      [GIST_FILENAME]: {
+        content: mainFileContent,
+      },
+    };
+
+    const nextPartHashes: Record<string, string> = {};
+    for (let i = 1; i < partCount; i++) {
+      const partNum = i + 1;
+      const partFilename = getPartFilename(partNum);
+      const partContent = JSON.stringify({
+        partIndex: partNum,
+        cards: cardParts[i],
+      });
+      const partHash = computeFastHash(partContent);
+      nextPartHashes[partFilename] = partHash;
+
+      // Only send overflow part file if its card slice changed (or force is true)
+      if (options?.force || cached?.partHashes?.[partFilename] !== partHash) {
+        gistFilesPayload[partFilename] = {
+          content: partContent,
+        };
+      }
+    }
+
+    // Delete any obsolete higher-numbered overflow part files from a previously larger deck
+    const previousPartCount = Math.max(cached?.partCount ?? 1, cloudData.chunkCount ?? 1);
+    for (let obsoletePart = partCount + 1; obsoletePart <= previousPartCount; obsoletePart++) {
+      gistFilesPayload[getPartFilename(obsoletePart)] = null;
+    }
+
+    const res = await gistFetch(`${GIST_API_BASE}/${cleanId}`, {
+      method: 'PATCH',
+      headers: buildHeaders(cleanToken, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        description: GIST_DESCRIPTION,
+        files: gistFilesPayload,
+      }),
+    });
+
+    if (res.status === 404) {
+      throw new Error(`GitHub Gist "${cleanId}" not found.`);
+    }
+    if (!res.ok) {
+      await throwDescriptiveGitHubAuthOrRateError(res, 'save to GitHub Gist');
+    }
+
+    const etag = res.headers.get('etag') || undefined;
+    saveGistSyncCache(cleanId, {
+      etag,
+      payloadHash,
+      partCount,
+      partHashes: nextPartHashes,
+      cachedData: {
+        cards: orderedCards,
+        studyHistory: cloudData.studyHistory || {},
+        longestStreak: cloudData.longestStreak || 0,
+        deletedCards: cloudData.deletedCards || {},
+        ...(cloudData.languagePreference
+          ? { languagePreference: cloudData.languagePreference }
+          : {}),
+        ...(cloudData.languagePreferenceUpdatedAt
+          ? { languagePreferenceUpdatedAt: cloudData.languagePreferenceUpdatedAt }
+          : {}),
+        chunkCount: partCount,
+        basketExists: true,
+      },
+      updatedAt: Date.now(),
+    });
+
+    options?.onProgress?.({
+      currentChunk: partCount,
+      totalChunks: partCount,
+      completedSteps: 1,
+      totalSteps: 1,
+      percent: 100,
+      step: 'Saved to GitHub Gist!',
+      estimatedRemainingSec: 0,
+    });
+    return { skippedUnchanged: false };
   });
-  return { skippedUnchanged: false };
 };

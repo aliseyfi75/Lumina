@@ -888,7 +888,73 @@ const App: React.FC = () => {
     return () => clearInterval(intervalId);
   }, [isCloudSaving, isSyncingOffline]);
 
-  // 4. Auto-Save to Cloud (Delta-aware for both GitHub Gist and Pantry)
+  const lastAutoGistPushAtRef = useRef<number>(0);
+
+  const flushPendingGistSyncNow = useCallback(async () => {
+    const activeCfg = cloudConfigRef.current;
+    if (
+      !activeCfg ||
+      !isGistCloud(activeCfg) ||
+      !navigator.onLine ||
+      isMigratingCloudRef.current ||
+      isCloudSavingRef.current
+    ) {
+      return;
+    }
+
+    const latestDeleted = prunedDeletedCards();
+    const latestPref = languagePreferenceRef.current;
+    const latestPrefTs = languagePreferenceUpdatedAtRef.current;
+    if (
+      !hasPendingGistSyncChanges(activeCfg.gistId!, {
+        cards: cardsRef.current,
+        studyHistory: studyHistoryRef.current,
+        longestStreak: longestStreakRef.current,
+        deletedCards: latestDeleted,
+        languagePreference: latestPref,
+        languagePreferenceUpdatedAt: latestPrefTs,
+      })
+    ) {
+      setPendingCloudSync(false);
+      return;
+    }
+
+    beginCloudSyncProgress(cardsRef.current.length, 'push', 1);
+    setIsCloudSaving(true);
+    try {
+      await ensureInitialGistPullBeforePush(activeCfg);
+      await updateGistDeck(
+        activeCfg.gistToken!,
+        activeCfg.gistId!,
+        {
+          cards: cardsRef.current,
+          studyHistory: studyHistoryRef.current,
+          longestStreak: longestStreakRef.current,
+          deletedCards: prunedDeletedCards(),
+          languagePreference: languagePreferenceRef.current,
+          languagePreferenceUpdatedAt: languagePreferenceUpdatedAtRef.current,
+        },
+        { immediate: true, onProgress: handleBackgroundCloudProgress }
+      );
+      lastAutoGistPushAtRef.current = Date.now();
+      setPendingCloudSync(false);
+    } catch (error) {
+      console.error('Flush Gist sync failed:', error);
+      if (!navigator.onLine) {
+        setPendingCloudSync(true);
+      }
+    } finally {
+      setIsCloudSaving(false);
+      setCloudSyncProgress(null);
+    }
+  }, [
+    beginCloudSyncProgress,
+    ensureInitialGistPullBeforePush,
+    handleBackgroundCloudProgress,
+    prunedDeletedCards,
+  ]);
+
+  // 4. Auto-Save to Cloud (Delta-aware & rate-limit-safe for both GitHub Gist and Pantry)
   useEffect(() => {
     if (!isDataLoaded || !cloudConfig || isMigratingCloudRef.current) return;
 
@@ -928,7 +994,24 @@ const App: React.FC = () => {
       return;
     }
 
-    const debounceMs = usingGist ? 1000 : 2000;
+    // Wait until batch Persian translation backfill completes so all backfilled cards upload in 1 commit
+    if (usingGist && isBackfillingTranslations) {
+      return;
+    }
+
+    let debounceMs = 2000;
+    if (usingGist) {
+      const elapsedSinceLastPush =
+        lastAutoGistPushAtRef.current > 0 ? Date.now() - lastAutoGistPushAtRef.current : Infinity;
+      if (location.pathname === '/study') {
+        // Coalesce rapid card reviews during active study sessions so we never trigger GitHub's secondary rate limit;
+        // StudySession exit/completion and app backgrounding also flush immediately via flushPendingGistSyncNow().
+        debounceMs = Math.max(8_000, 25_000 - elapsedSinceLastPush);
+      } else {
+        debounceMs = Math.max(1_500, 10_000 - elapsedSinceLastPush);
+      }
+    }
+
     const timeoutId = setTimeout(async () => {
       if (isMigratingCloudRef.current) return;
       const latestDeleted = prunedDeletedCards();
@@ -965,6 +1048,7 @@ const App: React.FC = () => {
             },
             { onProgress: handleBackgroundCloudProgress }
           );
+          lastAutoGistPushAtRef.current = Date.now();
           setPendingCloudSync(false);
         } catch (error) {
           console.error('Auto-save Gist failed:', error);
@@ -1024,10 +1108,21 @@ const App: React.FC = () => {
     }, debounceMs);
     return () => clearTimeout(timeoutId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cards, studyHistory, longestStreak, deletedCards, languagePreference, languagePreferenceUpdatedAt, cloudConfig, isDataLoaded]);
+  }, [
+    cards,
+    studyHistory,
+    longestStreak,
+    deletedCards,
+    languagePreference,
+    languagePreferenceUpdatedAt,
+    cloudConfig,
+    isDataLoaded,
+    isBackfillingTranslations,
+    location.pathname,
+  ]);
 
-  // 4b. Auto-pull latest card statuses when returning to an already-open tab / installed iOS PWA
-  // (plus keep Pantry's 30-day TTL alive when Pantry is the active provider)
+  // 4b. Auto-pull latest card statuses when returning to an already-open tab / installed iOS PWA,
+  // and flush any pending Gist study reviews immediately when hiding/backgrounding the app
   useEffect(() => {
     if (!isDataLoaded || !cloudConfig) return;
     const GIST_FOCUS_PULL_THROTTLE_MS = 15 * 1000; // 15 seconds (uses fast 304 ETag conditional GET)
@@ -1036,6 +1131,10 @@ const App: React.FC = () => {
     let isAutoPullingOnFocus = false;
 
     const handleVisibilityOrFocus = async () => {
+      if (document.visibilityState === 'hidden') {
+        void flushPendingGistSyncNow();
+        return;
+      }
       if (
         document.visibilityState !== 'visible' ||
         !navigator.onLine ||
@@ -1097,13 +1196,19 @@ const App: React.FC = () => {
       }
     };
 
+    const handlePageHide = () => {
+      void flushPendingGistSyncNow();
+    };
+
     document.addEventListener('visibilitychange', handleVisibilityOrFocus);
     window.addEventListener('focus', handleVisibilityOrFocus);
+    window.addEventListener('pagehide', handlePageHide);
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
       window.removeEventListener('focus', handleVisibilityOrFocus);
+      window.removeEventListener('pagehide', handlePageHide);
     };
-  }, [cloudConfig, isDataLoaded, applyPulledSnapshotToState]);
+  }, [cloudConfig, isDataLoaded, applyPulledSnapshotToState, flushPendingGistSyncNow]);
 
   // 5. Flush pending sync when coming back online (or cloud config is restored)
   useEffect(() => {
@@ -2181,6 +2286,9 @@ const App: React.FC = () => {
 
   const handleSessionComplete = () => {
     recordActivity();
+    setTimeout(() => {
+      void flushPendingGistSyncNow();
+    }, 50);
   };
 
   const handleStartStudySession = (initialTag?: string, initialChapters?: string[]) => {
@@ -2876,7 +2984,10 @@ const App: React.FC = () => {
                 onReviewCard={handleReviewCard}
                 onRestoreCard={handleRestoreCard}
                 onSessionComplete={handleSessionComplete}
-                onExit={() => navigate('/flashcards')}
+                onExit={() => {
+                  void flushPendingGistSyncNow();
+                  navigate('/flashcards');
+                }}
                 languagePreference={languagePreference}
               />
             }

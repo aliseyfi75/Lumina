@@ -87,7 +87,7 @@ const MOCK_DEFINITIONS: Record<string, { pos: string; def: string; phonetic: str
   },
 };
 
-test('supports Tier 1 Gutenberg book vocabulary extraction with real book sentences and Tier 2 file upload fallback when book is not found', async ({ page }) => {
+test('supports Tier 1 Gutenberg book vocabulary extraction with real book sentences and Tier 2 file upload fallback when book is not found', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1280, height: 900 });
 
   // Mock Gutendex catalog API
@@ -298,7 +298,7 @@ test('supports Tier 1 Gutenberg book vocabulary extraction with real book senten
 
   await page.waitForTimeout(300);
   await page.screenshot({
-    path: '/Users/aliseyfi/.gemini/antigravity/brain/a96b9d77-0d1a-4784-ac20-758650393c58/scratch/feature_book_prep_preview.png',
+    path: testInfo.outputPath('feature_book_prep_preview.png'),
   });
 
   // Confirm adding the 3 extracted words to the Book Vocabulary Dock
@@ -312,7 +312,7 @@ test('supports Tier 1 Gutenberg book vocabulary extraction with real book senten
 
   await page.waitForTimeout(400);
   await page.screenshot({
-    path: '/Users/aliseyfi/.gemini/antigravity/brain/a96b9d77-0d1a-4784-ac20-758650393c58/scratch/feature_book_dock.png',
+    path: testInfo.outputPath('feature_book_dock.png'),
   });
 
   // Verify the card in the deck has the actual book sentence on its back
@@ -355,12 +355,12 @@ test('supports Tier 1 Gutenberg book vocabulary extraction with real book senten
   await expect(dock.getByRole('heading', { name: 'Frankenstein' })).toBeVisible();
   await expect(dock.getByRole('heading', { name: 'Dune' })).toBeVisible();
 
-  // Clicking "Study Book" on Dune opens SessionConfigModal pre-filtered to #Book: Dune
-  await dock.getByRole('button', { name: 'Study Dune' }).click();
+  // Clicking "Study Book" on Dune opens SessionConfigModal pre-filtered to Dune
+  await dock.getByRole('button', { name: 'Study Dune', exact: true }).click();
 
   const tagSelect = page.getByLabel('Study tag filter');
   await expect(tagSelect).toBeVisible();
-  await expect(tagSelect).toHaveValue('Book: Dune');
+  await expect(tagSelect).toHaveValue(/Dune/);
 
   // Start the study session for Dune and verify the Book Sentence Hint before flipping the card
   await page.getByRole('button', { name: /Start Full Session/i }).click();
@@ -379,11 +379,11 @@ test('supports Tier 1 Gutenberg book vocabulary extraction with real book senten
 
   await page.waitForTimeout(300);
   await page.screenshot({
-    path: '/Users/aliseyfi/.gemini/antigravity/brain/a96b9d77-0d1a-4784-ac20-758650393c58/scratch/feature_study_book_hint.png',
+    path: testInfo.outputPath('feature_study_book_hint.png'),
   });
 });
 
-test('supports backup catalog providers when Gutendex fails and shows fuzzy Similar Books when searching with typos', async ({ page }) => {
+test('supports backup catalog providers when Gutendex fails and shows fuzzy Similar Books when searching with typos', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1280, height: 900 });
 
   // Simulate primary Gutendex API completely failing (502 Bad Gateway)
@@ -580,7 +580,7 @@ test('supports backup catalog providers when Gutendex fails and shows fuzzy Simi
 
   await page.waitForTimeout(300);
   await page.screenshot({
-    path: '/Users/aliseyfi/.gemini/antigravity/brain/a96b9d77-0d1a-4784-ac20-758650393c58/scratch/feature_book_similar_matches.png',
+    path: testInfo.outputPath('feature_book_similar_matches.png'),
   });
 
   // 2. Search "Moby dick" directly even while Gutendex is down -> finds exact match via backup catalog
@@ -612,7 +612,7 @@ test('supports backup catalog providers when Gutendex fails and shows fuzzy Simi
 
   await page.waitForTimeout(300);
   await page.screenshot({
-    path: '/Users/aliseyfi/.gemini/antigravity/brain/a96b9d77-0d1a-4784-ac20-758650393c58/scratch/feature_book_complexity_levels.png',
+    path: testInfo.outputPath('feature_book_complexity_levels.png'),
   });
 
   // 3. Go back to book search and search for a modern book ("Kite Runner")

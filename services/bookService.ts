@@ -23,6 +23,8 @@ export interface GutenbergBook {
   source?: string;
   similarity?: number;
   iaId?: string;
+  iaCandidateIds?: string[];
+  pageCount?: number;
   wikisourceTitle?: string;
   openLibraryKey?: string;
   description?: string;
@@ -55,6 +57,8 @@ const GUTENDEX_API_URL = 'https://gutendex.com/books';
 const OPEN_LIBRARY_SEARCH_URL = 'https://openlibrary.org/search.json';
 const GOOGLE_BOOKS_API_URL = 'https://www.googleapis.com/books/v1/volumes';
 const INTERNET_ARCHIVE_SEARCH_URL = 'https://archive.org/advancedsearch.php';
+const INTERNET_ARCHIVE_METADATA_URL = 'https://archive.org/metadata';
+const INTERNET_ARCHIVE_DOWNLOAD_URL = 'https://archive.org/download';
 const WIKISOURCE_API_URL = 'https://en.wikisource.org/w/api.php';
 const WIKIPEDIA_API_URL = 'https://en.wikipedia.org/w/api.php';
 const DATAMUSE_API_URL = 'https://api.datamuse.com/words';
@@ -756,6 +760,38 @@ const fetchSpellingSuggestion = async (query: string): Promise<string | null> =>
   }
 };
 
+const DERIVATIVE_STUDY_GUIDE_REGEX =
+  /\b(?:study\s*guide|sparknotes|cliffsnotes|bookrags|litcharts?|quicklet|summary\s+and\s+analysis|summary\s+of\b|detailed\s+summary|plot\s+summary|book\s+review|teacher'?s?\s+guide|lesson\s+plans?|reading\s+guide|student'?s?\s+guide|workbook|critical\s+companion|trivia|discussion\s+questions|penguin\s+readers\s+level)\b/i;
+
+const USER_REQUESTED_GUIDE_REGEX =
+  /\b(?:study\s*guide|summary|sparknotes|cliffsnotes|review|notes|workbook|guide)\b/i;
+
+/**
+ * Excludes 5-page previews/pamphlets/metadata stubs (`pageCount < 25`) and third-party study guides/summaries
+ * unless the user explicitly searched for a guide or summary.
+ */
+export const isDerivativeOrTinyStubBook = (
+  title: string,
+  userQuery: string,
+  pageCount?: number
+): boolean => {
+  if (typeof pageCount === 'number' && Number.isFinite(pageCount) && pageCount > 0 && pageCount < 25) {
+    return true;
+  }
+  if (!USER_REQUESTED_GUIDE_REGEX.test(userQuery) && DERIVATIVE_STUDY_GUIDE_REGEX.test(title)) {
+    return true;
+  }
+  return false;
+};
+
+export const getCanonicalBookDedupeKey = (title: string): string => {
+  const stripped = title
+    .replace(/\s*;.*$/, '')
+    .replace(/\s*[:(\[-]\s*(?:a\s+)?(?:novel|memoir|romance|story|tale|book|classic|edition|complete\s+edition|unabridged)\b.*$/i, '')
+    .trim();
+  return normalizeSearchText(stripped || title);
+};
+
 const queryGutendex = async (query: string): Promise<GutenbergBook[]> => {
   try {
     const response = await fetchWithTimeout(
@@ -769,6 +805,9 @@ const queryGutendex = async (query: string): Promise<GutenbergBook[]> => {
     const books: GutenbergBook[] = [];
     for (const item of data.results) {
       if (!item || typeof item.title !== 'string') continue;
+      const cleanTitle = item.title.replace(/\s*;.*$/, '').trim();
+      if (isDerivativeOrTinyStubBook(cleanTitle, query)) continue;
+
       const id = Number(item.id) || 0;
       const formats = item.formats || {};
       const textUrl = pickBestTextUrl(formats, id);
@@ -777,9 +816,8 @@ const queryGutendex = async (query: string): Promise<GutenbergBook[]> => {
       const authors = Array.isArray(item.authors)
         ? item.authors.map((a: any) => formatAuthorName(String(a?.name || ''))).filter(Boolean)
         : [];
-      const cleanTitle = item.title.replace(/\s*;.*$/, '').trim();
       const classicMatch = CLASSIC_BOOKS_CATALOG.find(
-        c => c.id === id || normalizeSearchText(c.title) === normalizeSearchText(cleanTitle)
+        c => c.id === id || getCanonicalBookDedupeKey(c.title) === getCanonicalBookDedupeKey(cleanTitle)
       );
 
       books.push({
@@ -804,12 +842,12 @@ const queryGutendex = async (query: string): Promise<GutenbergBook[]> => {
 // Backup Provider 1: Open Library (supports both Public Domain and Modern Books; queries title= first for speed & precision)
 const queryOpenLibrary = async (query: string): Promise<GutenbergBook[]> => {
   try {
-    const fields = 'key,title,author_name,cover_i,ia,id_project_gutenberg,first_publish_year,ebook_access,first_sentence';
-    const titleUrl = `${OPEN_LIBRARY_SEARCH_URL}?title=${encodeURIComponent(query)}&limit=8&fields=${fields}`;
+    const fields = 'key,title,author_name,cover_i,ia,id_project_gutenberg,first_publish_year,ebook_access,first_sentence,number_of_pages_median';
+    const titleUrl = `${OPEN_LIBRARY_SEARCH_URL}?title=${encodeURIComponent(query)}&limit=10&fields=${fields}`;
     let response = await fetchWithTimeout(titleUrl, 5500);
     let data = response.ok ? await response.json() : null;
     if (!data || !Array.isArray(data.docs) || data.docs.length === 0) {
-      const qUrl = `${OPEN_LIBRARY_SEARCH_URL}?q=${encodeURIComponent(query)}&limit=8&fields=${fields}`;
+      const qUrl = `${OPEN_LIBRARY_SEARCH_URL}?q=${encodeURIComponent(query)}&limit=10&fields=${fields}`;
       response = await fetchWithTimeout(qUrl, 4500);
       data = response.ok ? await response.json() : null;
     }
@@ -818,9 +856,17 @@ const queryOpenLibrary = async (query: string): Promise<GutenbergBook[]> => {
     const books: GutenbergBook[] = [];
     for (const doc of data.docs) {
       if (!doc || typeof doc.title !== 'string') continue;
+      const cleanTitle = doc.title.replace(/\s*;.*$/, '').trim();
+      const medianPages =
+        typeof doc.number_of_pages_median === 'number' && doc.number_of_pages_median > 0
+          ? doc.number_of_pages_median
+          : undefined;
+      if (isDerivativeOrTinyStubBook(cleanTitle, query, medianPages)) continue;
 
       const pgIds: string[] = Array.isArray(doc.id_project_gutenberg) ? doc.id_project_gutenberg : [];
-      const iaIds: string[] = Array.isArray(doc.ia) ? doc.ia : [];
+      const iaIds: string[] = Array.isArray(doc.ia)
+        ? doc.ia.map((x: any) => String(x || '').trim()).filter(Boolean)
+        : [];
       const publishYear = typeof doc.first_publish_year === 'number' ? doc.first_publish_year : 9999;
       const isPublicDomain =
         pgIds.length > 0 ||
@@ -828,12 +874,11 @@ const queryOpenLibrary = async (query: string): Promise<GutenbergBook[]> => {
         (publishYear <= 1928 && iaIds.length > 0);
 
       const pgNum = pgIds[0] ? parseInt(String(pgIds[0]).replace(/\D+/g, ''), 10) : 0;
-      const iaId = iaIds[0] ? String(iaIds[0]) : undefined;
-      const cleanTitle = doc.title.replace(/\s*;.*$/, '').trim();
+      const iaId = iaIds[0];
       const classicMatch = CLASSIC_BOOKS_CATALOG.find(
         c =>
           (pgNum && c.id === pgNum) ||
-          normalizeSearchText(c.title.replace(/\s*;.*$/, '')) === normalizeSearchText(cleanTitle)
+          getCanonicalBookDedupeKey(c.title) === getCanonicalBookDedupeKey(cleanTitle)
       );
 
       const effectiveId = pgNum || classicMatch?.id || Math.abs(
@@ -844,8 +889,8 @@ const queryOpenLibrary = async (query: string): Promise<GutenbergBook[]> => {
         ? `https://www.gutenberg.org/cache/epub/${pgNum}/pg${pgNum}.txt`
         : classicMatch && !classicMatch.isModernBook
           ? `https://www.gutenberg.org/cache/epub/${classicMatch.id}/pg${classicMatch.id}.txt`
-          : isPublicDomain && iaId
-            ? `https://archive.org/download/${iaId}/${iaId}_djvu.txt`
+          : iaId
+            ? `${INTERNET_ARCHIVE_DOWNLOAD_URL}/${iaId}/${iaId}_djvu.txt`
             : `${WIKIPEDIA_API_URL}?origin=*&action=query&prop=extracts&explaintext=1&titles=${encodeURIComponent(cleanTitle)}&redirects=1&format=json`;
 
       const authors = Array.isArray(doc.author_name)
@@ -872,6 +917,8 @@ const queryOpenLibrary = async (query: string): Promise<GutenbergBook[]> => {
         textUrl,
         source: isPublicDomain ? 'Open Library' : 'Open Library (Modern)',
         iaId,
+        iaCandidateIds: iaIds.slice(0, 5),
+        pageCount: medianPages,
         openLibraryKey: typeof doc.key === 'string' ? doc.key : undefined,
         isModernBook: !isPublicDomain,
         description: firstSent || undefined,
@@ -891,7 +938,7 @@ const queryOpenLibrary = async (query: string): Promise<GutenbergBook[]> => {
 // Backup Provider 2: Google Books Public API (no key required, native CORS, rich modern book descriptions)
 const queryGoogleBooks = async (query: string): Promise<GutenbergBook[]> => {
   try {
-    const url = `${GOOGLE_BOOKS_API_URL}?q=${encodeURIComponent(query)}&maxResults=6&langRestrict=en`;
+    const url = `${GOOGLE_BOOKS_API_URL}?q=${encodeURIComponent(query)}&maxResults=8&langRestrict=en`;
     const response = await fetchWithTimeout(url, 4000);
     if (!response.ok) return [];
     const data = await response.json();
@@ -903,8 +950,12 @@ const queryGoogleBooks = async (query: string): Promise<GutenbergBook[]> => {
       if (!info || typeof info.title !== 'string') continue;
 
       const cleanTitle = info.title.replace(/\s*;.*$/, '').trim();
+      const pageCount =
+        typeof info.pageCount === 'number' && info.pageCount > 0 ? info.pageCount : undefined;
+      if (isDerivativeOrTinyStubBook(cleanTitle, query, pageCount)) continue;
+
       const classicMatch = CLASSIC_BOOKS_CATALOG.find(
-        c => normalizeSearchText(c.title.replace(/\s*;.*$/, '')) === normalizeSearchText(cleanTitle)
+        c => getCanonicalBookDedupeKey(c.title) === getCanonicalBookDedupeKey(cleanTitle)
       );
 
       const authors = Array.isArray(info.authors) && info.authors.length > 0
@@ -928,6 +979,7 @@ const queryGoogleBooks = async (query: string): Promise<GutenbergBook[]> => {
         coverUrl,
         textUrl: `${WIKIPEDIA_API_URL}?origin=*&action=query&prop=extracts&explaintext=1&titles=${encodeURIComponent(cleanTitle)}&redirects=1&format=json`,
         source: 'Google Books',
+        pageCount,
         isModernBook: classicMatch ? classicMatch.isModernBook : true,
         description: description || undefined,
         fallbackExcerpt: classicMatch?.excerpt,
@@ -966,8 +1018,9 @@ const queryWikisource = async (query: string): Promise<GutenbergBook[]> => {
       }
 
       const cleanTitle = rawTitle.replace(/\s*\([^)]*\)\s*$/, '').trim();
+      if (isDerivativeOrTinyStubBook(cleanTitle, query)) continue;
       const classicMatch = CLASSIC_BOOKS_CATALOG.find(
-        c => normalizeSearchText(c.title) === normalizeSearchText(cleanTitle)
+        c => getCanonicalBookDedupeKey(c.title) === getCanonicalBookDedupeKey(cleanTitle)
       );
 
       books.push({
@@ -991,11 +1044,11 @@ const queryWikisource = async (query: string): Promise<GutenbergBook[]> => {
   }
 };
 
-// Backup Provider 4: Internet Archive Texts Catalog (millions of books, native CORS, no API key)
+// Backup Provider 4: Internet Archive Open Full-Text Catalog (excludes restricted borrow-only `inlibrary` scans & tiny pamphlets)
 const queryInternetArchive = async (query: string): Promise<GutenbergBook[]> => {
   try {
-    const iaQuery = `title:(${query}) AND mediatype:(texts)`;
-    const url = `${INTERNET_ARCHIVE_SEARCH_URL}?q=${encodeURIComponent(iaQuery)}&fl[]=identifier&fl[]=title&fl[]=creator&fl[]=description&rows=6&page=1&output=json`;
+    const iaQuery = `title:(${query}) AND mediatype:(texts) AND NOT collection:(inlibrary) AND NOT collection:(printdisabled)`;
+    const url = `${INTERNET_ARCHIVE_SEARCH_URL}?q=${encodeURIComponent(iaQuery)}&fl[]=identifier&fl[]=title&fl[]=creator&fl[]=description&fl[]=imagecount&fl[]=downloads&sort[]=downloads+desc&rows=10&page=1&output=json`;
     const response = await fetchWithTimeout(url, 4500);
     if (!response.ok) return [];
     const data = await response.json();
@@ -1006,7 +1059,13 @@ const queryInternetArchive = async (query: string): Promise<GutenbergBook[]> => 
     for (const doc of docs) {
       if (!doc || typeof doc.title !== 'string' || typeof doc.identifier !== 'string') continue;
       const cleanTitle = doc.title.replace(/\s*;.*$/, '').trim();
-      const iaId = String(doc.identifier);
+      const rawImageCount = Number(doc.imagecount);
+      const pageCount = Number.isFinite(rawImageCount) && rawImageCount > 0 ? rawImageCount : undefined;
+      if (isDerivativeOrTinyStubBook(cleanTitle, query, pageCount)) continue;
+
+      const iaId = String(doc.identifier).trim();
+      if (!iaId) continue;
+
       const authors = Array.isArray(doc.creator)
         ? doc.creator.slice(0, 2).map((c: any) => String(c))
         : typeof doc.creator === 'string'
@@ -1019,7 +1078,7 @@ const queryInternetArchive = async (query: string): Promise<GutenbergBook[]> => 
           : undefined;
 
       const classicMatch = CLASSIC_BOOKS_CATALOG.find(
-        c => normalizeSearchText(c.title.replace(/\s*;.*$/, '')) === normalizeSearchText(cleanTitle)
+        c => getCanonicalBookDedupeKey(c.title) === getCanonicalBookDedupeKey(cleanTitle)
       );
       const effectiveId = classicMatch?.id || Math.abs(
         cleanTitle.split('').reduce((acc: number, ch: string) => ((acc << 5) - acc + ch.charCodeAt(0)) | 0, 0)
@@ -1030,15 +1089,17 @@ const queryInternetArchive = async (query: string): Promise<GutenbergBook[]> => 
         title: cleanTitle,
         authors,
         coverUrl: `https://archive.org/services/img/${iaId}`,
-        textUrl: `${WIKIPEDIA_API_URL}?origin=*&action=query&prop=extracts&explaintext=1&titles=${encodeURIComponent(cleanTitle)}&redirects=1&format=json`,
+        textUrl: `${INTERNET_ARCHIVE_DOWNLOAD_URL}/${iaId}/${iaId}_djvu.txt`,
         source: 'Internet Archive',
         iaId,
-        isModernBook: classicMatch ? classicMatch.isModernBook : true,
+        iaCandidateIds: [iaId],
+        pageCount,
+        isModernBook: classicMatch ? classicMatch.isModernBook : false,
         description,
         fallbackExcerpt: classicMatch?.excerpt,
       });
 
-      if (books.length >= 5) break;
+      if (books.length >= 6) break;
     }
     return books;
   } catch {
@@ -1066,11 +1127,12 @@ const queryWikipediaBooks = async (query: string): Promise<GutenbergBook[]> => {
       }
 
       const cleanTitle = rawTitle.replace(/\s*\((?:book|novel|memoir|[^)]*book[^)]*)\)\s*$/i, '').trim();
+      if (isDerivativeOrTinyStubBook(cleanTitle, query)) continue;
       const sim = computeBookSimilarity(query, cleanTitle);
       if (sim < 0.65) continue;
 
       const classicMatch = CLASSIC_BOOKS_CATALOG.find(
-        c => normalizeSearchText(c.title.replace(/\s*;.*$/, '')) === normalizeSearchText(cleanTitle)
+        c => getCanonicalBookDedupeKey(c.title) === getCanonicalBookDedupeKey(cleanTitle)
       );
       const effectiveId = classicMatch?.id || Number(hit.pageid) || Math.abs(
         cleanTitle.split('').reduce((acc: number, ch: string) => ((acc << 5) - acc + ch.charCodeAt(0)) | 0, 0)
@@ -1146,22 +1208,41 @@ export const searchPublicDomainBooks = async (query: string): Promise<BookSearch
   ) {
     const suggestedQuery = await fetchSpellingSuggestion(cleanQuery);
     if (suggestedQuery) {
-      const [retryGutendex, retryOpenLib, retryGoogle] = await Promise.all([
+      const [retryGutendex, retryOpenLib, retryGoogle, retryIa] = await Promise.all([
         queryGutendex(suggestedQuery),
         queryOpenLibrary(suggestedQuery),
         queryGoogleBooks(suggestedQuery),
+        queryInternetArchive(suggestedQuery),
       ]);
-      additionalBooks = [...retryGutendex, ...retryOpenLib, ...retryGoogle];
+      additionalBooks = [...retryGutendex, ...retryOpenLib, ...retryGoogle, ...retryIa];
     }
   }
 
-  // Merge and deduplicate by normalized primary title
+  // Merge and deduplicate by canonical primary title (collapsing `: A Novel` subtitle duplicates)
   const mergedMap = new Map<string, GutenbergBook>();
-  const getDedupeKey = (title: string) =>
-    normalizeSearchText(title.replace(/\s*;.*$/, ''));
+  const pickBetterTextUrl = (urlA: string, urlB: string): string => {
+    const rankUrl = (u: string) => {
+      if (!u) return 0;
+      if (u.includes('gutenberg.org')) return 4;
+      if (u.includes('archive.org/download')) return 3;
+      if (u.includes('wikisource.org')) return 2;
+      return 1;
+    };
+    return rankUrl(urlB) > rankUrl(urlA) ? urlB : urlA || urlB;
+  };
+
+  const pickBetterAuthors = (a: string[], b: string[]): string[] => {
+    const isGeneric = (arr: string[]) =>
+      arr.length === 0 ||
+      arr[0] === 'Unknown Author' ||
+      arr[0].includes('Catalog') ||
+      arr[0].includes('Wikisource');
+    return isGeneric(a) && !isGeneric(b) ? b : a;
+  };
 
   const addCandidate = (b: GutenbergBook, boostExact = false) => {
-    const key = getDedupeKey(b.title);
+    if (isDerivativeOrTinyStubBook(b.title, cleanQuery, b.pageCount)) return;
+    const key = getCanonicalBookDedupeKey(b.title);
     if (!key) return;
     const sim = Math.max(
       b.similarity ?? 0,
@@ -1170,15 +1251,47 @@ export const searchPublicDomainBooks = async (query: string): Promise<BookSearch
     );
     const existing = mergedMap.get(key);
     if (!existing) {
-      mergedMap.set(key, { ...b, similarity: sim });
+      mergedMap.set(key, {
+        ...b,
+        iaCandidateIds: Array.from(new Set([...(b.iaCandidateIds || []), ...(b.iaId ? [b.iaId] : [])])),
+        similarity: sim,
+      });
     } else {
+      // Put open Internet Archive IDs (`source === 'Internet Archive'`) ahead of potentially borrow-locked OpenLibrary IA IDs
+      const combinedIaIds =
+        b.source === 'Internet Archive'
+          ? Array.from(
+              new Set([
+                ...(b.iaCandidateIds || []),
+                ...(b.iaId ? [b.iaId] : []),
+                ...(existing.iaCandidateIds || []),
+                ...(existing.iaId ? [existing.iaId] : []),
+              ])
+            )
+          : Array.from(
+              new Set([
+                ...(existing.iaCandidateIds || []),
+                ...(existing.iaId ? [existing.iaId] : []),
+                ...(b.iaCandidateIds || []),
+                ...(b.iaId ? [b.iaId] : []),
+              ])
+            );
+
       mergedMap.set(key, {
         ...existing,
         id: existing.id || b.id,
-        title: existing.title.length >= b.title.length ? existing.title : b.title,
+        title:
+          existing.source === 'Project Gutenberg' || existing.source === 'Modern Classics'
+            ? existing.title
+            : existing.title.length <= b.title.length
+              ? existing.title
+              : b.title,
+        authors: pickBetterAuthors(existing.authors, b.authors),
         coverUrl: existing.coverUrl || b.coverUrl,
-        textUrl: existing.source === 'Project Gutenberg' ? existing.textUrl : b.textUrl || existing.textUrl,
-        iaId: existing.iaId || b.iaId,
+        textUrl: pickBetterTextUrl(existing.textUrl, b.textUrl),
+        iaId: combinedIaIds[0] || existing.iaId || b.iaId,
+        iaCandidateIds: combinedIaIds.slice(0, 6),
+        pageCount: Math.max(existing.pageCount ?? 0, b.pageCount ?? 0) || undefined,
         openLibraryKey: existing.openLibraryKey || b.openLibraryKey,
         description: [existing.description, b.description].filter(Boolean).join('\n\n') || undefined,
         wikisourceTitle: existing.wikisourceTitle || b.wikisourceTitle,
@@ -1188,14 +1301,14 @@ export const searchPublicDomainBooks = async (query: string): Promise<BookSearch
     }
   };
 
-  // Prioritize Gutendex direct results, then strong Classic/Modern matches, then Open Library, Google Books, Internet Archive, Wikipedia & Wikisource
+  // Prioritize Gutendex direct results, then strong Classic/Modern matches, then Internet Archive open full texts, Open Library, Google Books, Wikipedia & Wikisource
   for (const b of gutendexBooks) addCandidate(b, true);
   for (const { book, sim } of scoredClassics) {
     if (sim >= 0.55) addCandidate(book);
   }
+  for (const b of iaBooks) addCandidate(b);
   for (const b of openLibraryBooks) addCandidate(b);
   for (const b of googleBooks) addCandidate(b);
-  for (const b of iaBooks) addCandidate(b);
   for (const b of wikiBooks) addCandidate(b);
   for (const b of additionalBooks) addCandidate(b);
   for (const b of wikisourceBooks) addCandidate(b);
@@ -1208,9 +1321,9 @@ export const searchPublicDomainBooks = async (query: string): Promise<BookSearch
     .filter(b => (b.similarity ?? 0) >= 0.80)
     .slice(0, 6);
 
-  const exactKeys = new Set(exactMatches.map(b => getDedupeKey(b.title)));
+  const exactKeys = new Set(exactMatches.map(b => getCanonicalBookDedupeKey(b.title)));
   const similarMatches = allCandidates
-    .filter(b => !exactKeys.has(getDedupeKey(b.title)) && (b.similarity ?? 0) >= 0.55)
+    .filter(b => !exactKeys.has(getCanonicalBookDedupeKey(b.title)) && (b.similarity ?? 0) >= 0.55)
     .slice(0, 5);
 
   return { exactMatches, similarMatches };
@@ -1349,19 +1462,296 @@ const fetchOpenLibraryWorkDetails = async (openLibraryKey?: string): Promise<str
   }
 };
 
+const countApproximateWords = (text: string): number => {
+  if (!text) return 0;
+  let count = 0;
+  const matches = text.match(/\S+/g);
+  if (matches) count = matches.length;
+  return count;
+};
+
+const cleanInternetArchiveOcrText = (rawText: string): string => {
+  const stripped = stripGutenbergBoilerplate(rawText);
+  // Remove common Google/Internet Archive digitized cover-sheet boilerplate while preserving \f page breaks
+  return stripped
+    .replace(/This is a digital copy of a book that was preserved for generations[\s\S]{0,1800}?http:\/\/books\.google\.com\/?/gi, '')
+    .trim();
+};
+
+const extractTextFromEpubArrayBuffer = async (
+  buffer: ArrayBuffer,
+  defaultTitle: string
+): Promise<{ title: string; text: string }> => {
+  const zip = await JSZip.loadAsync(buffer);
+
+  let extractedTitle = defaultTitle;
+  const chapterFiles: string[] = [];
+
+  zip.forEach((relativePath, entry) => {
+    if (entry.dir) return;
+    const lower = relativePath.toLowerCase();
+    if (lower.endsWith('.opf')) {
+      chapterFiles.unshift(relativePath);
+    } else if (
+      (lower.endsWith('.xhtml') || lower.endsWith('.html') || lower.endsWith('.htm')) &&
+      !lower.includes('nav.') &&
+      !lower.includes('toc.') &&
+      !lower.includes('cover.')
+    ) {
+      chapterFiles.push(relativePath);
+    }
+  });
+
+  const paragraphs: string[] = [];
+  let epubChapterCounter = 0;
+  for (const path of chapterFiles) {
+    const entry = zip.file(path);
+    if (!entry) continue;
+    const rawContent = await entry.async('string');
+
+    if (path.toLowerCase().endsWith('.opf')) {
+      const titleMatch = rawContent.match(/<(?:dc:)?title[^>]*>([^<]+)<\/(?:dc:)?title>/i);
+      if (titleMatch?.[1]?.trim()) {
+        extractedTitle = titleMatch[1].trim();
+      }
+      continue;
+    }
+
+    const extractBody = (): string => {
+      if (typeof DOMParser !== 'undefined') {
+        const doc = new DOMParser().parseFromString(rawContent, 'text/html');
+        return doc.body?.textContent?.replace(/\s+/g, ' ').trim() || '';
+      }
+      return rawContent.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    };
+
+    const bodyText = extractBody();
+    if (bodyText && bodyText.length > 40) {
+      epubChapterCounter += 1;
+      const hasLeadingChapterHeading =
+        /^\s*(?:chapter|chap\.?|letter|part|book|prologue|epilogue)\b/i.test(bodyText);
+      paragraphs.push(hasLeadingChapterHeading ? bodyText : `Chapter ${epubChapterCounter}\n${bodyText}`);
+    }
+  }
+
+  const fullText = paragraphs.join('\n\n');
+  return { title: extractedTitle, text: fullText };
+};
+
+interface InternetArchiveMetadataFile {
+  name?: string;
+  format?: string;
+  size?: string | number;
+  private?: boolean | string;
+}
+
+/**
+ * Discovers and downloads full-length book text (`.txt`, `_djvu.txt`, or `.epub`) from open Internet Archive
+ * items so modern & classic novels (such as *The Kite Runner*) load all ~300–500 pages instead of a 5-page summary.
+ */
+export const fetchFullTextFromInternetArchive = async (
+  book: GutenbergBook
+): Promise<string | null> => {
+  const cleanPrimaryTitle = book.title.replace(/\s*;.*$/, '').trim();
+  const candidateIds: string[] = [];
+  const pushId = (raw?: string) => {
+    const clean = (raw || '').trim();
+    if (clean && !candidateIds.includes(clean)) {
+      candidateIds.push(clean);
+    }
+  };
+
+  for (const id of book.iaCandidateIds || []) pushId(id);
+  pushId(book.iaId);
+
+  // Search Internet Archive specifically for open (non-lending) full-text uploads matching this book
+  if (candidateIds.length < 3) {
+    try {
+      const authorLastName =
+        book.authors[0] &&
+        book.authors[0] !== 'Unknown Author' &&
+        !book.authors[0].includes('Catalog')
+          ? book.authors[0].trim().split(/\s+/).slice(-1)[0]
+          : '';
+      const authorClause =
+        authorLastName && authorLastName.length >= 3 ? ` AND creator:(${authorLastName})` : '';
+      const iaQuery = `title:("${cleanPrimaryTitle}")${authorClause} AND mediatype:(texts) AND NOT collection:(inlibrary) AND NOT collection:(printdisabled)`;
+      const searchUrl = `${INTERNET_ARCHIVE_SEARCH_URL}?q=${encodeURIComponent(iaQuery)}&fl[]=identifier&fl[]=title&fl[]=creator&fl[]=imagecount&fl[]=downloads&sort[]=downloads+desc&rows=6&page=1&output=json`;
+      const searchRes = await fetchWithTimeout(searchUrl, 4000);
+      if (searchRes.ok) {
+        const searchData = await searchRes.json();
+        const docs = Array.isArray(searchData?.response?.docs) ? searchData.response.docs : [];
+        for (const doc of docs) {
+          if (!doc || typeof doc.identifier !== 'string') continue;
+          const docTitle = String(doc.title || '').trim();
+          const imgCount = Number(doc.imagecount);
+          const pages = Number.isFinite(imgCount) && imgCount > 0 ? imgCount : undefined;
+          if (docTitle && isDerivativeOrTinyStubBook(docTitle, cleanPrimaryTitle, pages)) continue;
+          if (docTitle) {
+            const docAuthors = Array.isArray(doc.creator)
+              ? doc.creator.map((c: any) => String(c))
+              : typeof doc.creator === 'string'
+                ? [doc.creator]
+                : [];
+            const sim = computeBookSimilarity(cleanPrimaryTitle, docTitle, docAuthors);
+            if (sim < 0.68) continue;
+          }
+          pushId(doc.identifier);
+          if (candidateIds.length >= 5) break;
+        }
+      }
+    } catch {
+      // Proceed with existing candidateIds
+    }
+  }
+
+  if (candidateIds.length === 0) return null;
+
+  const MIN_FULL_BOOK_BYTES = 25_000; // ~4,000+ words (never a 5-page preview)
+  const MAX_FULL_BOOK_BYTES = 12_000_000;
+  const MIN_FULL_BOOK_WORDS = 3_500; // >= ~15 pages (real novels have 40,000–150,000 words)
+
+  for (const iaId of candidateIds.slice(0, 4)) {
+    try {
+      const metaRes = await fetchWithTimeout(
+        `${INTERNET_ARCHIVE_METADATA_URL}/${encodeURIComponent(iaId)}`,
+        3500
+      );
+      let textCandidates: string[] = [];
+      let epubCandidates: string[] = [];
+
+      if (metaRes.ok) {
+        const metaJson = await metaRes.json();
+        const metaTitle = String(metaJson?.metadata?.title || '').trim();
+        const metaImageCount = Number(metaJson?.metadata?.imagecount);
+        if (
+          metaTitle &&
+          isDerivativeOrTinyStubBook(
+            metaTitle,
+            cleanPrimaryTitle,
+            Number.isFinite(metaImageCount) && metaImageCount > 0 ? metaImageCount : undefined
+          )
+        ) {
+          continue;
+        }
+        if (metaTitle && computeBookSimilarity(cleanPrimaryTitle, metaTitle) < 0.5) {
+          continue;
+        }
+
+        const files: InternetArchiveMetadataFile[] = Array.isArray(metaJson?.files)
+          ? metaJson.files
+          : [];
+        const publicFiles = files.filter(
+          f =>
+            f &&
+            typeof f.name === 'string' &&
+            f.private !== true &&
+            String(f.private).toLowerCase() !== 'true'
+        );
+
+        const scoredTxt = publicFiles
+          .filter(f => {
+            const lower = f.name!.toLowerCase();
+            const fmt = String(f.format || '').toLowerCase();
+            if (
+              lower.endsWith('_meta.txt') ||
+              lower.endsWith('_files.xml') ||
+              lower.includes('readme') ||
+              lower.includes('license')
+            ) {
+              return false;
+            }
+            const isTxt =
+              fmt.includes('djvutxt') ||
+              fmt === 'text' ||
+              lower.endsWith('_djvu.txt') ||
+              lower.endsWith('.txt');
+            if (!isTxt) return false;
+            const sizeNum = Number(f.size);
+            if (Number.isFinite(sizeNum) && sizeNum > 0) {
+              return sizeNum >= MIN_FULL_BOOK_BYTES && sizeNum <= MAX_FULL_BOOK_BYTES;
+            }
+            return true;
+          })
+          .sort((a, b) => (Number(b.size) || 0) - (Number(a.size) || 0));
+
+        textCandidates = scoredTxt.map(
+          f => `${INTERNET_ARCHIVE_DOWNLOAD_URL}/${encodeURIComponent(iaId)}/${encodeURIComponent(f.name!)}`
+        );
+
+        const scoredEpub = publicFiles
+          .filter(f => {
+            const lower = f.name!.toLowerCase();
+            const fmt = String(f.format || '').toLowerCase();
+            if (!(fmt.includes('epub') || lower.endsWith('.epub'))) return false;
+            const sizeNum = Number(f.size);
+            if (Number.isFinite(sizeNum) && sizeNum > 0) {
+              return sizeNum >= MIN_FULL_BOOK_BYTES && sizeNum <= 15_000_000;
+            }
+            return true;
+          })
+          .sort((a, b) => (Number(a.size) || 0) - (Number(b.size) || 0));
+
+        epubCandidates = scoredEpub.map(
+          f => `${INTERNET_ARCHIVE_DOWNLOAD_URL}/${encodeURIComponent(iaId)}/${encodeURIComponent(f.name!)}`
+        );
+      } else {
+        // Fallback direct URL if metadata endpoint wasn't available
+        textCandidates = [
+          `${INTERNET_ARCHIVE_DOWNLOAD_URL}/${encodeURIComponent(iaId)}/${encodeURIComponent(iaId)}_djvu.txt`,
+        ];
+      }
+
+      for (const txtUrl of textCandidates.slice(0, 2)) {
+        try {
+          const res = await fetchWithTimeout(txtUrl, 7000);
+          if (!res.ok) continue;
+          const raw = await res.text();
+          const cleaned = cleanInternetArchiveOcrText(raw);
+          if (countApproximateWords(cleaned) >= MIN_FULL_BOOK_WORDS) {
+            return cleaned;
+          }
+        } catch {
+          // Try next text file
+        }
+      }
+
+      for (const epubUrl of epubCandidates.slice(0, 1)) {
+        try {
+          const res = await fetchWithTimeout(epubUrl, 8000);
+          if (!res.ok) continue;
+          const buf = await res.arrayBuffer();
+          const parsed = await extractTextFromEpubArrayBuffer(buf, book.title);
+          if (countApproximateWords(parsed.text) >= MIN_FULL_BOOK_WORDS) {
+            return parsed.text;
+          }
+        } catch {
+          // Try next IA candidate
+        }
+      }
+    } catch {
+      // Try next IA candidate
+    }
+  }
+
+  return null;
+};
+
 export const fetchGutenbergBookText = async (book: GutenbergBook): Promise<string> => {
-  const normBookPrimary = normalizeSearchText(book.title.replace(/\s*;.*$/, ''));
+  const normBookPrimary = getCanonicalBookDedupeKey(book.title);
   const classicMatch = CLASSIC_BOOKS_CATALOG.find(
-    c =>
-      c.id === book.id ||
-      normalizeSearchText(c.title.replace(/\s*;.*$/, '')) === normBookPrimary
+    c => c.id === book.id || getCanonicalBookDedupeKey(c.title) === normBookPrimary
   );
   const fallbackExcerpt = book.fallbackExcerpt || classicMatch?.excerpt;
 
-  // 1. Try direct book.textUrl first (fast path for mocked tests or CORS-enabled URLs)
-  if (!book.isModernBook && book.textUrl && !book.textUrl.includes('wikipedia.org')) {
+  // 1. Try direct non-Wikipedia, non-Archive book.textUrl first (fast path for Gutenberg & mocked test URLs)
+  if (
+    book.textUrl &&
+    !book.textUrl.includes('wikipedia.org') &&
+    !book.textUrl.includes('archive.org/download')
+  ) {
     try {
-      const directRes = await fetchWithTimeout(book.textUrl, 4000);
+      const directRes = await fetchWithTimeout(book.textUrl, 4500);
       if (directRes.ok) {
         const raw = await directRes.text();
         const cleaned = stripGutenbergBoilerplate(raw);
@@ -1370,11 +1760,63 @@ export const fetchGutenbergBookText = async (book: GutenbergBook): Promise<strin
         }
       }
     } catch {
-      // Proceed to backup mirrors & CORS proxies
+      // Proceed to Internet Archive & backup mirrors
     }
   }
 
-  // 2. Gather native-CORS sources in parallel (Wikisource + Wikipedia + Open Library Work Details)
+  // 2. Try full-length text / EPUB on Internet Archive (works for BOTH modern books like The Kite Runner AND classics)
+  const iaFullText = await fetchFullTextFromInternetArchive(book);
+  if (iaFullText) {
+    return iaFullText;
+  }
+
+  // 3. Try Gutenberg mirror URLs via CORS proxies for public-domain books before falling back to short summaries
+  if (!book.isModernBook) {
+    const rawGutenbergUrls = Array.from(
+      new Set([
+        book.textUrl,
+        ...(book.id > 0 && book.id < 100000
+          ? [
+              `https://www.gutenberg.org/cache/epub/${book.id}/pg${book.id}.txt`,
+              `https://www.gutenberg.org/files/${book.id}/${book.id}-0.txt`,
+            ]
+          : []),
+      ])
+    );
+
+    const proxyUrls: string[] = [];
+    for (const targetUrl of rawGutenbergUrls) {
+      if (
+        !targetUrl ||
+        targetUrl.includes('wikisource.org') ||
+        targetUrl.includes('wikipedia.org') ||
+        targetUrl.includes('archive.org')
+      ) {
+        continue;
+      }
+      proxyUrls.push(
+        `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`,
+        `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`,
+        `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`
+      );
+    }
+
+    for (const proxyUrl of proxyUrls.slice(0, 3)) {
+      try {
+        const res = await fetchWithTimeout(proxyUrl, 3500);
+        if (!res.ok) continue;
+        const raw = await res.text();
+        const cleaned = stripGutenbergBoilerplate(raw);
+        if (cleaned.length > 200 && !cleaned.startsWith('{"error"')) {
+          return cleaned;
+        }
+      } catch {
+        // Try next mirror/proxy
+      }
+    }
+  }
+
+  // 4. Last-resort fallback: Wikisource + Open Library Work Details + Wikipedia + built-in literary excerpt
   const [wikiSourceText, wikipediaText, openLibWorkText] = await Promise.all([
     !book.isModernBook ? fetchTextFromWikisource(book.wikisourceTitle || book.title) : Promise.resolve(null),
     fetchTextFromWikipedia(book.title, book.authors),
@@ -1392,50 +1834,6 @@ export const fetchGutenbergBookText = async (book: GutenbergBook): Promise<strin
     .join('\n\n')
     .trim();
 
-  if (combinedRichText.length > 8000) {
-    return combinedRichText;
-  }
-
-  // 3. Try Gutenberg mirror URLs via multiple independent CORS proxies if needed
-  if (!book.isModernBook) {
-    const rawGutenbergUrls = Array.from(
-      new Set([
-        book.textUrl,
-        ...(book.id > 0 && book.id < 100000
-          ? [
-              `https://www.gutenberg.org/cache/epub/${book.id}/pg${book.id}.txt`,
-              `https://www.gutenberg.org/files/${book.id}/${book.id}-0.txt`,
-            ]
-          : []),
-      ])
-    );
-
-    const proxyUrls: string[] = [];
-    for (const targetUrl of rawGutenbergUrls) {
-      if (targetUrl.includes('wikisource.org') || targetUrl.includes('wikipedia.org')) continue;
-      proxyUrls.push(
-        `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`,
-        `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`,
-        `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`
-      );
-    }
-
-    for (const proxyUrl of proxyUrls.slice(0, 3)) {
-      try {
-        const res = await fetchWithTimeout(proxyUrl, 3500);
-        if (!res.ok) continue;
-        const raw = await res.text();
-        const cleaned = stripGutenbergBoilerplate(raw);
-        if (cleaned.length > 200 && !cleaned.startsWith('{"error"')) {
-          return [combinedRichText, cleaned].filter(Boolean).join('\n\n');
-        }
-      } catch {
-        // Try next mirror/proxy
-      }
-    }
-  }
-
-  // 4. Use combined native-CORS + built-in authentic literary corpus excerpt if available
   if (combinedRichText.length > 80) {
     return combinedRichText;
   }
@@ -1457,64 +1855,13 @@ export const extractTextFromBookFile = async (
 
   if (isEpub) {
     const buffer = await file.arrayBuffer();
-    const zip = await JSZip.loadAsync(buffer);
-
-    let extractedTitle = defaultTitle;
-    const chapterFiles: string[] = [];
-
-    zip.forEach((relativePath, entry) => {
-      if (entry.dir) return;
-      const lower = relativePath.toLowerCase();
-      if (lower.endsWith('.opf')) {
-        chapterFiles.unshift(relativePath);
-      } else if (
-        (lower.endsWith('.xhtml') || lower.endsWith('.html') || lower.endsWith('.htm')) &&
-        !lower.includes('nav.') &&
-        !lower.includes('toc.') &&
-        !lower.includes('cover.')
-      ) {
-        chapterFiles.push(relativePath);
-      }
-    });
-
-    const paragraphs: string[] = [];
-    let epubChapterCounter = 0;
-    for (const path of chapterFiles) {
-      const entry = zip.file(path);
-      if (!entry) continue;
-      const rawContent = await entry.async('string');
-
-      if (path.toLowerCase().endsWith('.opf')) {
-        const titleMatch = rawContent.match(/<(?:dc:)?title[^>]*>([^<]+)<\/(?:dc:)?title>/i);
-        if (titleMatch?.[1]?.trim()) {
-          extractedTitle = titleMatch[1].trim();
-        }
-        continue;
-      }
-
-      if (typeof DOMParser !== 'undefined') {
-        const doc = new DOMParser().parseFromString(rawContent, 'text/html');
-        const bodyText = doc.body?.textContent?.replace(/\s+/g, ' ').trim();
-        if (bodyText && bodyText.length > 40) {
-          epubChapterCounter += 1;
-          const hasLeadingChapterHeading = /^\s*(?:chapter|chap\.?|letter|part|book|prologue|epilogue)\b/i.test(bodyText);
-          paragraphs.push(hasLeadingChapterHeading ? bodyText : `Chapter ${epubChapterCounter}\n${bodyText}`);
-        }
-      } else {
-        const stripped = rawContent.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-        if (stripped.length > 40) {
-          epubChapterCounter += 1;
-          const hasLeadingChapterHeading = /^\s*(?:chapter|chap\.?|letter|part|book|prologue|epilogue)\b/i.test(stripped);
-          paragraphs.push(hasLeadingChapterHeading ? stripped : `Chapter ${epubChapterCounter}\n${stripped}`);
-        }
-      }
-    }
-
-    const fullText = paragraphs.join('\n\n');
+    const { title: extractedTitle, text: fullText } = await extractTextFromEpubArrayBuffer(
+      buffer,
+      defaultTitle
+    );
     if (!fullText.trim()) {
       throw new Error('Could not extract readable text from this EPUB file.');
     }
-
     return { title: extractedTitle, text: fullText };
   }
 
@@ -1532,9 +1879,36 @@ const WORD_NUMBER_MAP: Record<string, number> = {
   six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
   eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15,
   sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20,
-  twentyone: 21, 'twenty-one': 21, twentytwo: 22, 'twenty-two': 22,
-  twentythree: 23, 'twenty-three': 23, twentyfour: 24, 'twenty-four': 24,
-  twentyfive: 25, 'twenty-five': 25, thirty: 30, forty: 40, fifty: 50,
+  twentyone: 21, 'twenty-one': 21, 'twenty one': 21,
+  twentytwo: 22, 'twenty-two': 22, 'twenty two': 22,
+  twentythree: 23, 'twenty-three': 23, 'twenty three': 23,
+  twentyfour: 24, 'twenty-four': 24, 'twenty four': 24,
+  twentyfive: 25, 'twenty-five': 25, 'twenty five': 25,
+  twentysix: 26, 'twenty-six': 26, 'twenty six': 26,
+  twentyseven: 27, 'twenty-seven': 27, 'twenty seven': 27,
+  twentyeight: 28, 'twenty-eight': 28, 'twenty eight': 28,
+  twentynine: 29, 'twenty-nine': 29, 'twenty nine': 29,
+  thirty: 30,
+  thirtyone: 31, 'thirty-one': 31, 'thirty one': 31,
+  thirtytwo: 32, 'thirty-two': 32, 'thirty two': 32,
+  thirtythree: 33, 'thirty-three': 33, 'thirty three': 33,
+  thirtyfour: 34, 'thirty-four': 34, 'thirty four': 34,
+  thirtyfive: 35, 'thirty-five': 35, 'thirty five': 35,
+  thirtysix: 36, 'thirty-six': 36, 'thirty six': 36,
+  thirtyseven: 37, 'thirty-seven': 37, 'thirty seven': 37,
+  thirtyeight: 38, 'thirty-eight': 38, 'thirty eight': 38,
+  thirtynine: 39, 'thirty-nine': 39, 'thirty nine': 39,
+  forty: 40,
+  fortyone: 41, 'forty-one': 41, 'forty one': 41,
+  fortytwo: 42, 'forty-two': 42, 'forty two': 42,
+  fortythree: 43, 'forty-three': 43, 'forty three': 43,
+  fortyfour: 44, 'forty-four': 44, 'forty four': 44,
+  fortyfive: 45, 'forty-five': 45, 'forty five': 45,
+  fortysix: 46, 'forty-six': 46, 'forty six': 46,
+  fortyseven: 47, 'forty-seven': 47, 'forty seven': 47,
+  fortyeight: 48, 'forty-eight': 48, 'forty eight': 48,
+  fortynine: 49, 'forty-nine': 49, 'forty nine': 49,
+  fifty: 50,
 };
 
 const parseRomanNumeral = (roman: string): number | null => {
@@ -1567,34 +1941,54 @@ const normalizeChapterTokenToNumber = (token: string): number | null => {
   return parseRomanNumeral(clean);
 };
 
-const matchChapterHeadingLine = (line: string): string | null => {
-  const trimmed = line.trim();
+const matchChapterHeadingLine = (
+  line: string,
+  options?: { allowStandaloneWordNumber?: boolean }
+): { label: string; isStandaloneWordNumber: boolean } | null => {
+  const trimmed = line.replace(/\f/g, '').trim();
   if (!trimmed || trimmed.length > 90) return null;
 
   if (/^(?:prologue|epilogue)[.:]?$/i.test(trimmed)) {
     const clean = trimmed.replace(/[.:]+$/, '');
-    return clean.charAt(0).toUpperCase() + clean.slice(1).toLowerCase();
+    return {
+      label: clean.charAt(0).toUpperCase() + clean.slice(1).toLowerCase(),
+      isStandaloneWordNumber: false,
+    };
   }
 
   const m = trimmed.match(
-    /^(chapter|chap\.?|letter|stave|canto|act)\s+([0-9]{1,3}|[ivxlcdm]{1,7}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty(?:[- ](?:one|two|three|four|five))?)(?:\b|\s*[:.\-—].*)$/i
+    /^(chapter|chap\.?|letter|stave|canto|act)\s+([0-9]{1,3}|[ivxlcdm]{1,7}|(?:twenty|thirty|forty)(?:[- ](?:one|two|three|four|five|six|seven|eight|nine))?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|fifty)(?:\b|\s*[:.\-—].*)$/i
   );
-  if (!m) return null;
+  if (m) {
+    const rawKind = m[1].toLowerCase();
+    const num = normalizeChapterTokenToNumber(m[2]);
+    if (!num) return null;
 
-  const rawKind = m[1].toLowerCase();
-  const num = normalizeChapterTokenToNumber(m[2]);
-  if (!num) return null;
+    const prefix = rawKind.startsWith('letter')
+      ? 'Letter'
+      : rawKind.startsWith('stave')
+        ? 'Stave'
+        : rawKind.startsWith('act')
+          ? 'Act'
+          : rawKind.startsWith('canto')
+            ? 'Canto'
+            : 'Chapter';
+    return { label: `${prefix} ${num}`, isStandaloneWordNumber: false };
+  }
 
-  const prefix = rawKind.startsWith('letter')
-    ? 'Letter'
-    : rawKind.startsWith('stave')
-      ? 'Stave'
-      : rawKind.startsWith('act')
-        ? 'Act'
-        : rawKind.startsWith('canto')
-          ? 'Canto'
-          : 'Chapter';
-  return `${prefix} ${num}`;
+  // Modern novels like *The Kite Runner* head chapters with standalone uppercase word numbers ("ONE", "TWO", ..., "TWENTY-FIVE")
+  if (options?.allowStandaloneWordNumber) {
+    const bareClean = trimmed.replace(/[.:—-]+$/, '').trim();
+    if (/^[A-Z][A-Z\s-]+$/.test(bareClean)) {
+      const lowerBare = bareClean.toLowerCase().replace(/\s+/g, ' ');
+      const wordNum = WORD_NUMBER_MAP[lowerBare];
+      if (wordNum !== undefined) {
+        return { label: `Chapter ${wordNum}`, isStandaloneWordNumber: true };
+      }
+    }
+  }
+
+  return null;
 };
 
 export const formatPageRangeBucket = (pageNumber: number, pagesPerSection = 20): string => {
@@ -1608,6 +2002,47 @@ export const formatPageRangeBucket = (pageNumber: number, pagesPerSection = 20):
 
 export const formatTwentyPageBucket = (pageNumber: number): string => {
   return formatPageRangeBucket(pageNumber, 20);
+};
+
+const hasGenuinePerPageFormFeeds = (normalizedText: string, safeWordsPerPage: number): boolean => {
+  const rawPages = normalizedText.split('\f');
+  if (rawPages.length <= 1) return false;
+  const nonEmptyPages = rawPages.map(p => p.trim()).filter(Boolean);
+  if (nonEmptyPages.length <= 1) return false;
+  const totalWords = countApproximateWords(normalizedText);
+  const expectedWordPages = totalWords / safeWordsPerPage;
+  const avgWordsPerFormFeed = totalWords / nonEmptyPages.length;
+  // Reject sparse \f dividers (e.g. 4–5 front-matter/part breaks in a 100,000-word novel!)
+  // which would otherwise collapse a 370-page book into "5 pages"!
+  return (
+    nonEmptyPages.length >= Math.max(2, expectedWordPages * 0.4) &&
+    avgWordsPerFormFeed <= safeWordsPerPage * 3
+  );
+};
+
+export const estimateBookPageCount = (text: string, wordsPerPage = 250): number => {
+  if (!text || !text.trim()) return 0;
+  const normalized = text.replace(/\r\n/g, '\n');
+  const safeWordsPerPage = Math.max(1, wordsPerPage);
+
+  if (hasGenuinePerPageFormFeeds(normalized, safeWordsPerPage)) {
+    return normalized
+      .split('\f')
+      .map(p => p.trim())
+      .filter(Boolean).length;
+  }
+
+  let maxExplicitPage = 0;
+  for (const line of normalized.split('\n')) {
+    const trimmed = line.trim();
+    const pageMarker = trimmed.match(/^(?:\[|\b|-+\s*)?page\s+(\d{1,4})(?:\]|\s*-+)?$/i);
+    if (pageMarker?.[1]) {
+      const p = parseInt(pageMarker[1], 10);
+      if (p > maxExplicitPage) maxExplicitPage = p;
+    }
+  }
+  const wordEstimatedPages = Math.max(1, Math.ceil(countApproximateWords(normalized) / safeWordsPerPage));
+  return Math.max(maxExplicitPage, wordEstimatedPages);
 };
 
 /**
@@ -1624,35 +2059,75 @@ export const segmentBookIntoChaptersOrPageRanges = (
 ): Array<{ label: string; text: string }> => {
   const mode: BookSegmentationMode = options?.mode ?? 'chapters';
   const pagesPerSection = Math.max(1, Math.floor(options?.pagesPerSection ?? 20));
+  const safeWordsPerPage = Math.max(1, wordsPerPage);
   const normalized = text.replace(/\r\n/g, '\n');
   const lines = normalized.split('\n');
 
   if (mode === 'chapters') {
-    const rawChapterSections: Array<{ label: string; lines: string[] }> = [];
-    let preChapterLines: string[] = [];
-    let currentChapter: { label: string; lines: string[] } | null = null;
+    const collectChapters = (allowStandaloneWordNumber: boolean) => {
+      const rawChapterSections: Array<{
+        label: string;
+        lines: string[];
+        isStandaloneWordNumber: boolean;
+      }> = [];
+      const preChapterLines: string[] = [];
+      let currentChapter: {
+        label: string;
+        lines: string[];
+        isStandaloneWordNumber: boolean;
+      } | null = null;
 
-    for (const line of lines) {
-      const heading = matchChapterHeadingLine(line);
-      if (heading) {
-        if (currentChapter) {
-          const body = currentChapter.lines.join('\n').trim();
-          if (body.length >= 25) {
-            rawChapterSections.push({ label: currentChapter.label, lines: [...currentChapter.lines] });
+      for (let idx = 0; idx < lines.length; idx++) {
+        const line = lines[idx];
+        const prevBlank = idx === 0 || !lines[idx - 1].replace(/\f/g, '').trim();
+        const nextBlank = idx === lines.length - 1 || !lines[idx + 1].replace(/\f/g, '').trim();
+        const heading = matchChapterHeadingLine(line, {
+          allowStandaloneWordNumber: allowStandaloneWordNumber && prevBlank && nextBlank,
+        });
+        if (heading) {
+          if (currentChapter) {
+            const body = currentChapter.lines.join('\n').trim();
+            if (body.length >= 25) {
+              rawChapterSections.push({
+                label: currentChapter.label,
+                lines: [...currentChapter.lines],
+                isStandaloneWordNumber: currentChapter.isStandaloneWordNumber,
+              });
+            }
           }
+          currentChapter = {
+            label: heading.label,
+            lines: [],
+            isStandaloneWordNumber: heading.isStandaloneWordNumber,
+          };
+        } else if (currentChapter) {
+          currentChapter.lines.push(line);
+        } else {
+          preChapterLines.push(line);
         }
-        currentChapter = { label: heading, lines: [] };
-      } else if (currentChapter) {
-        currentChapter.lines.push(line);
-      } else {
-        preChapterLines.push(line);
       }
-    }
 
-    if (currentChapter) {
-      const body = currentChapter.lines.join('\n').trim();
-      if (body.length >= 25) {
-        rawChapterSections.push({ label: currentChapter.label, lines: [...currentChapter.lines] });
+      if (currentChapter) {
+        const body = currentChapter.lines.join('\n').trim();
+        if (body.length >= 25) {
+          rawChapterSections.push({
+            label: currentChapter.label,
+            lines: [...currentChapter.lines],
+            isStandaloneWordNumber: currentChapter.isStandaloneWordNumber,
+          });
+        }
+      }
+      return { rawChapterSections, preChapterLines };
+    };
+
+    let { rawChapterSections, preChapterLines } = collectChapters(false);
+    if (rawChapterSections.length === 0) {
+      const standaloneAttempt = collectChapters(true);
+      // Accept standalone word-number chapters ("ONE", "TWO", ...) when at least 2 distinct chapters exist
+      const uniqueLabels = new Set(standaloneAttempt.rawChapterSections.map(s => s.label));
+      if (uniqueLabels.size >= 2) {
+        rawChapterSections = standaloneAttempt.rawChapterSections;
+        preChapterLines = standaloneAttempt.preChapterLines;
       }
     }
 
@@ -1683,9 +2158,9 @@ export const segmentBookIntoChaptersOrPageRanges = (
   let currentExplicitPage: number | null = null;
   let runningWordCount = 0;
 
-  // Check if form-feed characters (\f) exist
-  const formFeedPages = normalized.split('\f');
-  if (formFeedPages.length > 1) {
+  // Only use form-feed characters (\f) when they genuinely delimit per-page scans
+  if (hasGenuinePerPageFormFeeds(normalized, safeWordsPerPage)) {
+    const formFeedPages = normalized.split('\f');
     formFeedPages.forEach((pageContent, idx) => {
       const trimmedPage = pageContent.trim();
       if (!trimmedPage) return;
@@ -1702,14 +2177,14 @@ export const segmentBookIntoChaptersOrPageRanges = (
     }
   }
 
-  const safeWordsPerPage = Math.max(1, wordsPerPage);
+  const linesWithoutSparseFormFeeds = normalized.replace(/\f+/g, '\n').split('\n');
 
-  for (const line of lines) {
+  for (const line of linesWithoutSparseFormFeeds) {
     const trimmed = line.trim();
     if (!trimmed) continue;
 
     // In page mode, skip standalone chapter heading lines so they don't pollute sentences
-    if (mode === 'pages' && matchChapterHeadingLine(trimmed)) {
+    if (mode === 'pages' && matchChapterHeadingLine(trimmed, { allowStandaloneWordNumber: true })) {
       continue;
     }
 
@@ -2687,8 +3162,8 @@ export const extractComplexWordsFromText = async (
 
   options?.onProgress?.('Scanning sentences and tokenizing full book text...');
 
-  // Sample up to ~500 KB from the book body so even massive novels process quickly
-  const sampledText = text.length > 500_000 ? text.slice(0, 500_000) : text;
+  // Support full-length novels up to ~1.5 MB (~1,000 pages) without truncating later chapters/pages
+  const sampledText = text.length > 1_500_000 ? text.slice(0, 1_500_000) : text;
 
   const segments = segmentBookIntoChaptersOrPageRanges(
     sampledText,
@@ -2784,9 +3259,38 @@ export const extractComplexWordsFromText = async (
     .filter(c => c.lowercaseCount >= 1 && c.capitalizedMidSentenceCount === 0)
     .sort((a, b) => b.localScore - a.localScore);
 
+  const selectStratifiedAcrossSections = (items: CandidateInfo[], limit: number): CandidateInfo[] => {
+    if (items.length <= limit) return items;
+    const bySection = new Map<string, CandidateInfo[]>();
+    for (const seg of segments) {
+      if (!bySection.has(seg.label)) bySection.set(seg.label, []);
+    }
+    for (const item of items) {
+      const list = bySection.get(item.chapter) || [];
+      list.push(item);
+      bySection.set(item.chapter, list);
+    }
+    const sectionQueues = Array.from(bySection.values()).filter(q => q.length > 0);
+    const chosen: CandidateInfo[] = [];
+    let depth = 0;
+    while (chosen.length < limit) {
+      let addedInRound = false;
+      for (const queue of sectionQueues) {
+        if (depth < queue.length) {
+          chosen.push(queue[depth]);
+          addedInRound = true;
+          if (chosen.length >= limit) break;
+        }
+      }
+      if (!addedInRound) break;
+      depth += 1;
+    }
+    return chosen.sort((a, b) => b.localScore - a.localScore);
+  };
+
   const validCandidates: CandidateInfo[] = maxWords
     ? sortedByScore.slice(0, Math.max(maxWords * 2, 48))
-    : sortedByScore;
+    : selectStratifiedAcrossSections(sortedByScore, 360);
 
   if (validCandidates.length === 0) {
     return [];

@@ -5,6 +5,9 @@ import {
   formatTwentyPageBucket,
   formatPageRangeBucket,
   reassignWordsToBookSections,
+  estimateBookPageCount,
+  isDerivativeOrTinyStubBook,
+  getCanonicalBookDedupeKey,
 } from '../services/bookService';
 import {
   parseTagHierarchy,
@@ -747,4 +750,312 @@ test.describe('Book Nested Chapters & Page Sections E2E', () => {
     await secondOdysseyCard.getByRole('button', { name: 'Study Second Odyssey', exact: true }).click();
     await expect(page.getByText(/Review all 2 cards that are due today/i)).toBeVisible();
   });
+
+  test('filters 5-page stubs/study guides, ignores sparse form-feeds, parses standalone word-number chapters, and downloads full multi-hundred-page Kite Runner text from Internet Archive', async ({
+    page,
+  }) => {
+    // Part 1: Unit assertions for stub filtering, canonical dedupe, sparse \f form-feeds, and "ONE".."TWENTY-FIVE" chapters
+    expect(isDerivativeOrTinyStubBook('The Kite Runner', 'kite runner', 5)).toBe(true);
+    expect(isDerivativeOrTinyStubBook('Study Guide: The Kite Runner', 'kite runner', 45)).toBe(true);
+    expect(isDerivativeOrTinyStubBook('SparkNotes The Kite Runner', 'kite runner')).toBe(true);
+    expect(isDerivativeOrTinyStubBook('The Kite Runner', 'kite runner', 371)).toBe(false);
+
+    expect(getCanonicalBookDedupeKey('The Kite Runner: A Novel')).toBe(
+      getCanonicalBookDedupeKey('The Kite Runner')
+    );
+
+    // Sparse \f breaks (4 front-matter/part breaks across a 15,000-word / 60-page text) must NOT collapse into 5 pages!
+    const longPart = Array.from({ length: 3750 }, (_, i) =>
+      i === 50 ? 'ephemeral' : 'walking'
+    ).join(' ') + '.';
+    const sparseFormFeedNovel = [
+      'Title Page',
+      'Copyright Notice',
+      'Dedication',
+      longPart,
+      `${longPart} ${longPart} ${longPart}`,
+    ].join('\f');
+
+    expect(estimateBookPageCount(sparseFormFeedNovel, 250)).toBeGreaterThanOrEqual(55);
+    const sparsePageBuckets = segmentBookIntoChaptersOrPageRanges(sparseFormFeedNovel, 250, {
+      mode: 'pages',
+      pagesPerSection: 20,
+    });
+    expect(sparsePageBuckets.map(s => s.label)).toEqual([
+      'Pages 1-20',
+      'Pages 21-40',
+      'Pages 41-60',
+    ]);
+
+    // Standalone uppercase word-number headings ("ONE", "TWO", "TWENTY-FIVE") used in The Kite Runner
+    const kiteRunnerStyleChapters = `
+ONE
+
+Looking back on the tranquil afternoons, an ineffable remorse lingered across the decades.
+
+TWO
+
+A palpable trepidation gripped his heart amidst the desolate ruins of the winter tournament.
+
+TWENTY-FIVE
+
+With unfeigned benevolence and resilient hope, he ran beneath the luminous sky.
+`;
+    const wordNumSections = segmentBookIntoChaptersOrPageRanges(kiteRunnerStyleChapters, 250, {
+      mode: 'chapters',
+    });
+    expect(wordNumSections.map(s => s.label)).toEqual([
+      'Chapter 1',
+      'Chapter 2',
+      'Chapter 25',
+    ]);
+
+    // Part 2: E2E verification — searching "kite runner" filters out 5-page stubs/study guides
+    // and downloads the full 65-page (~16,250-word) Internet Archive OCR text instead of a 5-page Wikipedia summary!
+    await page.setViewportSize({ width: 1280, height: 900 });
+
+    const fillerParagraph = (fillerWord: string) =>
+      Array.from({ length: 640 }, () => fillerWord).join(' ') + '.';
+
+    // Build a 25-chapter, ~16,250-word (~65-page) full novel text for Internet Archive
+    const fullKiteRunnerChapters: string[] = [];
+    for (let ch = 1; ch <= 25; ch++) {
+      const specialSentence =
+        ch === 1
+          ? 'An ineffable remorse haunted his solitary conscience throughout the silent winter.'
+          : ch === 12
+            ? 'His fastidious demeanor masked a profound benevolence toward the estranged family.'
+            : ch === 25
+              ? 'A sudden alacrity animated his steps across the tranquil meadow at twilight.'
+              : `They walked quietly through chapter ${ch} watching the bright morning clouds.`;
+      fullKiteRunnerChapters.push(
+        `Chapter ${ch}\n${specialSentence}\n${fillerParagraph('quietly')}`
+      );
+    }
+    const fullKiteRunnerBookText = fullKiteRunnerChapters.join('\n\n');
+
+    await page.route('https://gutendex.com/books**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ count: 0, results: [] }),
+      });
+    });
+
+    await page.route('https://openlibrary.org/search.json**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          docs: [
+            // 5-page preview stub that previously polluted search results!
+            {
+              key: '/works/OL_STUB_5P',
+              title: 'The Kite Runner Preview',
+              author_name: ['Khaled Hosseini'],
+              number_of_pages_median: 5,
+            },
+            // Study guide that previously appeared as 2nd book with 5 pages!
+            {
+              key: '/works/OL_GUIDE',
+              title: 'Study Guide: The Kite Runner',
+              author_name: ['BookRags'],
+              number_of_pages_median: 12,
+            },
+            {
+              key: '/works/OL5781992W',
+              title: 'The Kite Runner: A Novel',
+              author_name: ['Khaled Hosseini'],
+              number_of_pages_median: 371,
+              ia: ['kiterunner_open_full_371'],
+            },
+          ],
+        }),
+      });
+    });
+
+    await page.route('https://www.googleapis.com/books/v1/volumes**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          items: [
+            {
+              volumeInfo: {
+                title: 'Summary of The Kite Runner',
+                authors: ['QuickRead'],
+                pageCount: 5,
+              },
+            },
+          ],
+        }),
+      });
+    });
+
+    await page.route('https://archive.org/advancedsearch.php**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          response: {
+            docs: [
+              {
+                identifier: 'kiterunner_stub_5p',
+                title: 'The Kite Runner Sample',
+                creator: 'Khaled Hosseini',
+                imagecount: 5,
+                downloads: 99999,
+              },
+              {
+                identifier: 'kiterunner_open_full_371',
+                title: 'The Kite Runner',
+                creator: 'Khaled Hosseini',
+                imagecount: 371,
+                downloads: 45000,
+              },
+            ],
+          },
+        }),
+      });
+    });
+
+    await page.route('https://archive.org/metadata/kiterunner_open_full_371', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          metadata: {
+            title: 'The Kite Runner',
+            creator: 'Khaled Hosseini',
+            imagecount: '371',
+          },
+          files: [
+            {
+              name: 'kiterunner_open_full_371_djvu.txt',
+              format: 'DjVuTXT',
+              size: String(fullKiteRunnerBookText.length),
+            },
+          ],
+        }),
+      });
+    });
+
+    await page.route(
+      'https://archive.org/download/kiterunner_open_full_371/kiterunner_open_full_371_djvu.txt',
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'text/plain; charset=utf-8',
+          body: fullKiteRunnerBookText,
+        });
+      }
+    );
+
+    await page.route('https://en.wikisource.org/w/api.php**', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{"query":{"search":[]}}' });
+    });
+    await page.route('https://en.wikipedia.org/w/api.php**', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{"query":{"search":[]}}' });
+    });
+
+    const mockDict: Record<string, { pos: string; def: string; freq: string }> = {
+      ineffable: {
+        pos: 'adjective',
+        def: 'Too great or extreme to be expressed in words.',
+        freq: '0.45',
+      },
+      fastidious: {
+        pos: 'adjective',
+        def: 'Very attentive to and concerned about accuracy and detail.',
+        freq: '0.65',
+      },
+      alacrity: {
+        pos: 'noun',
+        def: 'Brisk and cheerful readiness.',
+        freq: '0.52',
+      },
+    };
+
+    await page.route('https://api.datamuse.com/words**', async (route) => {
+      const sp = (new URL(route.request().url()).searchParams.get('sp') || '').toLowerCase();
+      const hit = mockDict[sp];
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            word: sp,
+            score: 1000,
+            tags: [`f:${hit ? hit.freq : '50.0'}`],
+            ...(hit ? { defs: [`adj\t${hit.def}`] } : {}),
+          },
+        ]),
+      });
+    });
+
+    await page.route('https://api.dictionaryapi.dev/api/v2/entries/en/**', async (route) => {
+      const w = decodeURIComponent(route.request().url().split('/').pop() || '').toLowerCase();
+      const hit = mockDict[w];
+      if (!hit) {
+        await route.fulfill({ status: 404, body: 'Not Found' });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            word: w,
+            meanings: [{ partOfSpeech: hit.pos, definitions: [{ definition: hit.def }] }],
+          },
+        ]),
+      });
+    });
+    await page.route('https://freedictionaryapi.com/**', async (route) => {
+      await route.fulfill({ status: 404, body: 'Not Found' });
+    });
+    await page.route('https://en.wiktionary.org/**', async (route) => {
+      await route.fulfill({ status: 404, body: 'Not Found' });
+    });
+    await page.route('https://translate.googleapis.com/**', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
+    });
+    await page.route('https://fa.wiktionary.org/**', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+    });
+
+    await page.goto('/#/flashcards');
+    await page.getByRole('button', { name: /Prepare for a Book/i }).click();
+    await page.getByLabel('Search book title').fill('kite runner');
+    await page.getByRole('button', { name: /Find Book/i }).click();
+
+    const exactSection = page.getByTestId('exact-books-section');
+    await expect(exactSection).toBeVisible();
+    await expect(exactSection.getByText('The Kite Runner')).toBeVisible();
+    await expect(exactSection.getByText('371 pages')).toBeVisible();
+    // 5-page stubs and study guides must be completely excluded!
+    await expect(exactSection.getByText(/Study Guide/i)).toHaveCount(0);
+    await expect(exactSection.getByText(/Summary of/i)).toHaveCount(0);
+    await expect(exactSection.getByText(/Sample/i)).toHaveCount(0);
+
+    // Click Extract Words on The Kite Runner
+    await exactSection.getByRole('button', { name: /Extract Words/i }).first().click();
+
+    // Verify full 65+ page book was extracted (NOT 5 pages!) with words from Chapter 1, Chapter 12, AND Chapter 25!
+    await expect(page.getByText('ineffable', { exact: false }).first()).toBeVisible({
+      timeout: 15000,
+    });
+    const pageBadgeText = await page.getByTestId('extracted-book-page-count').innerText();
+    const pageNum = parseInt(pageBadgeText.replace(/\D+/g, ''), 10);
+    expect(pageNum).toBeGreaterThanOrEqual(60);
+    await expect(page.getByTestId('short-preview-upload-banner')).toHaveCount(0);
+
+    // Switch to Page-based mode (20 pages/section) and verify words span Pages 1-20, Pages 21-40, AND Pages 61-80!
+    await page.getByTestId('preview-segmentation-selector').getByTestId('segmentation-mode-pages').click();
+    const chapterFilterBox = page.getByTestId('preview-chapter-filter');
+    await expect(chapterFilterBox).toContainText('Pages 1-20');
+    await expect(chapterFilterBox).toContainText('Pages 21-40');
+    await expect(chapterFilterBox).toContainText('Pages 61-80');
+  });
 });
+

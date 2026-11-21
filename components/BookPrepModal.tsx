@@ -27,6 +27,7 @@ import {
   extractTextFromBookFile,
   extractComplexWordsFromText,
   reassignWordsToBookSections,
+  estimateBookPageCount,
 } from '../services/bookService';
 import { compareChapterNames } from '../utils/tagUtils';
 import { MeaningDisplay } from './MeaningDisplay';
@@ -80,6 +81,7 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
   const [pagesPerSection, setPagesPerSection] = useState<number>(20);
   const [pagesPerSectionInput, setPagesPerSectionInput] = useState<string>('20');
   const [extractedRawText, setExtractedRawText] = useState<string>('');
+  const [isCatalogExtraction, setIsCatalogExtraction] = useState(false);
   const [chapterFilter, setChapterFilter] = useState<string>('all');
   const [isPreviewChaptersExpanded, setIsPreviewChaptersExpanded] = useState(false);
   const [extractedWords, setExtractedWords] = useState<BookExtractedWord[]>([]);
@@ -107,6 +109,7 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
     setPagesPerSection(20);
     setPagesPerSectionInput('20');
     setExtractedRawText('');
+    setIsCatalogExtraction(false);
     setChapterFilter('all');
     setIsPreviewChaptersExpanded(false);
     setExtractedWords([]);
@@ -229,9 +232,10 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
 
   const handleSelectGutenbergBook = async (book: GutenbergBook) => {
     setIsExtracting(true);
+    setIsCatalogExtraction(true);
     setExtractionError(null);
     setActiveBookTitle(book.title);
-    setExtractionStage(`Downloading "${book.title}" from Project Gutenberg...`);
+    setExtractionStage(`Downloading full book text for "${book.title}"...`);
 
     try {
       const text = await fetchGutenbergBookText(book);
@@ -255,6 +259,7 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
     e.target.value = '';
 
     setIsExtracting(true);
+    setIsCatalogExtraction(false);
     setExtractionError(null);
     setExtractionStage(`Reading ${file.name}...`);
 
@@ -386,12 +391,23 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                   Back to book search
                 </button>
 
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 border border-brand-200 dark:border-brand-800">
                     <BookOpen className="h-3 w-3 shrink-0" />
                     <span className="opacity-70">Books /</span>
                     <span>{activeBookTitle}</span>
                   </span>
+                  {extractedRawText.trim() && (() => {
+                    const estPages = estimateBookPageCount(extractedRawText);
+                    return estPages > 0 ? (
+                      <span
+                        data-testid="extracted-book-page-count"
+                        className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
+                      >
+                        ~{estPages} {estPages === 1 ? 'page' : 'pages'}
+                      </span>
+                    ) : null;
+                  })()}
                   <button
                     type="button"
                     onClick={() => {
@@ -407,6 +423,30 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                   </button>
                 </div>
               </div>
+
+              {isCatalogExtraction &&
+                extractedRawText.trim() &&
+                estimateBookPageCount(extractedRawText) < 15 && (
+                  <div
+                    data-testid="short-preview-upload-banner"
+                    className="p-3 rounded-2xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/60 flex flex-wrap items-center justify-between gap-3 text-xs text-amber-900 dark:text-amber-200"
+                  >
+                    <div className="flex items-start gap-2 flex-1 min-w-[220px]">
+                      <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                      <span>
+                        Only a short public excerpt (~{estimateBookPageCount(extractedRawText)} pages) was reachable online for this copyrighted book. Upload your <strong>.epub</strong> or <strong>.txt</strong> copy to extract vocabulary across all pages and chapters.
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-semibold inline-flex items-center gap-1.5 shrink-0 transition-colors"
+                    >
+                      <Upload className="h-3.5 w-3.5" />
+                      Upload Full .epub / .txt
+                    </button>
+                  </div>
+                )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
@@ -958,6 +998,11 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                               {book.source && (
                                 <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 border border-brand-200/70 dark:border-brand-800/70 shrink-0">
                                   {book.source}
+                                </span>
+                              )}
+                              {book.pageCount && book.pageCount >= 25 && (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-200/70 dark:bg-slate-700 text-slate-600 dark:text-slate-300 shrink-0">
+                                  {book.pageCount} pages
                                 </span>
                               )}
                             </div>

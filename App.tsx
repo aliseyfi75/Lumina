@@ -521,6 +521,11 @@ const App: React.FC = () => {
         }
       }
 
+      initialCards = initialCards.map(c => {
+        if (!c.translations) return c;
+        const cleaned = sanitizeTranslations(c.translations);
+        return cleaned?.fa === c.translations.fa ? c : { ...c, translations: cleaned };
+      });
       cardsRef.current = initialCards;
       setCards(initialCards);
 
@@ -2153,6 +2158,7 @@ const App: React.FC = () => {
                 mainDefinition: card.mainDefinition,
                 partOfSpeech: card.partOfSpeech,
                 existingTranslations: card.translations,
+                maxWaitMs: 5000,
               });
               return { id: card.id, resolved };
             } catch {
@@ -2174,7 +2180,7 @@ const App: React.FC = () => {
             const next = prev.map(card => {
               const incoming = resolvedMap.get(card.id);
               if (!incoming) return card;
-              const merged = mergeTranslations(card.translations, incoming, false);
+              const merged = mergeTranslations(card.translations, incoming, true);
               if (merged?.fa === card.translations?.fa) return card;
               changed = true;
               return {

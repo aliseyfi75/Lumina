@@ -136,7 +136,12 @@ export const StudySession: React.FC<StudySessionProps> = ({
     // Snapshot the queue once cards have loaded so in-session status updates do not reshuffle the queue.
   }, [cards, isInitialized, sessionConfig]);
 
-  const currentCard = queue[currentIndex];
+  const queuedCard = queue[currentIndex];
+  const currentCard = useMemo(() => {
+    if (!queuedCard) return undefined;
+    const liveCard = cards.find(c => c.id === queuedCard.id);
+    return liveCard ? { ...queuedCard, translations: liveCard.translations } : queuedCard;
+  }, [queuedCard, cards]);
 
   const activeSessionBookTitle = useMemo(() => {
     if (!sessionConfig?.tag) return null;

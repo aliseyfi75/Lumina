@@ -80,6 +80,127 @@ export const saveLanguagePreferenceToStorage = (
   }
 };
 
+const PERSIAN_SCRIPT_CHAR_REGEX = /[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/;
+
+const normalizeBasicPersianScript = (raw: string): string =>
+  raw
+    .replace(/\u064A/g, '\u06CC') // Arabic Yeh -> Persian Yeh (ی)
+    .replace(/\u0643/g, '\u06A9') // Arabic Kaf -> Persian Kaf (ک)
+    .replace(/\u0649/g, '\u06CC') // Alef Maksura -> Persian Yeh
+    .replace(/<ref[^>]*>[\s\S]*?<\/ref>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\[https?:\/\/[^\]]*\]/gi, ' ')
+    .replace(/\[\[\s*(?:رده|Category|پرونده|File|Image|[a-z]{2,3})\s*:[^\]]*\]\]/gi, ' ')
+    .replace(/\[\[(?:[^|\]]*\|)?([^\]]+)\]\]/g, '$1')
+    .replace(/\{\{[^{}]*\}\}/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+// Meta/wiki/citation/API-error phrases that must NEVER be accepted or displayed as a word's Persian meaning
+const INVALID_PERSIAN_SUBSTRING_PATTERNS: RegExp[] = [
+  /ویکی\s*واژه/, // e.g. "ویکی‌واژه انگلیسی", "برگرفته از ویکی‌واژه انگلیسی", "مشارکت‌کنندگان ویکی‌واژه"
+  /ویکیواژه/,
+  /ویکی\s*پدیا/, // e.g. "ویکی‌پدیای انگلیسی"
+  /ویکیپدیا/,
+  /ویکی\s*نسک/,
+  /ویکی\s*نبشته/,
+  /مدیا\s*ویکی/,
+  /دانشنامه\s*آزاد/,
+  /مشارکت\s*کنندگان/,
+  /یادکرد/,
+  /پیوند\s*به\s*بیرون/,
+  /جستارهای\s*وابسته/,
+  /تغییر\s*مسیر/,
+  /ابهام\s*زدایی/,
+  /https?:\/\//i,
+  /\bwiktionary\b/i,
+  /\bwikipedia\b/i,
+  /\bwikimedia\b/i,
+  /\bmymemory\b/i,
+  /query\s+length\s+limit/i,
+];
+
+const INVALID_STANDALONE_PERSIAN_LABELS = new Set([
+  'منابع',
+  'منبع',
+  'مراجع',
+  'پانویس',
+  'بن مایه',
+  'ریشه شناسی',
+  'واژه شناسی',
+  'تلفظ',
+  'آوایش',
+  'برگردان',
+  'برگردان ها',
+  'رده ها',
+  'فرهنگ لغت انگلیسی',
+  'فرهنگ انگلیسی به فارسی',
+  'انگلیسی',
+  'فارسی',
+]);
+
+export const isInvalidPersianTranslationFragment = (raw?: string | null): boolean => {
+  if (!raw) return true;
+  const cleaned = normalizeBasicPersianScript(raw)
+    .replace(/^[\s،,؛;:\-–—.()«»"'[\]]+|[\s،,؛;:\-–—.()«»"'[\]]+$/g, '')
+    .trim();
+  if (!cleaned || !PERSIAN_SCRIPT_CHAR_REGEX.test(cleaned)) return true;
+
+  // Normalize ZWNJ (\u200C) to space so "ویکی‌واژه" and "ویکی واژه" match identically
+  const zwnjNormalized = cleaned.replace(/\u200C+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (INVALID_STANDALONE_PERSIAN_LABELS.has(zwnjNormalized)) {
+    return true;
+  }
+  return INVALID_PERSIAN_SUBSTRING_PATTERNS.some(rx => rx.test(zwnjNormalized));
+};
+
+/**
+ * Cleans a Persian translation string, stripping Wiktionary/citation artifacts (such as "ویکی‌واژه انگلیسی")
+ * both when they appear as the entire string AND when they appear inside a comma-separated list of equivalents.
+ */
+export const sanitizePersianTranslation = (raw?: string | null): string => {
+  if (!raw || typeof raw !== 'string') return '';
+  const normalized = normalizeBasicPersianScript(raw);
+  if (!normalized || !PERSIAN_SCRIPT_CHAR_REGEX.test(normalized)) return '';
+
+  const splitAndCleanTerms = (segment: string): string[] => {
+    const seen = new Set<string>();
+    const valid: string[] = [];
+    for (const part of segment.split(/[،,؛;]/)) {
+      const trimmed = part.replace(/^[\s\-–—.]+|[\s\-–—.]+$/g, '').trim();
+      if (!trimmed || isInvalidPersianTranslationFragment(trimmed)) continue;
+      if (!seen.has(trimmed)) {
+        seen.add(trimmed);
+        valid.push(trimmed);
+      }
+    }
+    return valid;
+  };
+
+  if (normalized.includes('—')) {
+    const [leftRaw, ...rightParts] = normalized.split('—');
+    const validEquivalents = splitAndCleanTerms(leftRaw || '');
+    const rightRaw = rightParts.join(' — ').replace(/^[\s،,؛;:\-–—.]+|[\s،,؛;:\-–—.]+$/g, '').trim();
+    const validSense = rightRaw && !isInvalidPersianTranslationFragment(rightRaw) ? rightRaw : '';
+
+    if (validEquivalents.length > 0 && validSense) {
+      return `${validEquivalents.join('، ')} — ${validSense}`;
+    }
+    if (validEquivalents.length > 0) {
+      return validEquivalents.join('، ');
+    }
+    return validSense;
+  }
+
+  // Single-clause or comma-separated equivalents without '—'
+  if (/[،,؛;]/.test(normalized)) {
+    return splitAndCleanTerms(normalized).join('، ');
+  }
+
+  const trimmedSingle = normalized.replace(/^[\s\-–—.]+|[\s\-–—.]+$/g, '').trim();
+  return isInvalidPersianTranslationFragment(trimmedSingle) ? '' : trimmedSingle;
+};
+
 export const sanitizeTranslations = (
   translations?: LocalizedTranslations | null
 ): LocalizedTranslations | undefined => {
@@ -88,8 +209,10 @@ export const sanitizeTranslations = (
   let hasAny = false;
   for (const lang of ALL_TRANSLATION_LANGUAGES) {
     const raw = translations[lang];
-    if (typeof raw === 'string' && raw.trim()) {
-      cleaned[lang] = raw.trim();
+    if (typeof raw !== 'string') continue;
+    const sanitizedVal = lang === 'fa' ? sanitizePersianTranslation(raw) : raw.trim();
+    if (sanitizedVal) {
+      cleaned[lang] = sanitizedVal;
       hasAny = true;
     }
   }
@@ -138,7 +261,7 @@ export const resolveMeaningDisplay = (
   preference: MeaningLanguagePreference
 ): ResolvedMeaningDisplay => {
   const cleanEnglish = (englishText || '').trim();
-  const cleanPersian = (translations?.fa || '').trim();
+  const cleanPersian = sanitizePersianTranslation(translations?.fa);
 
   if (preference === 'en') {
     return {
@@ -185,5 +308,11 @@ export const cardNeedsPersianBackfill = (card: {
   translations?: LocalizedTranslations;
 }): boolean => {
   if (!card.word?.trim() || !card.mainDefinition?.trim()) return false;
-  return !card.translations?.fa?.trim();
+  const rawFa = card.translations?.fa?.trim() || '';
+  if (!rawFa) return true;
+  const sanitizedFa = sanitizePersianTranslation(rawFa);
+  if (!sanitizedFa) return true;
+  // If rawFa contained invalid wiki noise that removed all equivalents before '—', re-backfill to restore equivalents
+  if (rawFa.includes('—') && !sanitizedFa.includes('—')) return true;
+  return false;
 };

@@ -1,5 +1,5 @@
 import { Flashcard, FlashcardStatus } from '../types';
-import { mergeTranslations } from './languageUtils';
+import { mergeTranslations, sanitizeTranslations } from './languageUtils';
 
 export interface MergeDeckOptions {
   ignoreTombstones?: boolean;
@@ -165,15 +165,24 @@ export const mergeFlashcardDecks = (
     return deletedAt >= cardTs;
   };
 
+  const sanitizeCardTranslations = (card: Flashcard): Flashcard => {
+    if (!card.translations) return card;
+    const cleaned = sanitizeTranslations(card.translations);
+    if (cleaned?.fa === card.translations.fa) return card;
+    return { ...card, translations: cleaned };
+  };
+
   const cardMap = new Map<string, Flashcard>();
   for (const c of baseCards) {
     if (!isDeleted(c)) {
-      cardMap.set(c.id, c);
+      const cleanCard = sanitizeCardTranslations(c);
+      cardMap.set(cleanCard.id, cleanCard);
     }
   }
 
-  for (const c of incoming) {
-    if (isDeleted(c)) continue;
+  for (const rawIncoming of incoming) {
+    if (isDeleted(rawIncoming)) continue;
+    const c = sanitizeCardTranslations(rawIncoming);
 
     const normWord = c.word.trim().toLowerCase();
     const normDef = c.mainDefinition.trim().toLowerCase();

@@ -1,6 +1,7 @@
 import { test, expect } from 'playwright/test';
 import {
   resolveMeaningDisplay,
+  sanitizePersianTranslation,
   sanitizeTranslations,
   mergeTranslations,
   cardNeedsPersianBackfill,
@@ -8,6 +9,7 @@ import {
 import {
   formatPersianMeaning,
   extractPersianFromSenseTranslations,
+  parseFaWiktionaryWikitext,
 } from '../services/translationService';
 import { mergeWordEntries } from '../services/dictionaryService';
 import type { WordEntry } from '../types';
@@ -543,4 +545,133 @@ test.describe('Multi-Language Dictionary (English + Persian) End-to-End Tests', 
       page.getByText(/All .* flashcards in your deck have both English & Persian saved in JSON/i)
     ).toBeVisible();
   });
+
+  test('rejects "ویکی‌واژه انگلیسی" from Persian Wiktionary منابع sections and self-heals previously polluted cards in Study Session', async ({
+    page,
+  }) => {
+    // Part 1: Unit verification on real fa.wiktionary.org bot-stub wikitext
+    const enrollFaWikitext = `
+== انگلیسی ==
+=== فعل ===
+'''enroll'''
+# [[ثبت‌نام کردن]]، [[نام‌نویسی کردن]]
+
+=== منابع ===
+# [https://en.wiktionary.org/wiki/enroll ویکی‌واژه انگلیسی]
+# {{یادکرد-ویکی|عنوان=enroll}} ویکی‌واژه انگلیسی
+# مشارکت‌کنندگان ویکی‌پدیای انگلیسی
+`;
+    expect(parseFaWiktionaryWikitext(enrollFaWikitext)).toEqual(['ثبت‌نام کردن', 'نام‌نویسی کردن']);
+
+    const stubOnlyReferencesWikitext = `
+== انگلیسی ==
+=== فعل ===
+'''enroll'''
+
+=== منابع ===
+# ویکی‌واژه انگلیسی
+`;
+    expect(parseFaWiktionaryWikitext(stubOnlyReferencesWikitext)).toEqual([]);
+
+    expect(sanitizePersianTranslation('ویکی‌واژه انگلیسی')).toBe('');
+    expect(sanitizePersianTranslation('ویکی واژه انگلیسی')).toBe('');
+    expect(
+      sanitizePersianTranslation(
+        'ویکی‌واژه انگلیسی، ثبت‌نام کردن — نام‌نویسی کردن خود در چیزی یا عضو شدن'
+      )
+    ).toBe('ثبت‌نام کردن — نام‌نویسی کردن خود در چیزی یا عضو شدن');
+    expect(
+      cardNeedsPersianBackfill({
+        word: 'enroll',
+        mainDefinition: 'To enlist oneself (in something) or become a member (of something)',
+        translations: { fa: 'ویکی‌واژه انگلیسی' },
+      })
+    ).toBe(true);
+
+    // Part 2: E2E verification — a card already saved in localStorage with "ویکی‌واژه انگلیسی"
+    // never renders "ویکی‌واژه انگلیسی" on flip and automatically self-heals to the real Persian meaning!
+    await page.route('https://fa.wiktionary.org/w/api.php**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          parse: {
+            wikitext: {
+              '*': enrollFaWikitext,
+            },
+          },
+        }),
+      });
+    });
+
+    await page.route('https://translate.googleapis.com/translate_a/single**', async (route) => {
+      const url = new URL(route.request().url());
+      const q = url.searchParams.get('q') || '';
+      const dtList = url.searchParams.getAll('dt');
+      if (dtList.includes('bd')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([
+            [['ثبت‌نام کردن', 'enroll', null, null, 10]],
+            [['verb', ['ثبت‌نام کردن', 'نام‌نویسی کردن', 'عضو شدن']]],
+          ]),
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          [['ثبت‌نام کردن خود (در چیزی) یا عضو شدن (در چیزی)', q, null, null, 10]],
+        ]),
+      });
+    });
+
+    await page.addInitScript(() => {
+      if (!sessionStorage.getItem('heal_enroll_seeded')) {
+        localStorage.setItem('lumina_language_pref', 'both');
+        localStorage.setItem('lumina_language_pref_updated_at', String(Date.now()));
+        localStorage.setItem(
+          'lumina_cards_v1',
+          JSON.stringify([
+            {
+              id: 'polluted-enroll-1',
+              word: 'enroll',
+              partOfSpeech: 'verb',
+              mainDefinition: 'To enlist oneself (in something) or become a member (of something)',
+              translations: { fa: 'ویکی‌واژه انگلیسی' },
+              example:
+                'The following year, he enrolled in the University of California, San Diego School of Medicine, where he graduated with his M.D.',
+              status: 'New',
+              repetition: 0,
+              lastReviewed: 0,
+              createdAt: Date.now() - 10000,
+            },
+          ])
+        );
+        sessionStorage.setItem('heal_enroll_seeded', '1');
+      }
+    });
+
+    await page.goto('/#/study');
+    await expect(page.getByText('1 / 1')).toBeVisible();
+
+    // Flip card in Study Session
+    await page.keyboard.press('Space');
+    await expect(page.getByTestId('study-card-meaning-en')).toContainText(
+      'To enlist oneself (in something) or become a member (of something)'
+    );
+    // Must NEVER display "ویکی‌واژه انگلیسی"
+    await expect(page.getByText(/ویکی[\s\u200C]*واژه/)).toHaveCount(0);
+
+    // Self-healing background backfill populates the real Persian translation automatically!
+    await expect(page.getByTestId('study-card-meaning-fa')).toContainText('ثبت‌نام کردن', {
+      timeout: 8000,
+    });
+    await expect(page.getByTestId('study-card-meaning-fa')).toContainText(
+      'ثبت‌نام کردن خود (در چیزی) یا عضو شدن (در چیزی)'
+    );
+  });
 });
+

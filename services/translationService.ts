@@ -1,11 +1,16 @@
 import type { LocalizedTranslations, WordEntry } from '../types';
-import { mergeTranslations } from '../utils/languageUtils';
+import {
+  isInvalidPersianTranslationFragment,
+  mergeTranslations,
+  sanitizePersianTranslation,
+  sanitizeTranslations,
+} from '../utils/languageUtils';
 
 const GOOGLE_TRANSLATE_URL = 'https://translate.googleapis.com/translate_a/single';
 const MYMEMORY_TRANSLATE_URL = 'https://api.mymemory.translated.net/get';
 const FA_WIKTIONARY_API_URL = 'https://fa.wiktionary.org/w/api.php';
 
-const TRANSLATION_TIMEOUT_MS = 1000;
+const TRANSLATION_TIMEOUT_MS = 2200;
 const BATCH_SEPARATOR = '\n';
 
 const PERSIAN_SCRIPT_REGEX = /[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/;
@@ -61,20 +66,39 @@ export const normalizePersianText = (raw: string): string => {
     .trim();
 };
 
+const stripNestedWikitextTemplates = (input: string): string => {
+  let prev = input;
+  for (let i = 0; i < 4; i++) {
+    const next = prev.replace(/\{\{[^{}]*\}\}/g, ' ');
+    if (next === prev) break;
+    prev = next;
+  }
+  return prev;
+};
+
 export const cleanPersianEquivalent = (raw: string): string => {
   if (!raw) return '';
-  const cleaned = normalizePersianText(
+  const withoutRefsAndLinks = stripNestedWikitextTemplates(
     raw
+      .replace(/<!--[\s\S]*?-->/g, ' ')
+      .replace(/<ref[^>]*>[\s\S]*?<\/ref>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\[https?:\/\/[^\]]*\]/gi, ' ')
+      .replace(/\[\[\s*(?:رده|Category|پرونده|File|Image|[a-z]{2,3})\s*:[^\]]*\]\]/gi, ' ')
       .replace(/\[\[(?:[^|\]]*\|)?([^\]]+)\]\]/g, '$1')
-      .replace(/\{\{[^}]*\}\}/g, '')
+  );
+
+  const cleaned = normalizePersianText(
+    withoutRefsAndLinks
       .replace(/\([^)]*[a-zA-Z][^)]*\)/g, '')
       .replace(/[«»"'[\]]/g, '')
   )
-    .replace(/^[\s،,;:\-–—.]+|[\s،,;:\-–—.]+$/g, '')
+    .replace(/^[\s،,؛;:\-–—.]+|[\s،,؛;:\-–—.]+$/g, '')
     .trim();
 
   if (!cleaned || !PERSIAN_SCRIPT_REGEX.test(cleaned)) return '';
   if (cleaned.length > 48) return '';
+  if (isInvalidPersianTranslationFragment(cleaned)) return '';
   return cleaned;
 };
 
@@ -124,10 +148,10 @@ export const formatPersianMeaning = (
   }
 
   let cleanSense = normalizePersianText(senseTranslation || '')
-    .replace(/^[\s،,;:\-–—.]+|[\s،,;:\-–—.]+$/g, '')
+    .replace(/^[\s،,؛;:\-–—.]+|[\s،,؛;:\-–—.]+$/g, '')
     .trim();
 
-  if (!PERSIAN_SCRIPT_REGEX.test(cleanSense)) {
+  if (!PERSIAN_SCRIPT_REGEX.test(cleanSense) || isInvalidPersianTranslationFragment(cleanSense)) {
     cleanSense = '';
   }
 
@@ -145,7 +169,77 @@ export const formatPersianMeaning = (
     return `${eqJoined} — ${cleanSense}`;
   }
 
-  return eqJoined || cleanSense;
+  return sanitizePersianTranslation(eqJoined || cleanSense);
+};
+
+// Subsections on fa.wiktionary.org whose `#` numbered lists are references, etymology, or metadata — NOT definitions!
+const FA_WIKTIONARY_NON_DEFINITION_HEADING_REGEX =
+  /(?:منابع|منبع|مراجع|پانویس|بن[\s\u200C]*مایه|یادکرد|ریشه[\s\u200C]*شناسی|واژه[\s\u200C]*شناسی|تلفظ|آوایش|مترادف|متضاد|هم[\s\u200C]*خانواده|واژگان\s*مرتبط|مشتقات|ترکیب|برگردان|ترجمه|جستارهای\s*وابسته|پیوند\s*به\s*بیرون|بیشتر\s*بخوانید|صرف|تصریف|املا|نکته)/i;
+
+export const parseFaWiktionaryWikitext = (wikitext: string): string[] => {
+  if (!wikitext || typeof wikitext !== 'string') return [];
+
+  const preCleaned = wikitext
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<ref[^>]*>[\s\S]*?<\/ref>/gi, '')
+    .replace(/<ref[^/>]*\/>/gi, '');
+
+  // Narrow to English section if language headers exist
+  let targetSection = preCleaned;
+  const englishHeaderMatch = preCleaned.match(
+    /(?:==\s*(?:\[\[)?انگلیسی(?:\]\])?\s*==|\{\{زبان\|en\}\})([\s\S]*?)(?:\n==\s*[^=]|$)/
+  );
+  if (englishHeaderMatch?.[1]) {
+    targetSection = englishHeaderMatch[1];
+  }
+
+  const lines = targetSection.split('\n');
+  const equivalents: string[] = [];
+  let inNonDefinitionSection = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    // Detect MediaWiki subsection headings (`=== فعل ===`, `=== منابع ===`, etc.)
+    const headingMatch = trimmed.match(/^={2,}\s*(.+?)\s*={2,}$/);
+    if (headingMatch) {
+      const headingText = normalizePersianText(
+        stripNestedWikitextTemplates(headingMatch[1]).replace(/[\[\]{}'"]/g, '')
+      );
+      inNonDefinitionSection = FA_WIKTIONARY_NON_DEFINITION_HEADING_REGEX.test(headingText);
+      continue;
+    }
+
+    if (inNonDefinitionSection) {
+      continue;
+    }
+
+    // Definition lines in Persian Wiktionary start with '#' (excluding '#:' examples, '#*' quotes, and '##' sub-notes)
+    if (!trimmed.startsWith('#') || trimmed.startsWith('#:') || trimmed.startsWith('#*')) {
+      continue;
+    }
+
+    const rawGloss = trimmed.replace(/^#+\s*/, '');
+    // Skip citation/reference lines that bots sometimes place directly under `#`
+    if (
+      /https?:\/\/|\{\{\s*یادکرد|ویکی[\s\u200C]*واژه|ویکی[\s\u200C]*پدیا/i.test(rawGloss)
+    ) {
+      continue;
+    }
+
+    const parts = rawGloss.split(/[،,؛;]/);
+    for (const part of parts) {
+      const cleaned = cleanPersianEquivalent(part);
+      if (cleaned && cleaned.split(/\s+/).length <= 5 && !equivalents.includes(cleaned)) {
+        equivalents.push(cleaned);
+      }
+      if (equivalents.length >= 5) break;
+    }
+    if (equivalents.length >= 5) break;
+  }
+
+  return equivalents;
 };
 
 const fetchFaWiktionaryEquivalents = async (word: string): Promise<string[]> => {
@@ -153,41 +247,12 @@ const fetchFaWiktionaryEquivalents = async (word: string): Promise<string[]> => 
     const url = `${FA_WIKTIONARY_API_URL}?action=parse&page=${encodeURIComponent(
       word.toLowerCase()
     )}&prop=wikitext&format=json&origin=*`;
-    const res = await fetchWithTimeout(url, 1500);
+    const res = await fetchWithTimeout(url, 1800);
     if (!res.ok) return [];
     const data = await res.json();
     const wikitext: string | undefined = data?.parse?.wikitext?.['*'];
     if (!wikitext || typeof wikitext !== 'string') return [];
-
-    // Narrow to English section if language headers exist
-    let targetSection = wikitext;
-    const englishHeaderMatch = wikitext.match(/(?:==\s*انگلیسی\s*==|\{\{زبان\|en\}\})([\s\S]*?)(?:\n==[^=]|$)/);
-    if (englishHeaderMatch?.[1]) {
-      targetSection = englishHeaderMatch[1];
-    }
-
-    const lines = targetSection.split('\n');
-    const equivalents: string[] = [];
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      // Definition lines in Persian Wiktionary start with '#' (excluding '#:' examples and '#*' quotes)
-      if (!trimmed.startsWith('#') || trimmed.startsWith('#:') || trimmed.startsWith('#*')) {
-        continue;
-      }
-      const rawGloss = trimmed.replace(/^#+\s*/, '');
-      const parts = rawGloss.split(/[،,؛;]/);
-      for (const part of parts) {
-        const cleaned = cleanPersianEquivalent(part);
-        if (cleaned && cleaned.split(/\s+/).length <= 5) {
-          equivalents.push(cleaned);
-        }
-        if (equivalents.length >= 5) break;
-      }
-      if (equivalents.length >= 5) break;
-    }
-
-    return equivalents;
+    return parseFaWiktionaryWikitext(wikitext);
   } catch {
     return [];
   }
@@ -315,7 +380,7 @@ const translateSingleTextViaMyMemory = async (englishText: string): Promise<stri
     const raw = data?.responseData?.translatedText;
     if (typeof raw !== 'string') return '';
     const cleaned = normalizePersianText(raw);
-    if (!PERSIAN_SCRIPT_REGEX.test(cleaned)) return '';
+    if (!PERSIAN_SCRIPT_REGEX.test(cleaned) || isInvalidPersianTranslationFragment(cleaned)) return '';
     return cleaned;
   } catch {
     return '';
@@ -334,7 +399,9 @@ const translateSingleTextViaGoogle = async (englishText: string): Promise<string
         .map((seg: any) => (Array.isArray(seg) && typeof seg[0] === 'string' ? seg[0] : ''))
         .join('')
     );
-    return PERSIAN_SCRIPT_REGEX.test(joined) ? joined : '';
+    return PERSIAN_SCRIPT_REGEX.test(joined) && !isInvalidPersianTranslationFragment(joined)
+      ? joined
+      : '';
   } catch {
     return '';
   }
@@ -574,19 +641,20 @@ export const translateCardMeaningToPersian = async (params: {
   maxWaitMs?: number;
 }): Promise<LocalizedTranslations | undefined> => {
   const { word, partOfSpeech, mainDefinition, existingTranslations, maxWaitMs = TRANSLATION_TIMEOUT_MS } = params;
+  const sanitizedExisting = sanitizeTranslations(existingTranslations);
   const cleanWord = word.trim();
   const cleanDef = mainDefinition.trim();
-  if (!cleanWord || !cleanDef) return existingTranslations;
+  if (!cleanWord || !cleanDef) return sanitizedExisting;
 
-  // If existingTranslations.fa already contains a full formatted translation with '—' or multiple words, keep it
-  if (existingTranslations?.fa && existingTranslations.fa.includes('—')) {
-    return existingTranslations;
+  // If sanitizedExisting.fa already contains a clean full formatted translation with '—', keep it
+  if (sanitizedExisting?.fa && sanitizedExisting.fa.includes('—')) {
+    return sanitizedExisting;
   }
 
   const cacheKey = `${cleanWord.toLowerCase()}::${normalizePosKey(partOfSpeech)}::${cleanDef.toLowerCase()}`;
   const cached = cardMeaningCache.get(cacheKey);
   if (cached) {
-    return mergeTranslations(existingTranslations, { fa: cached }, true);
+    return mergeTranslations(sanitizedExisting, { fa: cached }, true);
   }
 
   const work = (async (): Promise<LocalizedTranslations | undefined> => {
@@ -597,24 +665,24 @@ export const translateCardMeaningToPersian = async (params: {
 
     const posKey = normalizePosKey(partOfSpeech);
     const posEquivalents = lexical.byPos[posKey] || lexical.allEquivalents;
-    const seedEquivalents = existingTranslations?.fa
-      ? [existingTranslations.fa, ...posEquivalents.slice(0, 3)]
+    const seedEquivalents = sanitizedExisting?.fa
+      ? [sanitizedExisting.fa, ...posEquivalents.slice(0, 3)]
       : posEquivalents.slice(0, 3);
 
     const formattedFa = formatPersianMeaning(seedEquivalents, senseTranslations[0]);
     if (!formattedFa) {
-      return existingTranslations;
+      return sanitizedExisting;
     }
 
     cardMeaningCache.set(cacheKey, formattedFa);
-    return mergeTranslations(existingTranslations, { fa: formattedFa }, true);
+    return mergeTranslations(sanitizedExisting, { fa: formattedFa }, true);
   })();
 
   if (maxWaitMs > 0) {
     return Promise.race([
       work,
       new Promise<LocalizedTranslations | undefined>((resolve) =>
-        setTimeout(() => resolve(existingTranslations), maxWaitMs)
+        setTimeout(() => resolve(sanitizedExisting), maxWaitMs)
       ),
     ]);
   }

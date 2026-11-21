@@ -1,5 +1,6 @@
 import { Flashcard, CloudData, FlashcardStatus } from '../types';
 import { ChunkProgressInfo } from './pantryService';
+import { sanitizeTranslations } from '../utils/languageUtils';
 
 const GIST_API_BASE = 'https://api.github.com/gists';
 export const LUMINA_GIST_FILENAME = 'lumina_flashcards_backup.json';
@@ -246,13 +247,8 @@ const sanitizeCardsForGist = (cards: Flashcard[]): Flashcard[] =>
     if (card.audio && !card.audio.startsWith('data:')) clean.audio = card.audio;
     if (card.image && !card.image.startsWith('data:')) clean.image = card.image;
     if (card.translations) {
-      const cleanedTranslations: Record<string, string> = {};
-      for (const [lang, text] of Object.entries(card.translations)) {
-        if (typeof text === 'string' && text.trim()) {
-          cleanedTranslations[lang] = text.trim();
-        }
-      }
-      if (Object.keys(cleanedTranslations).length > 0) {
+      const cleanedTranslations = sanitizeTranslations(card.translations);
+      if (cleanedTranslations) {
         clean.translations = cleanedTranslations;
       }
     }
@@ -276,6 +272,9 @@ const sanitizeCardsForGist = (cards: Flashcard[]): Flashcard[] =>
 const normalizeCardsFromGist = (cards: Flashcard[]): Flashcard[] =>
   cards.map(card => ({
     ...card,
+    ...(card.translations !== undefined
+      ? { translations: sanitizeTranslations(card.translations) }
+      : {}),
     partOfSpeech: card.partOfSpeech ?? '',
     status: card.status ?? FlashcardStatus.New,
     repetition: card.repetition ?? 0,

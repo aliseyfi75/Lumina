@@ -5,6 +5,7 @@ import {
   sanitizePersianTranslation,
   sanitizeTranslations,
 } from '../utils/languageUtils';
+import { LruMap } from '../utils/lruCache';
 
 const GOOGLE_TRANSLATE_URL = 'https://translate.googleapis.com/translate_a/single';
 const MYMEMORY_TRANSLATE_URL = 'https://api.mymemory.translated.net/get';
@@ -21,10 +22,10 @@ export interface PersianLexicalLookup {
   byPos: Record<string, string[]>;
 }
 
-const lexicalCache = new Map<string, PersianLexicalLookup>();
+const lexicalCache = new LruMap<string, PersianLexicalLookup>(500);
 const inFlightLexical = new Map<string, Promise<PersianLexicalLookup>>();
-const senseTranslationCache = new Map<string, string>();
-const cardMeaningCache = new Map<string, string>();
+const senseTranslationCache = new LruMap<string, string>(500);
+const cardMeaningCache = new LruMap<string, string>(500);
 
 export const clearTranslationCache = () => {
   lexicalCache.clear();

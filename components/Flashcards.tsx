@@ -1,11 +1,14 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import { Flashcard, FlashcardStatus, LocalizedTranslations, MeaningLanguagePreference } from '../types';
 import { Play, BookOpen, CheckCircle, Brain, Trash2, RotateCw, Upload, Volume2, ChevronDown, ChevronRight, ChevronUp, Search, X, ArrowUpDown, Filter, Plus, Pencil, Tag, Sparkles, AlertTriangle, Folder, FolderOpen, CornerDownRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { playAudio } from '../utils/audio';
 import { getDueCards } from '../utils/studyUtils';
-import { BookPrepModal } from './BookPrepModal';
-import { BookExtractedWord } from '../services/bookService';
+import type { BookExtractedWord } from '../services/bookService';
+
+const BookPrepModal = lazy(() =>
+  import('./BookPrepModal').then((m) => ({ default: m.BookPrepModal }))
+);
 import { parseTagHierarchy, BOOKS_FOLDER_FILTER, compareChapterNames, getCardBookInfo, getCardBookInfos, getCardBookInfoForBook, formatBookTag, formatBookChapterTag } from '../utils/tagUtils';
 import { TagSelectorInput } from './TagSelectorInput';
 import { useCardFlip3D } from '../utils/cardFlip';
@@ -1017,14 +1020,18 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
           onClose={() => setIsEditorOpen(false)}
           onSubmit={handleEditorSubmit}
         />
-        <BookPrepModal
-          isOpen={isBookPrepOpen}
-          onClose={() => setIsBookPrepOpen(false)}
-          existingWords={existingWordsSet}
-          existingCards={cards}
-          onImportBookWords={handleBookWordsImported}
-          languagePreference={languagePreference}
-        />
+        {isBookPrepOpen && (
+          <Suspense fallback={null}>
+            <BookPrepModal
+              isOpen={isBookPrepOpen}
+              onClose={() => setIsBookPrepOpen(false)}
+              existingWords={existingWordsSet}
+              existingCards={cards}
+              onImportBookWords={handleBookWordsImported}
+              languagePreference={languagePreference}
+            />
+          </Suspense>
+        )}
       </>
     );
   }
@@ -1780,14 +1787,18 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
         onSubmit={handleEditorSubmit}
       />
 
-      <BookPrepModal
-        isOpen={isBookPrepOpen}
-        onClose={() => setIsBookPrepOpen(false)}
-        existingWords={existingWordsSet}
-        existingCards={cards}
-        onImportBookWords={handleBookWordsImported}
-        languagePreference={languagePreference}
-      />
+      {isBookPrepOpen && (
+        <Suspense fallback={null}>
+          <BookPrepModal
+            isOpen={isBookPrepOpen}
+            onClose={() => setIsBookPrepOpen(false)}
+            existingWords={existingWordsSet}
+            existingCards={cards}
+            onImportBookWords={handleBookWordsImported}
+            languagePreference={languagePreference}
+          />
+        </Suspense>
+      )}
 
       {bookToDelete && (
         <div

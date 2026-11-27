@@ -1256,11 +1256,13 @@ const App: React.FC = () => {
             },
             { onProgress: handleBackgroundCloudProgress }
           );
+          if (!cancelled) {
+            setPendingCloudSync(false);
+          }
         } catch (e) {
           console.error('Pending Gist sync flush failed:', e);
         } finally {
           if (!cancelled) {
-            setPendingCloudSync(false);
             setIsSyncingOffline(false);
             setCloudSyncProgress(null);
           }
@@ -1299,11 +1301,13 @@ const App: React.FC = () => {
           },
           { onProgress: handleBackgroundCloudProgress }
         );
+        if (!cancelled) {
+          setPendingCloudSync(false);
+        }
       } catch (e) {
         console.error('Pending sync flush failed:', e);
       } finally {
         if (!cancelled) {
-          setPendingCloudSync(false);
           setIsSyncingOffline(false);
           setCloudSyncProgress(null);
         }
@@ -1346,7 +1350,11 @@ const App: React.FC = () => {
         if (loadedData.cards.length > 0) {
           performMerge(loadedData.cards, loadedData.deletedCards ?? {});
         }
-        if (loadedData.studyHistory) setStudyHistory(prev => ({ ...prev, ...loadedData.studyHistory }));
+        if (loadedData.studyHistory) {
+          const mergedHist = mergeHistoryRecords(studyHistoryRef.current, loadedData.studyHistory);
+          studyHistoryRef.current = mergedHist;
+          setStudyHistory(mergedHist);
+        }
         if (loadedData.longestStreak) setLongestStreak(prev => Math.max(prev, loadedData.longestStreak!));
         setFileHandle(handle);
         setPendingHandle(null);
@@ -1394,16 +1402,19 @@ const App: React.FC = () => {
   const handleManualFileSave = async () => {
     if (!fileHandle) return;
     setIsFileSaving(true);
-    await saveToLocalFile(fileHandle, {
-      cards,
-      studyHistory,
-      longestStreak,
-      deletedCards: prunedDeletedCards(),
-      languagePreference,
-      languagePreferenceUpdatedAt,
-    });
-    setIsFileSaving(false);
-    trackEvent(TRACKING_ACTION.MANUAL_SAVE, TRACKING_CATEGORY.DATA);
+    try {
+      await saveToLocalFile(fileHandle, {
+        cards,
+        studyHistory,
+        longestStreak,
+        deletedCards: prunedDeletedCards(),
+        languagePreference,
+        languagePreferenceUpdatedAt,
+      });
+      trackEvent(TRACKING_ACTION.MANUAL_SAVE, TRACKING_CATEGORY.DATA);
+    } finally {
+      setIsFileSaving(false);
+    }
   };
 
   const handleExportData = () => {
@@ -2610,8 +2621,52 @@ const App: React.FC = () => {
       return next;
     });
 
-    for (const item of cardsNeedingAsyncTranslation) {
-      populateSingleCardTranslationAsync(item.id, item.word, item.def, item.pos);
+    if (cardsNeedingAsyncTranslation.length > 0) {
+      void (async () => {
+        const BATCH_SIZE = 4;
+        for (let i = 0; i < cardsNeedingAsyncTranslation.length; i += BATCH_SIZE) {
+          const batch = cardsNeedingAsyncTranslation.slice(i, i + BATCH_SIZE);
+          const results = await Promise.all(
+            batch.map(async (item) => {
+              try {
+                const resolved = await translateCardMeaningToPersian({
+                  word: item.word,
+                  mainDefinition: item.def,
+                  partOfSpeech: item.pos,
+                });
+                return { id: item.id, resolved };
+              } catch {
+                return { id: item.id, resolved: undefined };
+              }
+            })
+          );
+
+          const resolvedMap = new Map<string, LocalizedTranslations>();
+          for (const r of results) {
+            if (r.resolved?.fa) {
+              resolvedMap.set(r.id, r.resolved);
+            }
+          }
+
+          if (resolvedMap.size > 0) {
+            setCards(prev => {
+              let changed = false;
+              const next = prev.map(card => {
+                const incoming = resolvedMap.get(card.id);
+                if (!incoming) return card;
+                const merged = mergeTranslations(card.translations, incoming, false);
+                if (merged?.fa === card.translations?.fa) return card;
+                changed = true;
+                return { ...card, translations: merged };
+              });
+              if (changed) {
+                cardsRef.current = next;
+              }
+              return changed ? next : prev;
+            });
+          }
+        }
+      })();
     }
 
     recordActivity();
@@ -2649,7 +2704,17 @@ const App: React.FC = () => {
     }
 
     // 3. Immediately sync with Cloud (GitHub Gist or Pantry) so deleted flashcards are removed right away
-    let activeConfig: CloudConfig | null = cloudConfig || parseSavedCloudConfig(localStorage.getItem(CLOUD_CONFIG_KEY));
+    let activeConfig: CloudConfig | null = cloudConfigRef.current || cloudConfig;
+    if (!activeConfig) {
+      try {
+        const rawStoredConfig = localStorage.getItem(CLOUD_CONFIG_KEY);
+        if (rawStoredConfig) {
+          activeConfig = parseSavedCloudConfig(JSON.parse(rawStoredConfig));
+        }
+      } catch {
+        activeConfig = null;
+      }
+    }
 
     if (activeConfig?.pantryId && !isMigratingCloudRef.current) {
       if (!navigator.onLine) {
@@ -2988,6 +3053,7 @@ const App: React.FC = () => {
             element={
               <StudySession
                 cards={cards}
+                isDataLoaded={isDataLoaded}
                 onReviewCard={handleReviewCard}
                 onRestoreCard={handleRestoreCard}
                 onSessionComplete={handleSessionComplete}

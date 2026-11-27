@@ -128,7 +128,7 @@ export const Statistics: React.FC<StatisticsProps> = ({ cards, studyHistory, lon
 
         // Future Reviews Histogram Data (Next 30 Days)
         const futureStartDate = today;
-        const futureEndDate = differenceInDays(today, firstDate) > 30 ? subDays(today, -30) : subDays(today, -30) // 30 days into future
+        const futureEndDate = subDays(today, -30); // 30 days into future
         const futureInterval = eachDayOfInterval({ start: futureStartDate, end: futureEndDate });
 
         const learningCards = cards.filter(c => c.status === FlashcardStatus.Learning);

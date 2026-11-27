@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Flashcard, FlashcardStatus, LocalizedTranslations, MeaningLanguagePreference } from '../types';
 import { RotateCw, CheckCircle, Brain, ArrowLeft, Volume2, MoveUp, MoveDown, MoveLeft, MoveRight, XCircle, ArrowRight, ListChecks, Undo2, RefreshCw, Lightbulb, BookOpen } from 'lucide-react';
 import Confetti from 'react-confetti';
@@ -55,6 +55,7 @@ interface ReviewHistoryItem {
 
 interface StudySessionProps {
   cards: Flashcard[];
+  isDataLoaded?: boolean;
   onReviewCard: (id: string, quality: number) => void;
   onRestoreCard?: (previousCard: Flashcard) => void;
   onSessionComplete: () => void;
@@ -64,6 +65,7 @@ interface StudySessionProps {
 
 export const StudySession: React.FC<StudySessionProps> = ({
   cards,
+  isDataLoaded = true,
   onReviewCard,
   onRestoreCard,
   onSessionComplete,
@@ -78,9 +80,20 @@ export const StudySession: React.FC<StudySessionProps> = ({
   const [selectedQuizOption, setSelectedQuizOption] = useState<string | null>(null);
   const [reviewHistory, setReviewHistory] = useState<ReviewHistoryItem[]>([]);
 
+  const isAdvancingRef = useRef(false);
+  const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const { width, height } = useWindowSize();
   const [showConfetti, setShowConfetti] = useState(false);
   const [actionToast, setActionToast] = useState<{ message: string; colorClass: string; bgColorClass: string } | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
 
   const location = useLocation();
   const sessionConfig = location.state?.sessionConfig as {
@@ -92,7 +105,14 @@ export const StudySession: React.FC<StudySessionProps> = ({
   const isQuizMode = sessionConfig?.mode === 'quiz';
 
   useEffect(() => {
-    if (isInitialized || cards.length === 0) return;
+    if (isInitialized) return;
+    if (cards.length === 0) {
+      if (isDataLoaded) {
+        setQueue([]);
+        setIsInitialized(true);
+      }
+      return;
+    }
 
     const allDueCards = getDueCards(cards);
     let dueCards = allDueCards;
@@ -134,7 +154,7 @@ export const StudySession: React.FC<StudySessionProps> = ({
     setQueue(studySet);
     setIsInitialized(true);
     // Snapshot the queue once cards have loaded so in-session status updates do not reshuffle the queue.
-  }, [cards, isInitialized, sessionConfig]);
+  }, [cards, isDataLoaded, isInitialized, sessionConfig]);
 
   const queuedCard = queue[currentIndex];
   const currentCard = useMemo(() => {
@@ -287,8 +307,21 @@ export const StudySession: React.FC<StudySessionProps> = ({
   const swipeDownOpacity = useTransform(y, [50, 150], [0, 1]);
   const swipeUpOpacity = useTransform(y, [-50, -150], [0, 1]);
 
+  const showActionFeedback = useCallback(
+    (toast: { message: string; colorClass: string; bgColorClass: string }, durationMs = 2000) => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      setActionToast(toast);
+      toastTimerRef.current = setTimeout(() => {
+        setActionToast(null);
+        toastTimerRef.current = null;
+      }, durationMs);
+    },
+    []
+  );
+
   const handleNext = useCallback((quality: number | null) => {
-    if (!currentCard) return;
+    if (!currentCard || isAdvancingRef.current) return;
+    isAdvancingRef.current = true;
 
     if (quality !== null) {
       const snapshot = cards.find(c => c.id === currentCard.id) || currentCard;
@@ -307,8 +340,7 @@ export const StudySession: React.FC<StudySessionProps> = ({
         toastMsg = "Mastered"; toastColor = "text-green-500"; toastBg = "bg-green-500/10 border-green-500/20";
       }
 
-      setActionToast({ message: toastMsg, colorClass: toastColor, bgColorClass: toastBg });
-      setTimeout(() => setActionToast(null), 2000);
+      showActionFeedback({ message: toastMsg, colorClass: toastColor, bgColorClass: toastBg }, 2000);
     }
 
     // Reset position instantly
@@ -320,8 +352,11 @@ export const StudySession: React.FC<StudySessionProps> = ({
     setShowBookHint(false);
     setSelectedQuizOption(null);
 
+    if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
     // Wait for flip to partially complete before changing content
-    setTimeout(() => {
+    advanceTimerRef.current = setTimeout(() => {
+      advanceTimerRef.current = null;
+      isAdvancingRef.current = false;
       setCurrentIndex(prev => {
         const nextIndex = prev + 1;
         if (nextIndex >= queue.length) {
@@ -331,7 +366,7 @@ export const StudySession: React.FC<StudySessionProps> = ({
         return nextIndex;
       });
     }, isQuizMode ? 100 : 300);
-  }, [currentCard, cards, currentIndex, onReviewCard, queue.length, onSessionComplete, x, y, isQuizMode]);
+  }, [currentCard, cards, currentIndex, onReviewCard, queue.length, onSessionComplete, x, y, isQuizMode, showActionFeedback]);
 
   const handleSelectQuizOption = useCallback((option: string) => {
     if (!currentCard || selectedQuizOption !== null) return;
@@ -345,6 +380,12 @@ export const StudySession: React.FC<StudySessionProps> = ({
 
   const handleUndo = useCallback(() => {
     if (reviewHistory.length === 0) return;
+    if (advanceTimerRef.current) {
+      clearTimeout(advanceTimerRef.current);
+      advanceTimerRef.current = null;
+    }
+    isAdvancingRef.current = false;
+
     const lastEntry = reviewHistory[reviewHistory.length - 1];
     setReviewHistory(prev => prev.slice(0, -1));
     onRestoreCard?.(lastEntry.previousCard);
@@ -356,16 +397,23 @@ export const StudySession: React.FC<StudySessionProps> = ({
     setSelectedQuizOption(null);
     setShowConfetti(false);
     setCurrentIndex(lastEntry.index);
-    setActionToast({
-      message: "Undone",
-      colorClass: "text-amber-500",
-      bgColorClass: "bg-amber-500/10 border-amber-500/20",
-    });
-    setTimeout(() => setActionToast(null), 1800);
-  }, [reviewHistory, onRestoreCard, x, y, resetFlipInstant]);
+    showActionFeedback(
+      {
+        message: "Undone",
+        colorClass: "text-amber-500",
+        bgColorClass: "bg-amber-500/10 border-amber-500/20",
+      },
+      1800
+    );
+  }, [reviewHistory, onRestoreCard, x, y, resetFlipInstant, showActionFeedback]);
 
   const handleReviewMissedCards = useCallback((missedCards: Flashcard[]) => {
     if (missedCards.length === 0) return;
+    if (advanceTimerRef.current) {
+      clearTimeout(advanceTimerRef.current);
+      advanceTimerRef.current = null;
+    }
+    isAdvancingRef.current = false;
     setQueue(missedCards);
     setCurrentIndex(0);
     setReviewHistory([]);

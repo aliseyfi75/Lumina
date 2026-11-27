@@ -1023,6 +1023,7 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
           existingWords={existingWordsSet}
           existingCards={cards}
           onImportBookWords={handleBookWordsImported}
+          languagePreference={languagePreference}
         />
       </>
     );

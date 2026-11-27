@@ -122,7 +122,15 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onInstalled) {
   });
 }
 
-async function handleAddToLumina(word) {
+let addQueueChain = Promise.resolve();
+
+function handleAddToLumina(word) {
+  const task = addQueueChain.then(() => executeAddToLumina(word));
+  addQueueChain = task.catch(() => {});
+  return task;
+}
+
+async function executeAddToLumina(word) {
   try {
     // A. Retrieve Pantry ID
     const storage = await chrome.storage.sync.get(["luminaPantryId"]);
@@ -162,6 +170,8 @@ async function handleAddToLumina(word) {
     let currentStudyHistory = {};
     let currentLongestStreak = 0;
     let currentDeletedCards = {};
+    let currentLanguagePreference;
+    let currentLanguagePreferenceUpdatedAt;
     let currentChunkCount = 1;
 
     if (deckRes.ok) {
@@ -170,6 +180,12 @@ async function handleAddToLumina(word) {
       currentStudyHistory = data.studyHistory || {};
       currentLongestStreak = data.longestStreak || 0;
       currentDeletedCards = data.deletedCards || {};
+      if (data.languagePreference === "en" || data.languagePreference === "fa" || data.languagePreference === "both") {
+        currentLanguagePreference = data.languagePreference;
+      }
+      if (typeof data.languagePreferenceUpdatedAt === "number") {
+        currentLanguagePreferenceUpdatedAt = data.languagePreferenceUpdatedAt;
+      }
       if (typeof data.chunkCount === "number" && data.chunkCount > 1) {
         currentChunkCount = data.chunkCount;
       }
@@ -195,6 +211,13 @@ async function handleAddToLumina(word) {
       return;
     }
 
+    const preservedLanguageMeta = {
+      ...(currentLanguagePreference ? { languagePreference: currentLanguagePreference } : {}),
+      ...(currentLanguagePreferenceUpdatedAt !== undefined
+        ? { languagePreferenceUpdatedAt: currentLanguagePreferenceUpdatedAt }
+        : {}),
+    };
+
     // E. Save updated deck with 30 KB chunking
     const updatedCards = [newCard, ...currentCards];
     const fullPayload = JSON.stringify({
@@ -202,6 +225,7 @@ async function handleAddToLumina(word) {
       studyHistory: currentStudyHistory,
       longestStreak: currentLongestStreak,
       deletedCards: currentDeletedCards,
+      ...preservedLanguageMeta,
       chunkCount: 1,
       lastAccessedAt: now,
     });
@@ -223,6 +247,7 @@ async function handleAddToLumina(word) {
           studyHistory: currentStudyHistory,
           longestStreak: currentLongestStreak,
           deletedCards: currentDeletedCards,
+          ...preservedLanguageMeta,
           chunkCount: 99,
           lastAccessedAt: now,
         }),
@@ -245,6 +270,7 @@ async function handleAddToLumina(word) {
           studyHistory: currentStudyHistory,
           longestStreak: currentLongestStreak,
           deletedCards: currentDeletedCards,
+          ...preservedLanguageMeta,
           chunkCount: allChunks.length,
           lastAccessedAt: now,
         }),

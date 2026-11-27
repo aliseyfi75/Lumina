@@ -96,11 +96,11 @@ export const decodeHtmlEntities = (input: string): string => {
     })
     .replace(/&#(\d+);/g, (_m, dec) => {
       const code = Number.parseInt(dec, 10);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : "";
+      return Number.isInteger(code) && code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : "";
     })
     .replace(/&#x([0-9a-f]+);/gi, (_m, hex) => {
       const code = Number.parseInt(hex, 16);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : "";
+      return Number.isInteger(code) && code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : "";
     });
 };
 

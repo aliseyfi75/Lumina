@@ -457,10 +457,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <div className="max-w-5xl mx-auto space-y-6 sm:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-12 sm:pb-16">
 
                     {/* ── Hero / Search ───────────────────────────────────────────────── */}
-                    <div className="relative rounded-2xl sm:rounded-3xl bg-gradient-to-br from-slate-900 via-brand-950 to-slate-900 dark:from-slate-700 dark:via-slate-800 dark:to-slate-700 dark:border dark:border-slate-600/50 p-5 sm:p-8 md:p-12 text-white shadow-2xl shadow-brand-900/20 dark:shadow-slate-900/50 overflow-hidden">
-                        {/* Decorative blobs */}
-                        <div className="pointer-events-none absolute -top-20 -right-20 w-80 h-80 rounded-full bg-brand-500/10 blur-3xl" />
-                        <div className="pointer-events-none absolute -bottom-16 -left-16 w-64 h-64 rounded-full bg-indigo-500/10 blur-3xl" />
+                    <div className="relative rounded-2xl sm:rounded-3xl bg-gradient-to-br from-slate-900 via-brand-950 to-slate-900 dark:from-slate-700 dark:via-slate-800 dark:to-slate-700 dark:border dark:border-slate-600/50 p-5 sm:p-8 md:p-12 text-white shadow-2xl shadow-brand-900/20 dark:shadow-slate-900/50">
+                        {/* Decorative blobs clipped to hero rounded corners without clipping autocomplete dropdown */}
+                        <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-2xl sm:rounded-3xl">
+                            <div className="absolute -top-20 -right-20 w-80 h-80 rounded-full bg-brand-500/10 blur-3xl" />
+                            <div className="absolute -bottom-16 -left-16 w-64 h-64 rounded-full bg-indigo-500/10 blur-3xl" />
+                        </div>
 
                         <div className="relative space-y-4 sm:space-y-6">
                             <div className="space-y-1">

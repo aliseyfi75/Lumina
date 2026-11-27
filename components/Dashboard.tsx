@@ -255,6 +255,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
     const [warmupRevealed, setWarmupRevealed] = useState(false);
     const [warmupCompletedCount, setWarmupCompletedCount] = useState(0);
     const [warmupSkippedIds, setWarmupSkippedIds] = useState<string[]>([]);
+    const [valuePropDismissed, setValuePropDismissed] = useState<boolean>(() => {
+        try {
+            return localStorage.getItem('lumina_value_prop_dismissed_v1') === 'true';
+        } catch {
+            return false;
+        }
+    });
+    const handleDismissValueProp = () => {
+        setValuePropDismissed(true);
+        try {
+            localStorage.setItem('lumina_value_prop_dismissed_v1', 'true');
+        } catch {
+            // ignore storage errors
+        }
+    };
     const wrapperRef = useRef<HTMLDivElement>(null);
     const cardPreviewModalRef = useRef<HTMLDivElement>(null);
     const deleteBookModalRef = useRef<HTMLDivElement>(null);
@@ -537,6 +552,25 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                                     ? 'You\'re all caught up! Great work.'
                                                     : 'Search for words to start building your vocabulary.'}
                                     </p>
+                                    {isNewUser && !valuePropDismissed && (
+                                        <div
+                                            data-testid="hero-value-prop-strip"
+                                            className="mt-2.5 inline-flex items-center gap-2.5 max-w-2xl px-3.5 py-2 rounded-xl bg-white/10 border border-white/15 backdrop-blur-sm text-xs sm:text-sm text-emerald-100"
+                                        >
+                                            <span className="leading-snug">
+                                                Look up words, prep vocabulary for any book, or import Anki decks — <strong className="font-semibold text-white">free, private, works offline.</strong>
+                                            </span>
+                                            <button
+                                                type="button"
+                                                data-testid="dismiss-value-prop-btn"
+                                                onClick={handleDismissValueProp}
+                                                aria-label="Dismiss welcome banner"
+                                                className="p-1 rounded-lg text-emerald-200/80 hover:text-white hover:bg-white/10 transition-colors shrink-0"
+                                            >
+                                                <X className="h-3.5 w-3.5" />
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
 
                                 {/* Daily Goal Progress Ring */}

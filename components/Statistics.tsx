@@ -19,6 +19,7 @@ interface StatisticsProps {
 export const Statistics: React.FC<StatisticsProps> = ({ cards, studyHistory, longestStreak }) => {
     const [activeChartTab, setActiveChartTab] = React.useState<'growth' | 'building' | 'remaining' | 'future'>('growth');
     const [timeframe, setTimeframe] = React.useState<'weekly' | 'monthly' | 'yearly'>('weekly');
+    const [selectedHeatmapDay, setSelectedHeatmapDay] = React.useState<{ dateStr: string; count: number } | null>(null);
     const [isDark, setIsDark] = React.useState(() =>
         typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
     );
@@ -264,7 +265,18 @@ export const Statistics: React.FC<StatisticsProps> = ({ cards, studyHistory, lon
                         </div>
                     </div>
 
-                    {activeChartTab !== 'future' && (
+                    {activeChartTab === 'future' ? (
+                        <div className="flex flex-wrap items-center justify-between gap-2 mb-4 px-1">
+                            <p className="text-xs text-slate-500 dark:text-slate-400">
+                                Scheduled spaced-repetition reviews for <span className="font-semibold text-amber-600 dark:text-amber-400">Learning</span> cards
+                            </p>
+                            {newCount > 0 && (
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 border border-indigo-100 dark:border-indigo-800/50">
+                                    + {newCount} New {newCount === 1 ? 'card' : 'cards'} ready anytime
+                                </span>
+                            )}
+                        </div>
+                    ) : (
                         <div className="flex justify-end mb-4">
                             <div className="flex items-center gap-1 bg-slate-50 dark:bg-slate-700 p-1 rounded-lg border border-slate-200 dark:border-slate-600">
                                 <button
@@ -418,31 +430,58 @@ export const Statistics: React.FC<StatisticsProps> = ({ cards, studyHistory, lon
                                     maxWidth: '320px'
                                 }}
                             >
-                                {heatmapDays.map((day) => (
-                                    <div
-                                        key={day.dateStr}
-                                        title={`${day.dateStr}: ${day.count} interaction${day.count === 1 ? '' : 's'}`}
-                                        className={cn(
-                                            "w-full h-full rounded-[3px] transition-colors duration-200 hover:ring-2 ring-slate-400 ring-offset-1 cursor-crosshair",
-                                            day.level === 0 && "bg-slate-200 dark:bg-slate-700",
-                                            day.level === 1 && "bg-brand-200 dark:bg-brand-900/60",
-                                            day.level === 2 && "bg-brand-300 dark:bg-brand-700",
-                                            day.level === 3 && "bg-brand-500",
-                                            day.level === 4 && "bg-brand-700 dark:bg-brand-400"
-                                        )}
-                                    />
-                                ))}
+                                {heatmapDays.map((day) => {
+                                    const label = `${day.dateStr}: ${day.count} interaction${day.count === 1 ? '' : 's'}`;
+                                    const isSelected = selectedHeatmapDay?.dateStr === day.dateStr;
+                                    return (
+                                        <button
+                                            key={day.dateStr}
+                                            type="button"
+                                            title={label}
+                                            aria-label={label}
+                                            aria-pressed={isSelected}
+                                            onClick={() => setSelectedHeatmapDay({ dateStr: day.dateStr, count: day.count })}
+                                            onFocus={() => setSelectedHeatmapDay({ dateStr: day.dateStr, count: day.count })}
+                                            className={cn(
+                                                "w-full h-full rounded-[3px] transition-colors duration-200 hover:ring-2 focus:outline-none focus:ring-2 ring-slate-400 dark:ring-slate-300 ring-offset-1 dark:ring-offset-slate-900 cursor-pointer",
+                                                isSelected && "ring-2 ring-brand-500 dark:ring-brand-400",
+                                                day.level === 0 && "bg-slate-200 dark:bg-slate-700",
+                                                day.level === 1 && "bg-brand-200 dark:bg-brand-900/60",
+                                                day.level === 2 && "bg-brand-300 dark:bg-brand-700",
+                                                day.level === 3 && "bg-brand-500",
+                                                day.level === 4 && "bg-brand-700 dark:bg-brand-400"
+                                            )}
+                                        />
+                                    );
+                                })}
                             </div>
+                        </div>
+
+                        <div
+                            role="status"
+                            aria-live="polite"
+                            data-testid="heatmap-selected-day"
+                            className="text-xs text-center font-medium text-slate-600 dark:text-slate-300 min-h-[1.25rem]"
+                        >
+                            {selectedHeatmapDay ? (
+                                <span>
+                                    <span className="font-semibold text-slate-900 dark:text-white">{selectedHeatmapDay.dateStr}</span>
+                                    {' · '}
+                                    {selectedHeatmapDay.count} {selectedHeatmapDay.count === 1 ? 'review' : 'reviews'}
+                                </span>
+                            ) : (
+                                <span className="text-slate-400 dark:text-slate-500">Tap any square to inspect daily activity</span>
+                            )}
                         </div>
 
                         <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 font-medium px-2">
                             <span>Less</span>
                             <div className="flex gap-1.5">
                                 <div className="w-3.5 h-3.5 rounded-[3px] bg-slate-200 dark:bg-slate-700" />
-                                <div className="w-3.5 h-3.5 rounded-[3px] bg-brand-200" />
-                                <div className="w-3.5 h-3.5 rounded-[3px] bg-brand-300" />
+                                <div className="w-3.5 h-3.5 rounded-[3px] bg-brand-200 dark:bg-brand-900/60" />
+                                <div className="w-3.5 h-3.5 rounded-[3px] bg-brand-300 dark:bg-brand-700" />
                                 <div className="w-3.5 h-3.5 rounded-[3px] bg-brand-500" />
-                                <div className="w-3.5 h-3.5 rounded-[3px] bg-brand-700" />
+                                <div className="w-3.5 h-3.5 rounded-[3px] bg-brand-700 dark:bg-brand-400" />
                             </div>
                             <span>More</span>
                         </div>

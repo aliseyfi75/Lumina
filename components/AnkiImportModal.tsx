@@ -5,6 +5,7 @@ import {
   AnkiModelInfo, AnkiSchema, LuminaFieldMapping, ModelMapping,
 } from '../services/ankiService';
 import { Flashcard } from '../types';
+import { useAccessibleModal } from '../hooks/useAccessibleModal';
 
 interface AnkiImportModalProps {
   file: File | null;
@@ -127,6 +128,9 @@ export const AnkiImportModal: React.FC<AnkiImportModalProps> = ({ file, onClose,
   const [mappings, setMappings]   = useState<Record<string, LuminaFieldMapping>>({});
   const [enabled, setEnabled]     = useState<Record<string, boolean>>({});
   const [isImporting, setIsImporting] = useState(false);
+  const modalRef = React.useRef<HTMLDivElement>(null);
+
+  useAccessibleModal(Boolean(file), onClose, modalRef);
 
   useEffect(() => {
     if (!file) { setSchema(null); setError(null); setMappings({}); setEnabled({}); return; }
@@ -180,8 +184,19 @@ export const AnkiImportModal: React.FC<AnkiImportModalProps> = ({ file, onClose,
   const canImport = !!schema && schema.models.some(m => enabled[m.id] && mappings[m.id]?.word);
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center modal-safe-overlay bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-2xl flex flex-col modal-safe-panel border border-slate-100 dark:border-slate-700">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="anki-import-modal-title"
+      onClick={onClose}
+      className="fixed inset-0 z-[100] flex items-center justify-center modal-safe-overlay bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200"
+    >
+      <div
+        ref={modalRef}
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
+        className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-2xl flex flex-col modal-safe-panel border border-slate-100 dark:border-slate-700 focus:outline-none"
+      >
 
         {/* Header */}
         <div className="px-4 sm:px-6 py-4 sm:py-5 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between bg-orange-50/60 dark:bg-orange-950/30 rounded-t-2xl shrink-0 gap-2">
@@ -190,13 +205,18 @@ export const AnkiImportModal: React.FC<AnkiImportModalProps> = ({ file, onClose,
               <Zap className="h-5 w-5" />
             </div>
             <div className="min-w-0">
-              <h2 className="text-lg sm:text-xl font-serif font-bold text-slate-900 dark:text-white truncate">Import from Anki</h2>
+              <h2 id="anki-import-modal-title" className="text-lg sm:text-xl font-serif font-bold text-slate-900 dark:text-white truncate">Import from Anki</h2>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-1.5 truncate">
                 <FileText className="h-3 w-3 shrink-0" /><span className="truncate">{file.name}</span>
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors shrink-0">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close Anki import"
+            className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-orange-100/60 dark:hover:bg-slate-700 rounded-full transition-colors shrink-0"
+          >
             <X className="h-5 w-5" />
           </button>
         </div>

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import {
   X,
   Globe,
@@ -12,6 +12,7 @@ import {
 import { MeaningLanguagePreference } from '../types';
 import { LANGUAGE_PREFERENCE_OPTIONS } from '../utils/languageUtils';
 import { MeaningDisplay } from './MeaningDisplay';
+import { useAccessibleModal } from '../hooks/useAccessibleModal';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -40,6 +41,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   isDarkMode,
   onToggleDarkMode,
 }) => {
+  const modalRef = useRef<HTMLDivElement>(null);
+  useAccessibleModal(isOpen, onClose, modalRef);
+
   if (!isOpen) return null;
 
   const missingPersianCount = Math.max(0, totalCards - translatedPersianCount);
@@ -61,7 +65,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         onClick={onClose}
       />
 
-      <div className="relative w-full max-w-lg bg-white dark:bg-slate-800 rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-100 dark:border-slate-700 overflow-hidden z-10 flex flex-col modal-safe-panel">
+      <div
+        ref={modalRef}
+        tabIndex={-1}
+        className="relative w-full max-w-lg bg-white dark:bg-slate-800 rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-100 dark:border-slate-700 overflow-hidden z-10 flex flex-col modal-safe-panel focus:outline-none"
+      >
         {/* Header */}
         <div className="px-4 sm:px-6 py-4 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between bg-slate-50/80 dark:bg-slate-800/80 shrink-0">
           <div className="flex items-center gap-2.5">
@@ -101,7 +109,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 Meaning & Translation Language
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                Lumina always fetches and saves meanings in all supported languages in your JSON data, and displays only the language(s) selected below across Dictionary, Flashcards, and Study Sessions.
+                Lumina saves meanings in all supported languages automatically, and displays your chosen language(s) across Dictionary, Flashcards, and Study Sessions.
               </p>
             </div>
 
@@ -224,7 +232,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               ) : missingPersianCount === 0 ? (
                 <div className="flex items-center gap-2 text-xs text-emerald-700 dark:text-emerald-400 font-medium">
                   <CheckCircle2 className="h-4 w-4 shrink-0" />
-                  All {totalCards} flashcards in your deck have both English & Persian saved in JSON!
+                  All {totalCards} flashcards in your deck have both English &amp; Persian saved in JSON!
                 </div>
               ) : (
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">

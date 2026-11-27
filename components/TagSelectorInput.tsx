@@ -204,8 +204,8 @@ export const TagSelectorInput: React.FC<TagSelectorInputProps> = ({
               onMouseDown={(e) => {
                 // Prevent input blur before click registers
                 e.preventDefault();
-                handleAddTag(tag);
               }}
+              onClick={() => handleAddTag(tag)}
               className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border transition-all cursor-pointer ${
                 parsed.isBook
                   ? 'bg-white dark:bg-slate-800 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/60 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 hover:border-emerald-400'
@@ -237,8 +237,8 @@ export const TagSelectorInput: React.FC<TagSelectorInputProps> = ({
               data-testid="tag-create-pill"
               onMouseDown={(e) => {
                 e.preventDefault();
-                handleAddTag(inputValue);
               }}
+              onClick={() => handleAddTag(inputValue)}
               className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 border border-brand-200 dark:border-brand-800 hover:bg-brand-100 transition-all"
             >
               <Plus className="h-3 w-3" />

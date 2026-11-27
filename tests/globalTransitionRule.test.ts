@@ -2,7 +2,7 @@ import { test, expect } from 'playwright/test';
 
 test('global wildcard CSS transition rule is removed so arbitrary DOM/SVG nodes do not incur forced transitions', async ({ page }) => {
   await page.goto('http://localhost:5173/');
-  const heading = page.getByRole('heading', { name: /Welcome back/i });
+  const heading = page.getByRole('heading', { name: /Welcome (back|to Lumina)/i });
   await expect(heading).toBeVisible();
 
   const headingTransitionProp = await heading.evaluate((el) => getComputedStyle(el).transitionProperty);

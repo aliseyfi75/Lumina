@@ -86,15 +86,7 @@ const ClickableDefinitionText: React.FC<{
           <React.Fragment key={idx}>
             {prefix}
             <span
-              role="button"
-              tabIndex={0}
               onClick={() => onWordClick(coreWord)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  onWordClick(coreWord);
-                }
-              }}
               title={`Look up "${coreWord}"`}
               className="cursor-pointer rounded px-0.5 -mx-0.5 hover:bg-brand-100/70 dark:hover:bg-brand-900/40 hover:text-brand-700 dark:hover:text-brand-300 transition-colors"
             >
@@ -153,10 +145,21 @@ export const Dictionary: React.FC<DictionaryProps> = ({
   };
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
 
   const showToast = (message: string) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     setToastMessage(message);
-    setTimeout(() => setToastMessage(null), 3000);
+    toastTimerRef.current = setTimeout(() => {
+      setToastMessage(null);
+      toastTimerRef.current = null;
+    }, 3000);
   };
 
   // Suggestion State
@@ -343,9 +346,9 @@ export const Dictionary: React.FC<DictionaryProps> = ({
 
   return (
     <div className="max-w-2xl mx-auto space-y-6 sm:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="text-center space-y-2 sm:space-y-4">
-        <h1 className="text-3xl sm:text-4xl md:text-5xl font-serif font-bold text-slate-900 dark:text-white tracking-tight">Lumina</h1>
-        <p className="text-slate-500 dark:text-slate-400 text-base sm:text-lg">Illuminate your vocabulary.</p>
+      <div className="text-center space-y-2 sm:space-y-3">
+        <h1 className="text-3xl sm:text-4xl md:text-5xl font-serif font-bold text-slate-900 dark:text-white tracking-tight">Dictionary</h1>
+        <p className="text-slate-500 dark:text-slate-400 text-base sm:text-lg">Look up words, explore synonyms, and save flashcards.</p>
       </div>
 
       <div className="space-y-3">
@@ -367,9 +370,28 @@ export const Dictionary: React.FC<DictionaryProps> = ({
                 }
               }}
               placeholder="Lookup a word..."
-              className="block w-full pl-10 sm:pl-11 pr-24 py-3 sm:py-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-2xl text-base sm:text-lg text-slate-900 dark:text-white shadow-sm placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 transition-all"
+              aria-label="Lookup a word"
+              className="block w-full pl-10 sm:pl-11 pr-32 py-3 sm:py-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-2xl text-base sm:text-lg text-slate-900 dark:text-white shadow-sm placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 transition-all"
               autoComplete="off"
             />
+            {query.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setQuery('');
+                  setSuggestions([]);
+                  setShowSuggestions(false);
+                  setError('');
+                  setTypoSuggestion(null);
+                  lastSearched.current = '';
+                }}
+                aria-label="Clear search"
+                title="Clear search"
+                className="absolute right-[5.5rem] sm:right-24 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
             <button
               type="submit"
               disabled={(loading && query.trim().toLowerCase() === lastSearched.current.toLowerCase()) || !query.trim()}
@@ -518,9 +540,11 @@ export const Dictionary: React.FC<DictionaryProps> = ({
                 <span className="text-base sm:text-xl text-slate-500 dark:text-slate-400 font-serif italic">{result.phonetic}</span>
               )}
               <button
+                type="button"
                 onClick={() => playAudio(result.word, result.audio)}
-                className="p-1.5 text-slate-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded-full transition-colors"
+                className="p-2 text-slate-500 dark:text-slate-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded-full transition-colors"
                 title="Listen to pronunciation"
+                aria-label={`Listen to pronunciation of ${result.word}`}
               >
                 <Volume2 className="h-5 w-5 sm:h-6 sm:w-6" />
               </button>
@@ -773,8 +797,9 @@ export const Dictionary: React.FC<DictionaryProps> = ({
       {/* Toast Message */}
       {toastMessage && (
         <div
-          style={{ bottom: 'calc(2rem + var(--safe-bottom, 0px))' }}
-          className="fixed left-1/2 transform -translate-x-1/2 bg-slate-900 text-white px-6 py-3 rounded-full shadow-lg z-50 animate-in fade-in slide-in-from-bottom-4 duration-300"
+          role="status"
+          aria-live="polite"
+          className="fixed safe-floating-bottom left-1/2 -translate-x-1/2 bg-slate-900 text-white px-6 py-3 rounded-full shadow-lg z-50 animate-in fade-in slide-in-from-bottom-4 duration-300"
         >
           {toastMessage}
         </div>

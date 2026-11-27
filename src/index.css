@@ -28,7 +28,11 @@ html.ios-standalone:not(.dark) .ios-safe-top-spacer {
   }
 
   .safe-main-pb {
-    padding-bottom: calc(1rem + var(--safe-bottom, 0px));
+    padding-bottom: calc(5.25rem + var(--safe-bottom, 0px));
+  }
+
+  .mobile-bottom-nav-pb {
+    padding-bottom: max(0.35rem, var(--safe-bottom, 0px));
   }
 
   .modal-safe-overlay {
@@ -48,17 +52,17 @@ html.ios-standalone:not(.dark) .ios-safe-top-spacer {
   }
 
   .safe-floating-bottom {
-    bottom: calc(1rem + var(--safe-bottom, 0px));
+    bottom: calc(4.75rem + var(--safe-bottom, 0px));
   }
 
   .safe-floating-bottom-right {
-    bottom: calc(1rem + var(--safe-bottom, 0px));
+    bottom: calc(4.75rem + var(--safe-bottom, 0px));
     right: calc(1rem + var(--safe-right, 0px));
   }
 
   .study-viewport-height {
-    height: calc(100vh - 6.5rem - var(--safe-top, 0px) - var(--safe-bottom, 0px));
-    height: calc(100dvh - 6.5rem - var(--safe-top, 0px) - var(--safe-bottom, 0px));
+    height: calc(100vh - 10.5rem - var(--safe-top, 0px) - var(--safe-bottom, 0px));
+    height: calc(100dvh - 10.5rem - var(--safe-top, 0px) - var(--safe-bottom, 0px));
     min-height: 22rem;
     max-height: 44rem;
   }
@@ -73,11 +77,76 @@ html.ios-standalone:not(.dark) .ios-safe-top-spacer {
       padding-bottom: calc(2rem + var(--safe-bottom, 0px));
     }
 
+    .safe-floating-bottom {
+      bottom: calc(1rem + var(--safe-bottom, 0px));
+    }
+
+    .safe-floating-bottom-right {
+      bottom: calc(1rem + var(--safe-bottom, 0px));
+      right: calc(1rem + var(--safe-right, 0px));
+    }
+
     .study-viewport-height {
       height: calc(100vh - 8.5rem - var(--safe-top, 0px) - var(--safe-bottom, 0px));
       height: calc(100dvh - 8.5rem - var(--safe-top, 0px) - var(--safe-bottom, 0px));
       min-height: 28rem;
       max-height: 46rem;
     }
+  }
+}
+
+@keyframes lumina-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes lumina-slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes lumina-zoom-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.slide-in-from-bottom-4 {
+  animation: lumina-slide-up 0.35s ease-out both;
+}
+
+.slide-in-from-top-2 {
+  animation: lumina-slide-down 0.18s ease-out both;
+}
+
+.zoom-in {
+  animation: lumina-zoom-in 0.2s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

@@ -13,6 +13,22 @@ import { getAdaptiveWordHeadingClass } from '../utils/deviceScale';
 import { resolveMeaningDisplay } from '../utils/languageUtils';
 import { MeaningDisplay } from './MeaningDisplay';
 import { SessionMode } from './SessionConfigModal';
+import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion';
+
+function getLearnedNextIntervalLabel(repetition: number): string {
+  switch (repetition) {
+    case 0:
+      return '1 day';
+    case 1:
+      return '7 days';
+    case 2:
+      return '14 days';
+    case 3:
+      return '30 days';
+    default:
+      return 'Master!';
+  }
+}
 
 const FALLBACK_DISTRACTOR_ITEMS: Array<{
   englishText: string;
@@ -60,6 +76,7 @@ interface StudySessionProps {
   onRestoreCard?: (previousCard: Flashcard) => void;
   onSessionComplete: () => void;
   onExit: () => void;
+  onExitToDashboard?: () => void;
   languagePreference?: MeaningLanguagePreference;
 }
 
@@ -70,8 +87,10 @@ export const StudySession: React.FC<StudySessionProps> = ({
   onRestoreCard,
   onSessionComplete,
   onExit,
+  onExitToDashboard,
   languagePreference = 'en',
 }) => {
+  const prefersReducedMotion = usePrefersReducedMotion();
   const [queue, setQueue] = useState<Flashcard[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
@@ -512,7 +531,7 @@ export const StudySession: React.FC<StudySessionProps> = ({
 
     return (
       <div className="max-w-lg mx-auto flex flex-col items-center justify-center min-h-[65vh] py-8 px-4 space-y-6 animate-in fade-in slide-in-from-bottom-4">
-        {showConfetti && (
+        {showConfetti && !prefersReducedMotion && (
           <div className="fixed inset-0 z-[100] pointer-events-none">
             <Confetti
               width={width}
@@ -562,7 +581,7 @@ export const StudySession: React.FC<StudySessionProps> = ({
           </div>
         )}
 
-        <div className="flex flex-col sm:flex-row items-center gap-3 w-full justify-center z-10">
+        <div className="flex flex-col sm:flex-row sm:flex-wrap items-center gap-3 w-full justify-center z-10">
           {missedCards.length > 0 && (
             <button
               onClick={() => handleReviewMissedCards(missedCards)}
@@ -581,8 +600,16 @@ export const StudySession: React.FC<StudySessionProps> = ({
               Undo Last
             </button>
           )}
+          {onExitToDashboard && (
+            <button
+              onClick={onExit}
+              className="w-full sm:w-auto whitespace-nowrap px-5 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-xl font-medium transition-colors"
+            >
+              Back to My Deck
+            </button>
+          )}
           <button
-            onClick={onExit}
+            onClick={onExitToDashboard || onExit}
             className="w-full sm:w-auto whitespace-nowrap px-6 py-3 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 rounded-xl font-medium hover:bg-slate-800 dark:hover:bg-white transition-colors shadow-lg shadow-slate-900/20"
           >
             Return to Dashboard
@@ -692,9 +719,11 @@ export const StudySession: React.FC<StudySessionProps> = ({
                   <span className="text-sm text-slate-400 dark:text-slate-500 font-serif italic">{currentCard.phonetic}</span>
                 )}
                 <button
+                  type="button"
                   onClick={() => playAudio(currentCard.word, currentCard.audio)}
-                  className="p-1.5 text-slate-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded-full transition-colors"
+                  className="p-2 text-slate-500 dark:text-slate-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded-full transition-colors"
                   title="Listen to pronunciation"
+                  aria-label={`Listen to pronunciation of ${currentCard.word}`}
                 >
                   <Volume2 className="h-4 w-4" />
                 </button>
@@ -863,7 +892,7 @@ export const StudySession: React.FC<StudySessionProps> = ({
             y,
             rotateZ: rotate,
           }}
-          drag={isFlipped}
+          drag={isFlipped ? 'x' : false}
           dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
           dragElastic={0.8}
           onDragEnd={handleDragEnd}
@@ -896,106 +925,110 @@ export const StudySession: React.FC<StudySessionProps> = ({
 
                 <div className="h-4 shrink-0" aria-hidden="true" />
 
-                <div className="relative z-10 flex-1 min-h-0 flex flex-col items-center justify-center w-full overflow-y-auto custom-scrollbar py-2">
-                  {(currentCardComplexity || currentCardChapter) && (
-                    <div className="mb-3 flex flex-wrap items-center justify-center gap-1.5">
-                      {currentCardComplexity && (
-                        <span
-                          data-testid="study-card-complexity-badge"
-                          className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
-                            currentCardComplexity === 'advanced'
-                              ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800/60'
-                              : currentCardComplexity === 'intermediate'
-                                ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/60'
-                                : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/60'
-                          }`}
-                        >
-                          {currentCardComplexity}
-                        </span>
-                      )}
-                      {currentCardChapter && (
-                        <span
-                          data-testid="study-card-chapter-badge"
-                          className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/60"
-                        >
-                          {currentCardChapter}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                  <h2 className={`${getAdaptiveWordHeadingClass(currentCard.word, 'study')} font-serif font-bold text-slate-900 dark:text-white mb-4 sm:mb-6 break-words max-w-full px-1`}>
-                    {currentCard.word}
-                  </h2>
-                  <div className="flex flex-wrap items-center gap-2 sm:gap-3 justify-center max-w-full">
-                    {currentCard.phonetic && (
-                      <p className="text-lg sm:text-2xl text-slate-400 dark:text-slate-500 font-serif italic break-words">
-                        {currentCard.phonetic}
-                      </p>
+                <div className="relative z-10 flex-1 min-h-0 flex flex-col items-center justify-start w-full overflow-y-auto custom-scrollbar py-2">
+                  <div className="my-auto w-full flex flex-col items-center">
+                    {(currentCardComplexity || currentCardChapter) && (
+                      <div className="mb-3 flex flex-wrap items-center justify-center gap-1.5">
+                        {currentCardComplexity && (
+                          <span
+                            data-testid="study-card-complexity-badge"
+                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
+                              currentCardComplexity === 'advanced'
+                                ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800/60'
+                                : currentCardComplexity === 'intermediate'
+                                  ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/60'
+                                  : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/60'
+                            }`}
+                          >
+                            {currentCardComplexity}
+                          </span>
+                        )}
+                        {currentCardChapter && (
+                          <span
+                            data-testid="study-card-chapter-badge"
+                            className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/60"
+                          >
+                            {currentCardChapter}
+                          </span>
+                        )}
+                      </div>
                     )}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        playAudio(currentCard.word, currentCard.audio);
-                      }}
-                      className="p-2 text-slate-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded-full transition-colors"
-                      title="Listen to pronunciation"
-                    >
-                      <Volume2 className="h-5 w-5 sm:h-6 sm:w-6" />
-                    </button>
-                  </div>
-
-                  {bookSourceTitle && currentCard.example && (
-                    <div
-                      className="mt-4 sm:mt-6 w-full flex flex-col items-center"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      {!showBookHint ? (
-                        <button
-                          type="button"
-                          data-testid="book-hint-button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setShowBookHint(true);
-                          }}
-                          className="inline-flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-full text-xs font-semibold bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 hover:bg-amber-100 dark:hover:bg-amber-900/50 transition-all shadow-sm"
-                        >
-                          <Lightbulb className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-                          <span>Show Book Hint</span>
-                          <span className="hidden sm:inline text-[10px] opacity-60 font-mono">(H)</span>
-                        </button>
-                      ) : (
-                        <div
-                          data-testid="book-hint-content"
-                          className="w-full p-3.5 sm:p-4 rounded-2xl bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 text-left space-y-2"
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400 min-w-0">
-                              <BookOpen className="h-3 w-3 shrink-0" />
-                              <span className="truncate">From {bookSourceTitle}</span>
-                            </span>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setShowBookHint(false);
-                              }}
-                              className="text-[11px] font-semibold text-amber-700/80 dark:text-amber-400/80 hover:underline shrink-0"
-                            >
-                              Hide Hint
-                            </button>
-                          </div>
-                          <p className="text-xs sm:text-sm italic font-serif text-slate-700 dark:text-slate-200 leading-relaxed max-h-28 overflow-y-auto custom-scrollbar">
-                            {renderHighlightedBookSentence(currentCard.example, currentCard.word)}
-                          </p>
-                        </div>
+                    <h2 className={`${getAdaptiveWordHeadingClass(currentCard.word, 'study')} font-serif font-bold text-slate-900 dark:text-white mb-4 sm:mb-6 break-words max-w-full px-1`}>
+                      {currentCard.word}
+                    </h2>
+                    <div className="flex flex-wrap items-center gap-2 sm:gap-3 justify-center max-w-full">
+                      {currentCard.phonetic && (
+                        <p className="text-lg sm:text-2xl text-slate-500 dark:text-slate-400 font-serif italic break-words">
+                          {currentCard.phonetic}
+                        </p>
                       )}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          playAudio(currentCard.word, currentCard.audio);
+                        }}
+                        className="p-2 text-slate-500 dark:text-slate-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded-full transition-colors"
+                        title="Listen to pronunciation"
+                        aria-label={`Listen to pronunciation of ${currentCard.word}`}
+                      >
+                        <Volume2 className="h-5 w-5 sm:h-6 sm:w-6" />
+                      </button>
                     </div>
-                  )}
+
+                    {bookSourceTitle && currentCard.example && (
+                      <div
+                        className="mt-4 sm:mt-6 w-full flex flex-col items-center"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {!showBookHint ? (
+                          <button
+                            type="button"
+                            data-testid="book-hint-button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setShowBookHint(true);
+                            }}
+                            className="inline-flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-full text-xs font-semibold bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 hover:bg-amber-100 dark:hover:bg-amber-900/50 transition-all shadow-sm"
+                          >
+                            <Lightbulb className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                            <span>Show Book Hint</span>
+                            <span className="hidden sm:inline text-[10px] opacity-70 font-mono">(H)</span>
+                          </button>
+                        ) : (
+                          <div
+                            data-testid="book-hint-content"
+                            className="w-full p-3.5 sm:p-4 rounded-2xl bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 text-left space-y-2"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400 min-w-0">
+                                <BookOpen className="h-3 w-3 shrink-0" />
+                                <span className="truncate">From {bookSourceTitle}</span>
+                              </span>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setShowBookHint(false);
+                                }}
+                                className="text-[11px] font-semibold text-amber-700/80 dark:text-amber-400/80 hover:underline shrink-0"
+                              >
+                                Hide Hint
+                              </button>
+                            </div>
+                            <p className="text-xs sm:text-sm italic font-serif text-slate-700 dark:text-slate-200 leading-relaxed max-h-28 overflow-y-auto custom-scrollbar">
+                              {renderHighlightedBookSentence(currentCard.example, currentCard.word)}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
-                <div className="relative z-10 pt-2 shrink-0 text-slate-300 dark:text-slate-600 flex items-center gap-2 opacity-60 group-hover:opacity-100 transition-opacity">
+                <div className="relative z-10 pt-2 shrink-0 text-slate-500 dark:text-slate-400 flex items-center gap-2 opacity-80 group-hover:opacity-100 transition-opacity">
                   <RotateCw className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                  <span className="text-[11px] sm:text-xs uppercase tracking-widest font-medium">Click to reveal</span>
+                  <span className="text-[11px] sm:text-xs uppercase tracking-widest font-medium">Tap to reveal</span>
                 </div>
               </motion.div>
             </div>
@@ -1017,73 +1050,81 @@ export const StudySession: React.FC<StudySessionProps> = ({
                 <motion.div style={{ opacity: swipeDownOpacity }} className="absolute inset-0 rounded-3xl pointer-events-none bg-blue-500/10" />
                 <motion.div style={{ opacity: swipeUpOpacity }} className="absolute inset-0 rounded-3xl pointer-events-none bg-blue-500/10" />
 
-                <div className="relative z-10 flex-1 min-h-0 flex flex-col items-center justify-center overflow-y-auto custom-scrollbar w-full">
-                  <span className="inline-block px-3 py-1 bg-brand-900/50 text-brand-300 text-[11px] sm:text-xs font-bold uppercase tracking-widest rounded-full mb-3 sm:mb-5 shrink-0">
-                    {currentCard.partOfSpeech}
-                  </span>
+                <div className="relative z-10 flex-1 min-h-0 flex flex-col items-center justify-start overflow-y-auto custom-scrollbar w-full">
+                  <div className="my-auto w-full flex flex-col items-center py-1">
+                    <span className="inline-block px-3 py-1 bg-brand-900/50 text-brand-300 text-[11px] sm:text-xs font-bold uppercase tracking-widest rounded-full mb-3 sm:mb-5 shrink-0">
+                      {currentCard.partOfSpeech}
+                    </span>
 
-                  {currentCard.image && (
-                    <div className="mb-3 sm:mb-5 shrink-0 rounded-2xl overflow-hidden shadow-sm border border-slate-700 h-28 sm:h-44 flex justify-center bg-slate-800 items-center w-full max-w-sm mx-auto">
-                      <img
-                        src={currentCard.image}
-                        alt={`Visual mnemonic for ${currentCard.word}`}
-                        className="max-h-full max-w-full object-contain"
-                        loading="lazy"
+                    {currentCard.image && (
+                      <div className="mb-3 sm:mb-5 shrink-0 rounded-2xl overflow-hidden shadow-sm border border-slate-700 h-28 sm:h-44 flex justify-center bg-slate-800 items-center w-full max-w-sm mx-auto">
+                        <img
+                          src={currentCard.image}
+                          alt={`Visual mnemonic for ${currentCard.word}`}
+                          className="max-h-full max-w-full object-contain"
+                          loading="lazy"
+                        />
+                      </div>
+                    )}
+
+                    <div className="mb-4 sm:mb-6 w-full max-w-full">
+                      <MeaningDisplay
+                        englishText={currentCard.mainDefinition}
+                        translations={currentCard.translations}
+                        preference={languagePreference}
+                        variant="darkCard"
+                        englishClassName="text-base sm:text-xl text-slate-50 leading-relaxed font-medium break-words text-center"
+                        persianClassName={
+                          languagePreference === 'both'
+                            ? 'font-persian text-base sm:text-xl text-emerald-300 leading-relaxed font-medium break-words text-right pt-3 mt-1 border-t border-slate-700/80'
+                            : 'font-persian text-lg sm:text-2xl text-slate-50 leading-relaxed font-medium break-words text-right'
+                        }
+                        testIdPrefix="study-card"
                       />
                     </div>
-                  )}
-
-                  <div className="mb-4 sm:mb-6 w-full max-w-full">
-                    <MeaningDisplay
-                      englishText={currentCard.mainDefinition}
-                      translations={currentCard.translations}
-                      preference={languagePreference}
-                      variant="darkCard"
-                      englishClassName="text-base sm:text-xl text-slate-50 leading-relaxed font-medium break-words text-center"
-                      persianClassName={
-                        languagePreference === 'both'
-                          ? 'font-persian text-base sm:text-xl text-emerald-300 leading-relaxed font-medium break-words text-right pt-3 mt-1 border-t border-slate-700/80'
-                          : 'font-persian text-lg sm:text-2xl text-slate-50 leading-relaxed font-medium break-words text-right'
-                      }
-                      testIdPrefix="study-card"
-                    />
+                    {currentCard.example && (
+                      <div className="bg-slate-800/50 p-3 sm:p-4 rounded-xl w-full border border-slate-800">
+                        <p className="text-slate-300 italic font-serif text-sm sm:text-lg leading-relaxed break-words">
+                          "{currentCard.example}"
+                        </p>
+                      </div>
+                    )}
                   </div>
-                  {currentCard.example && (
-                    <div className="bg-slate-800/50 p-3 sm:p-4 rounded-xl w-full border border-slate-800">
-                      <p className="text-slate-400 italic font-serif text-sm sm:text-lg leading-relaxed break-words">
-                        "{currentCard.example}"
-                      </p>
-                    </div>
-                  )}
                 </div>
 
                 {/* Integrated Controls */}
                 <div className="relative z-10 pt-3.5 sm:pt-5 mt-3 sm:mt-4 border-t border-slate-800 grid grid-cols-3 gap-2 sm:gap-3 w-full shrink-0" onClick={(e) => e.stopPropagation()}>
                   <button
+                    type="button"
                     onClick={() => handleNext(1)}
                     className="group/btn flex flex-col items-center justify-center p-2 sm:p-3 rounded-xl bg-slate-800 hover:bg-red-900/20 border border-slate-700 hover:border-red-700/50 transition-all text-center relative overflow-hidden"
                   >
-                    <span className="text-xs sm:text-sm font-bold uppercase tracking-wide sm:tracking-wider text-slate-300 group-hover/btn:text-red-400 mb-0.5 sm:mb-1 z-10 transition-colors">Again</span>
-                    <span className="text-[9px] text-slate-500 leading-tight sm:mb-2 z-10 transition-colors">Study again<br />today</span>
-                    <div className="hidden sm:flex text-[10px] items-center gap-1 text-slate-600 bg-slate-900/50 px-2 py-0.5 rounded border border-slate-700/50 z-10 transition-colors"><MoveLeft className="w-3 h-3" /> Swipe</div>
+                    <span className="text-xs sm:text-sm font-bold uppercase tracking-wide sm:tracking-wider text-slate-100 group-hover/btn:text-red-400 mb-0.5 sm:mb-1 z-10 transition-colors">Again</span>
+                    <span className="text-[10px] text-slate-300 leading-tight mb-1 sm:mb-2 z-10 transition-colors">Review today</span>
+                    <div className="flex text-[9px] sm:text-[10px] items-center gap-1 text-slate-400 bg-slate-900/60 px-1.5 sm:px-2 py-0.5 rounded border border-slate-700/70 z-10 transition-colors"><MoveLeft className="w-3 h-3" /> Swipe</div>
                   </button>
 
                   <button
+                    type="button"
                     onClick={() => handleNext(3)}
+                    data-testid="study-learned-btn"
                     className="group/btn flex flex-col items-center justify-center p-2 sm:p-3 rounded-xl bg-slate-800 hover:bg-blue-900/20 border border-slate-700 hover:border-blue-700/50 transition-all text-center relative overflow-hidden"
                   >
-                    <span className="text-xs sm:text-sm font-bold uppercase tracking-wide sm:tracking-wider text-slate-300 group-hover/btn:text-blue-400 mb-0.5 sm:mb-1 z-10 transition-colors">Learned</span>
-                    <span className="text-[9px] text-slate-500 leading-tight sm:mb-2 z-10 transition-colors">Pushes to<br />tomorrow</span>
-                    <div className="hidden sm:flex text-[10px] items-center gap-1 text-slate-600 bg-slate-900/50 px-2 py-0.5 rounded border border-slate-700/50 z-10 transition-colors"><MoveDown className="w-3 h-3" /><MoveUp className="w-3 h-3" /> Swipe</div>
+                    <span className="text-xs sm:text-sm font-bold uppercase tracking-wide sm:tracking-wider text-slate-100 group-hover/btn:text-blue-400 mb-0.5 sm:mb-1 z-10 transition-colors">Learned</span>
+                    <span data-testid="study-learned-interval" className="text-[10px] text-slate-300 leading-tight mb-1 sm:mb-2 z-10 transition-colors">
+                      {getLearnedNextIntervalLabel(currentCard.repetition)}
+                    </span>
+                    <div className="flex text-[9px] sm:text-[10px] items-center gap-1 text-slate-400 bg-slate-900/60 px-1.5 sm:px-2 py-0.5 rounded border border-slate-700/70 z-10 transition-colors"><MoveUp className="w-3 h-3" /> Key</div>
                   </button>
 
                   <button
+                    type="button"
                     onClick={() => handleNext(5)}
                     className="group/btn flex flex-col items-center justify-center p-2 sm:p-3 rounded-xl bg-slate-800 hover:bg-green-900/20 border border-slate-700 hover:border-green-700/50 transition-all text-center relative overflow-hidden"
                   >
-                    <span className="text-xs sm:text-sm font-bold uppercase tracking-wide sm:tracking-wider text-slate-300 group-hover/btn:text-green-400 mb-0.5 sm:mb-1 z-10 transition-colors">Mastered</span>
-                    <span className="text-[9px] text-slate-500 leading-tight sm:mb-2 z-10 transition-colors">Remove from<br />sessions</span>
-                    <div className="hidden sm:flex text-[10px] items-center gap-1 text-slate-600 bg-slate-900/50 px-2 py-0.5 rounded border border-slate-700/50 z-10 transition-colors"><MoveRight className="w-3 h-3" /> Swipe</div>
+                    <span className="text-xs sm:text-sm font-bold uppercase tracking-wide sm:tracking-wider text-slate-100 group-hover/btn:text-green-400 mb-0.5 sm:mb-1 z-10 transition-colors">Mastered</span>
+                    <span className="text-[10px] text-slate-300 leading-tight mb-1 sm:mb-2 z-10 transition-colors">Complete</span>
+                    <div className="flex text-[9px] sm:text-[10px] items-center gap-1 text-slate-400 bg-slate-900/60 px-1.5 sm:px-2 py-0.5 rounded border border-slate-700/70 z-10 transition-colors"><MoveRight className="w-3 h-3" /> Swipe</div>
                   </button>
                 </div>
               </motion.div>

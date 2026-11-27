@@ -18,7 +18,7 @@ import {
 } from './utils/languageUtils';
 import { mergeFlashcardDecks, MergeDeckOptions } from './utils/cardMerge';
 import { sanitizeMediaUrl } from './utils/security';
-import { Book, Layers, Database, Save, Cloud, BarChart2, Home, Sun, Moon, RefreshCw, Settings, Loader2 } from 'lucide-react';
+import { Book, Layers, Database, Save, Cloud, BarChart2, Home, Sun, Moon, RefreshCw, Settings, Loader2, Undo2, CheckCircle, X } from 'lucide-react';
 import { useWindowSize } from 'react-use';
 import type { SessionMode } from './components/SessionConfigModal';
 import type { BookExtractedWord } from './services/bookService';
@@ -26,6 +26,7 @@ import { useTheme } from './hooks/useTheme';
 import { useLanguagePreference } from './hooks/useLanguagePreference';
 import { useTranslationBackfill } from './hooks/useTranslationBackfill';
 import { useLocalFileSync } from './hooks/useLocalFileSync';
+import { usePrefersReducedMotion } from './hooks/usePrefersReducedMotion';
 
 const Dictionary = lazy(() => import('./components/Dictionary').then((m) => ({ default: m.Dictionary })));
 const Flashcards = lazy(() => import('./components/Flashcards').then((m) => ({ default: m.Flashcards })));
@@ -234,7 +235,28 @@ const App: React.FC = () => {
 
   // Confetti State
   const { width, height } = useWindowSize();
+  const prefersReducedMotion = usePrefersReducedMotion();
   const [showConfetti, setShowConfetti] = useState(false);
+  const [deletedToast, setDeletedToast] = useState<{ card: Flashcard; index: number } | null>(null);
+  const deletedToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [appNotice, setAppNotice] = useState<string | null>(null);
+  const appNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showAppNotice = useCallback((message: string, durationMs = 4000) => {
+    if (appNoticeTimerRef.current) clearTimeout(appNoticeTimerRef.current);
+    setAppNotice(message);
+    appNoticeTimerRef.current = setTimeout(() => {
+      setAppNotice(null);
+      appNoticeTimerRef.current = null;
+    }, durationMs);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (deletedToastTimerRef.current) clearTimeout(deletedToastTimerRef.current);
+      if (appNoticeTimerRef.current) clearTimeout(appNoticeTimerRef.current);
+    };
+  }, []);
   const [prevMasteredCount, setPrevMasteredCount] = useState(0);
 
   // Prune tombstones older than 30 days and return a plain Record for serialisation
@@ -1325,10 +1347,26 @@ const App: React.FC = () => {
     setAnkiImportFile(file);
   };
 
-  const handleAnkiImport = (cards: Flashcard[]) => {
-    performMerge(cards);
+  const handleAnkiImport = (importedCards: Flashcard[]) => {
+    const rawFileName = ankiImportFile?.name || '';
+    const deckName = rawFileName.replace(/\.apkg$/i, '').trim();
+    const deckTag = deckName ? `Anki: ${deckName}` : 'Anki';
+    const taggedCards = importedCards.map((card) => {
+      const existing = card.tags || [];
+      if (existing.some((t) => t.toLowerCase() === deckTag.toLowerCase())) {
+        return card;
+      }
+      return { ...card, tags: [...existing, deckTag] };
+    });
+
+    performMerge(taggedCards);
     setAnkiImportFile(null);
-    trackEvent(TRACKING_ACTION.IMPORT_CSV, TRACKING_CATEGORY.DATA, 'anki_card_count', cards.length);
+    if (taggedCards.length > 0) {
+      showAppNotice(
+        `Imported ${taggedCards.length} ${taggedCards.length === 1 ? 'card' : 'cards'} from Anki (${deckTag})`
+      );
+    }
+    trackEvent(TRACKING_ACTION.IMPORT_CSV, TRACKING_CATEGORY.DATA, 'anki_card_count', taggedCards.length);
   };
 
   // --- Cloud Handlers ---
@@ -2453,6 +2491,8 @@ const App: React.FC = () => {
   };
 
   const handleDeleteCard = (id: string) => {
+    const existingIndex = cardsRef.current.findIndex(c => c.id === id);
+    const removedCard = existingIndex >= 0 ? cardsRef.current[existingIndex] : null;
     const now = Date.now();
     const nextCards = cardsRef.current.filter(c => c.id !== id);
     const nextDeletedMap = new Map(deletedCardsRef.current);
@@ -2465,6 +2505,70 @@ const App: React.FC = () => {
 
     syncDeletionImmediately(nextCards, prunedDeletedCards());
     trackEvent(TRACKING_ACTION.DELETE_CARD, TRACKING_CATEGORY.FLASHCARDS);
+
+    if (removedCard) {
+      if (deletedToastTimerRef.current) clearTimeout(deletedToastTimerRef.current);
+      setDeletedToast({ card: removedCard, index: existingIndex });
+      deletedToastTimerRef.current = setTimeout(() => {
+        setDeletedToast(null);
+        deletedToastTimerRef.current = null;
+      }, 6000);
+    }
+  };
+
+  const handleUndoDeleteCard = () => {
+    if (!deletedToast) return;
+    if (deletedToastTimerRef.current) {
+      clearTimeout(deletedToastTimerRef.current);
+      deletedToastTimerRef.current = null;
+    }
+    const { card, index } = deletedToast;
+    const restoredCard: Flashcard = { ...card, updatedAt: Date.now() };
+    const nextCards = [...cardsRef.current.filter(c => c.id !== card.id)];
+    const insertAt = Math.max(0, Math.min(index, nextCards.length));
+    nextCards.splice(insertAt, 0, restoredCard);
+
+    const nextDeletedMap = new Map(deletedCardsRef.current);
+    nextDeletedMap.delete(card.id);
+
+    cardsRef.current = nextCards;
+    deletedCardsRef.current = nextDeletedMap;
+    setCards(nextCards);
+    setDeletedCards(nextDeletedMap);
+    setDeletedToast(null);
+
+    syncDeletionImmediately(nextCards, prunedDeletedCards());
+  };
+
+  const handleBulkUpdateCards = (ids: string[], updater: (card: Flashcard) => Flashcard) => {
+    if (ids.length === 0) return;
+    const idSet = new Set(ids);
+    const now = Date.now();
+    const nextCards = cardsRef.current.map(c =>
+      idSet.has(c.id) ? { ...updater(c), updatedAt: now } : c
+    );
+    cardsRef.current = nextCards;
+    setCards(nextCards);
+    showAppNotice(`Updated ${ids.length} ${ids.length === 1 ? 'card' : 'cards'}`);
+  };
+
+  const handleBulkDeleteCards = (ids: string[]) => {
+    if (ids.length === 0) return;
+    const idSet = new Set(ids);
+    const now = Date.now();
+    const nextCards = cardsRef.current.filter(c => !idSet.has(c.id));
+    const nextDeletedMap = new Map(deletedCardsRef.current);
+    for (const id of ids) {
+      nextDeletedMap.set(id, now);
+    }
+    cardsRef.current = nextCards;
+    deletedCardsRef.current = nextDeletedMap;
+    setCards(nextCards);
+    setDeletedCards(nextDeletedMap);
+
+    syncDeletionImmediately(nextCards, prunedDeletedCards());
+    showAppNotice(`Deleted ${ids.length} ${ids.length === 1 ? 'card' : 'cards'}`);
+    trackEvent(TRACKING_ACTION.DELETE_CARD, TRACKING_CATEGORY.FLASHCARDS, `bulk_${ids.length}`);
   };
 
   const handleDeleteBook = (bookTag: string) => {
@@ -2542,8 +2646,24 @@ const App: React.FC = () => {
       : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-700/50'
     }`;
 
+  // Mobile bottom tab link active class helper
+  const mobileTabClass = ({ isActive }: { isActive: boolean }) =>
+    `flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[52px] min-w-[44px] py-1.5 px-1 text-[11px] font-semibold touch-manipulation select-none transition-colors ${isActive
+      ? 'text-brand-600 dark:text-brand-400'
+      : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+    }`;
+
+  const isStudyRoute = location.pathname === '/study';
+
   return (
     <div className="min-h-[100dvh] flex flex-col bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 font-sans overflow-x-clip">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[200] focus:px-4 focus:py-2 focus:bg-brand-600 focus:text-white focus:rounded-xl focus:shadow-lg focus:text-sm focus:font-semibold"
+      >
+        Skip to main content
+      </a>
+
       {/* GA page-view tracker — fires on every route change */}
       <RouteTracker />
 
@@ -2574,7 +2694,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {showConfetti && (
+      {showConfetti && !prefersReducedMotion && (
         <Suspense fallback={null}>
           <div className="fixed inset-0 z-[100] pointer-events-none">
             <Confetti
@@ -2599,27 +2719,27 @@ const App: React.FC = () => {
         />
         <div
           data-testid="app-top-header-bar"
-          className="max-w-5xl mx-auto safe-px h-14 sm:h-16 flex items-center justify-between gap-1.5 sm:gap-2"
+          className="max-w-5xl mx-auto safe-px h-14 sm:h-16 flex items-center justify-between gap-2"
         >
           <NavLink
             to="/"
-            className="flex items-center gap-2 cursor-pointer shrink-0 min-h-[38px] min-w-[38px] touch-manipulation select-none"
+            className="flex items-center gap-2 cursor-pointer shrink-0 min-h-[40px] min-w-[40px] touch-manipulation select-none"
           >
             <div className="w-8 h-8 bg-brand-600 rounded-lg flex items-center justify-center text-white font-serif font-bold text-lg sm:text-xl shadow-lg shadow-brand-500/30">
               L
             </div>
-            <span className="font-bold text-xl tracking-tight text-slate-900 dark:text-white hidden sm:block">Lumina</span>
+            <span className="font-bold text-lg sm:text-xl tracking-tight text-slate-900 dark:text-white">Lumina</span>
           </NavLink>
 
-          <div className="flex items-center gap-1 sm:gap-2 min-w-0">
-            <nav className="flex items-center gap-0.5 sm:gap-1 bg-slate-100/50 dark:bg-slate-800/80 p-1 rounded-xl mr-0.5 sm:mr-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+            <nav aria-label="Primary navigation" className="hidden sm:flex items-center gap-1 bg-slate-100/50 dark:bg-slate-800/80 p-1 rounded-xl mr-2">
               <NavLink to="/" end className={navLinkClass}>
                 <Home className="h-4 w-4 shrink-0" />
-                <span className="sr-only sm:not-sr-only">Home</span>
+                <span>Home</span>
               </NavLink>
               <NavLink to="/dictionary" className={navLinkClass}>
                 <Book className="h-4 w-4 shrink-0" />
-                <span className="sr-only sm:not-sr-only">Dictionary</span>
+                <span>Dictionary</span>
               </NavLink>
               <NavLink
                 to="/flashcards"
@@ -2628,7 +2748,7 @@ const App: React.FC = () => {
                 }
               >
                 <Layers className="h-4 w-4 shrink-0" />
-                <span className="sr-only sm:not-sr-only">Flashcards</span>
+                <span>Flashcards</span>
                 {cards.length > 0 && (
                   <span className="bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] px-1.5 py-0.5 rounded-full min-w-[20px] text-center">
                     {cards.length}
@@ -2637,27 +2757,29 @@ const App: React.FC = () => {
               </NavLink>
               <NavLink to="/statistics" className={navLinkClass}>
                 <BarChart2 className="h-4 w-4 shrink-0" />
-                <span className="sr-only sm:not-sr-only">Statistics</span>
+                <span>Statistics</span>
               </NavLink>
             </nav>
 
             <button
+              type="button"
               onClick={handleToggleDark}
-              className="inline-flex items-center justify-center min-h-[38px] min-w-[38px] p-2 sm:p-2.5 rounded-xl transition-all touch-manipulation bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-700 dark:hover:text-slate-200 shrink-0"
+              className="inline-flex items-center justify-center min-h-[42px] min-w-[42px] p-2 sm:p-2.5 rounded-xl transition-all touch-manipulation bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-800 dark:hover:text-white shrink-0"
               title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
               aria-label="Toggle dark mode"
             >
               {isDark ? <Sun className="h-4 w-4 sm:h-5 sm:w-5" /> : <Moon className="h-4 w-4 sm:h-5 sm:w-5" />}
             </button>
             <button
+              type="button"
               onClick={() => setIsSettingsOpen(true)}
               data-testid="open-settings-button"
               aria-label="Open settings"
               title="Settings & Language"
-              className={`inline-flex items-center justify-center gap-1 min-h-[38px] min-w-[38px] p-2 sm:px-2.5 sm:py-2 rounded-xl transition-all touch-manipulation shrink-0 ${
+              className={`inline-flex items-center justify-center gap-1 min-h-[42px] min-w-[42px] p-2 sm:px-2.5 sm:py-2 rounded-xl transition-all touch-manipulation shrink-0 ${
                 languagePreference !== 'en'
                   ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/70 hover:bg-emerald-100 dark:hover:bg-emerald-900/50'
-                  : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-700 dark:hover:text-slate-200'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-800 dark:hover:text-white'
               }`}
             >
               <Settings className="h-4 w-4 sm:h-5 sm:w-5" />
@@ -2668,9 +2790,10 @@ const App: React.FC = () => {
               )}
             </button>
             <button
+              type="button"
               onClick={() => setIsDataModalOpen(true)}
               aria-label="Manage Data"
-              className={`inline-flex items-center justify-center min-h-[38px] min-w-[38px] p-2 sm:p-2.5 rounded-xl transition-all touch-manipulation hover:bg-slate-200 dark:hover:bg-slate-700 shrink-0 ${fileHandle || cloudConfig ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-400 border border-brand-200 dark:border-brand-800' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-brand-600 dark:hover:text-brand-400'}`}
+              className={`inline-flex items-center justify-center min-h-[42px] min-w-[42px] p-2 sm:p-2.5 rounded-xl transition-all touch-manipulation hover:bg-slate-200 dark:hover:bg-slate-700 shrink-0 ${fileHandle || cloudConfig ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-400 border border-brand-200 dark:border-brand-800' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-brand-600 dark:hover:text-brand-400'}`}
               title="Manage Data"
             >
               {cloudConfig ? <Cloud className="h-4 w-4 sm:h-5 sm:w-5" /> : (fileHandle ? <Save className="h-4 w-4 sm:h-5 sm:w-5" /> : <Database className="h-4 w-4 sm:h-5 sm:w-5" />)}
@@ -2679,7 +2802,7 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      <main className="flex-1 max-w-5xl mx-auto w-full safe-px pt-4 sm:pt-8 safe-main-pb">
+      <main id="main-content" className="flex-1 max-w-5xl mx-auto w-full safe-px pt-4 sm:pt-8 safe-main-pb">
         <Suspense fallback={<RouteLoadingFallback />}>
           <Routes>
             <Route
@@ -2700,6 +2823,8 @@ const App: React.FC = () => {
                   onStartStudy={handleStartStudySession}
                   onImportBookWords={handleImportBookWords}
                   onDeleteBook={handleDeleteBook}
+                  onOpenDataModal={() => setIsDataModalOpen(true)}
+                  onChangeLanguagePreference={handleChangeLanguagePreference}
                   languagePreference={languagePreference}
                 />
               }
@@ -2727,6 +2852,8 @@ const App: React.FC = () => {
                   onReviewCard={handleReviewCard}
                   onCreateCard={handleCreateCustomCard}
                   onUpdateCard={handleUpdateCard}
+                  onBulkUpdateCards={handleBulkUpdateCards}
+                  onBulkDeleteCards={handleBulkDeleteCards}
                   onImportBookWords={handleImportBookWords}
                   onOpenImport={() => setIsDataModalOpen(true)}
                   languagePreference={languagePreference}
@@ -2745,6 +2872,10 @@ const App: React.FC = () => {
                   onExit={() => {
                     void flushPendingGistSyncNow();
                     navigate('/flashcards');
+                  }}
+                  onExitToDashboard={() => {
+                    void flushPendingGistSyncNow();
+                    navigate('/');
                   }}
                   languagePreference={languagePreference}
                 />
@@ -2779,6 +2910,8 @@ const App: React.FC = () => {
                   onStartStudy={handleStartStudySession}
                   onImportBookWords={handleImportBookWords}
                   onDeleteBook={handleDeleteBook}
+                  onOpenDataModal={() => setIsDataModalOpen(true)}
+                  onChangeLanguagePreference={handleChangeLanguagePreference}
                   languagePreference={languagePreference}
                 />
               }
@@ -2786,6 +2919,91 @@ const App: React.FC = () => {
           </Routes>
         </Suspense>
       </main>
+
+      {/* Mobile Bottom Tab Bar (Thumb-Friendly Labeled Navigation) */}
+      {!isStudyRoute && (
+        <nav
+          aria-label="Mobile navigation"
+          data-testid="mobile-bottom-nav"
+          className="sm:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-700 mobile-bottom-nav-pb"
+        >
+          <div className="max-w-lg mx-auto flex items-stretch justify-around px-1">
+            <NavLink to="/" end className={mobileTabClass}>
+              <Home className="h-5 w-5 shrink-0" />
+              <span>Home</span>
+            </NavLink>
+            <NavLink to="/dictionary" className={mobileTabClass}>
+              <Book className="h-5 w-5 shrink-0" />
+              <span>Dictionary</span>
+            </NavLink>
+            <NavLink
+              to="/flashcards"
+              aria-label={cards.length > 0 ? `Flashcards (${cards.length})` : 'Flashcards'}
+              className={({ isActive }) =>
+                mobileTabClass({ isActive: isActive || location.pathname === '/study' })
+              }
+            >
+              <div className="relative flex items-center justify-center">
+                <Layers className="h-5 w-5 shrink-0" />
+                {cards.length > 0 && (
+                  <span aria-hidden="true" className="absolute -top-1.5 -right-3.5 bg-brand-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full min-w-[16px] leading-none text-center">
+                    {cards.length > 999 ? '999+' : cards.length}
+                  </span>
+                )}
+              </div>
+              <span>Flashcards</span>
+            </NavLink>
+            <NavLink to="/statistics" className={mobileTabClass}>
+              <BarChart2 className="h-5 w-5 shrink-0" />
+              <span>Statistics</span>
+            </NavLink>
+          </div>
+        </nav>
+      )}
+
+      {/* Undo Single-Card Delete Snackbar */}
+      {deletedToast && (
+        <div
+          role="status"
+          aria-live="polite"
+          data-testid="undo-delete-snackbar"
+          className="fixed safe-floating-bottom left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-slate-900 dark:bg-slate-800 text-white px-4 py-2.5 rounded-2xl shadow-2xl border border-slate-700 text-xs sm:text-sm animate-in fade-in slide-in-from-bottom-4 duration-200"
+        >
+          <span>
+            Deleted <strong className="font-semibold">“{deletedToast.card.word}”</strong>
+          </span>
+          <button
+            type="button"
+            data-testid="undo-delete-card-btn"
+            onClick={handleUndoDeleteCard}
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-brand-600 hover:bg-brand-500 text-white font-semibold transition-colors"
+          >
+            <Undo2 className="h-3.5 w-3.5" />
+            Undo
+          </button>
+          <button
+            type="button"
+            aria-label="Dismiss deleted notice"
+            onClick={() => setDeletedToast(null)}
+            className="p-1 text-slate-400 hover:text-white rounded-full"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Global Confirmation Notice Toast (e.g., Anki import, Bulk actions) */}
+      {appNotice && !deletedToast && (
+        <div
+          role="status"
+          aria-live="polite"
+          data-testid="app-notice-toast"
+          className="fixed safe-floating-bottom left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-slate-900 dark:bg-slate-800 text-white px-4 py-2.5 rounded-full shadow-2xl border border-slate-700 text-xs sm:text-sm font-medium animate-in fade-in slide-in-from-bottom-4 duration-200"
+        >
+          <CheckCircle className="h-4 w-4 text-emerald-400 shrink-0" />
+          <span>{appNotice}</span>
+        </div>
+      )}
 
       {/* Auto-Save Indicators */}
       {(isFileSaving || isCloudSaving || isSyncingOffline || (!isOnline && cloudConfig)) && (

@@ -2,6 +2,9 @@ import React, { useRef, useState, useEffect } from 'react';
 import { X, Database, Download, Upload, CheckCircle, AlertCircle, RefreshCw, Save, AlertTriangle, Cloud, ExternalLink, HardDrive, ShieldCheck, ShieldAlert, Zap } from 'lucide-react';
 import { CloudConfig } from '../types';
 import { CloudSyncProgress } from '../services/pantryService';
+import { useAccessibleModal } from '../hooks/useAccessibleModal';
+
+type DataManagerTab = 'all' | 'cloud' | 'import' | 'local';
 
 interface DataManagerModalProps {
   isOpen: boolean;
@@ -78,11 +81,15 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
   onCloudPull,
   onCloudPush
 }) => {
+  const modalRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const ankiFileInputRef = useRef<HTMLInputElement>(null);
+  const [activeTab, setActiveTab] = useState<DataManagerTab>('all');
   const [status, setStatus] = useState<{ type: 'idle' | 'success' | 'error', msg: string }>({ type: 'idle', msg: '' });
   const [isProcessing, setIsProcessing] = useState(false);
   const [isIframe, setIsIframe] = useState(false);
+
+  useAccessibleModal(isOpen, onClose, modalRef);
 
   const formatBytes = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
@@ -134,6 +141,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
       setGistOldPantryIdInput('');
     }
     if (!isOpen) {
+      setActiveTab('all');
       setIsMigratingCloud(false);
       setIsMigratingPantryToGist(false);
       setShowGistMigrateFromPantry(false);
@@ -391,28 +399,90 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
     }
   };
 
+  const showLocalSection = activeTab === 'all' || activeTab === 'local';
+  const showImportSection = activeTab === 'all' || activeTab === 'import';
+  const showCloudSection = activeTab === 'all' || activeTab === 'cloud';
+
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center modal-safe-overlay bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col modal-safe-panel">
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center modal-safe-overlay bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200"
+      onClick={onClose}
+    >
+      <div
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="data-manager-modal-title"
+        onClick={(e) => e.stopPropagation()}
+        className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col modal-safe-panel"
+      >
         {/* Header */}
         <div className="px-4 sm:px-6 py-4 sm:py-5 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/30 shrink-0">
           <div className="flex items-center gap-2">
             <div className="p-2 bg-brand-100 dark:bg-brand-900/40 text-brand-600 dark:text-brand-400 rounded-lg">
               <Database className="h-5 w-5" />
             </div>
-            <h2 className="text-lg sm:text-xl font-serif font-bold text-slate-900 dark:text-white">Data Manager</h2>
+            <h2 id="data-manager-modal-title" className="text-lg sm:text-xl font-serif font-bold text-slate-900 dark:text-white">Data Manager</h2>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close Data Manager"
+            className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200/70 dark:hover:bg-slate-700 rounded-full transition-colors"
+          >
             <X className="h-5 w-5" />
           </button>
         </div>
 
+        {/* Segmented Filter Tabs */}
+        <div className="px-4 sm:px-6 pt-3 pb-2 border-b border-slate-100 dark:border-slate-700 bg-white dark:bg-slate-800 shrink-0">
+          <div className="grid grid-cols-4 gap-1 bg-slate-100 dark:bg-slate-900/60 p-1 rounded-xl" role="tablist" aria-label="Data Manager sections">
+            {([
+              { id: 'all', label: 'All' },
+              { id: 'cloud', label: 'Cloud Sync' },
+              { id: 'import', label: 'Anki' },
+              { id: 'local', label: 'Backup' },
+            ] as const).map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === tab.id}
+                data-testid={`data-manager-tab-${tab.id}`}
+                onClick={() => setActiveTab(tab.id)}
+                className={`py-1.5 px-2 rounded-lg text-xs font-semibold transition-all ${
+                  activeTab === tab.id
+                    ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="p-4 sm:p-6 space-y-5 overflow-y-auto custom-scrollbar">
 
+          {/* Status Messages — pinned at top so feedback is immediately visible */}
+          {status.type !== 'idle' && (
+            <div
+              role="status"
+              aria-live="polite"
+              className={`flex items-center gap-3 p-3 rounded-xl text-sm font-medium animate-in fade-in slide-in-from-top-2 border ${
+                status.type === 'success'
+                  ? 'bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300 border-green-200 dark:border-green-800/60'
+                  : 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800/60'
+              }`}
+            >
+              {status.type === 'success' ? <CheckCircle className="h-5 w-5 shrink-0" /> : <AlertCircle className="h-5 w-5 shrink-0" />}
+              <span>{status.msg}</span>
+            </div>
+          )}
+
           {/* ── Local Storage (merged) ──────────────────────────────────── */}
-          {(() => {
+          {showLocalSection && (() => {
             const isStorageConnected = persistenceStatus === 'granted' || isFileConnected;
-            const storageAddress = isFileConnected ? connectedFileName : 'Browser Database (IndexedDB)';
             const isIdbOnly = isStorageConnected && !isFileConnected;
             const borderClass = isStorageConnected
               ? 'border-green-100 dark:border-green-800/40 bg-green-50/40 dark:bg-green-900/10'
@@ -425,7 +495,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <HardDrive className={`h-4 w-4 ${isStorageConnected ? 'text-green-600' : 'text-slate-400'}`} />
-                    <span className="text-sm font-semibold text-slate-800 dark:text-white">Local Storage</span>
+                    <span className="text-sm font-semibold text-slate-800 dark:text-white">Local Backup &amp; Storage</span>
                   </div>
                   {/* Persistence badge — green if IDB is persistent OR a file is linked */}
                   {persistenceStatus === 'granted' || isFileConnected ? (
@@ -444,7 +514,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                   <div className="bg-white dark:bg-slate-800 rounded-lg p-2 border border-slate-100 dark:border-slate-700">
                     <p className="text-[10px] text-slate-400">Type</p>
                     <p className="text-xs font-semibold text-slate-800 dark:text-white mt-0.5">
-                      {isFileConnected ? 'Local File' : 'Browser Data'}
+                      {isFileConnected ? 'Local File' : 'Browser Storage'}
                     </p>
                   </div>
                   <div className="bg-white dark:bg-slate-800 rounded-lg p-2 border border-slate-100 dark:border-slate-700">
@@ -462,6 +532,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                 {/* Export / Import */}
                 <div className="grid grid-cols-2 gap-2">
                   <button
+                    type="button"
                     onClick={onExport}
                     disabled={cardCount === 0 || isProcessing}
                     className="flex items-center justify-center gap-1.5 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-xs font-medium rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 hover:text-brand-600 dark:hover:text-brand-400 transition-colors disabled:opacity-40"
@@ -470,6 +541,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                     Export JSON
                   </button>
                   <button
+                    type="button"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={isProcessing}
                     className="flex items-center justify-center gap-1.5 py-2 bg-brand-600 text-white text-xs font-medium rounded-lg hover:bg-brand-700 transition-colors shadow-sm shadow-brand-500/20 disabled:opacity-40"
@@ -484,18 +556,19 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                   ? 'border-green-200/60 dark:border-green-800/40'
                   : 'border-slate-100 dark:border-slate-700'
                   }`}>
-                  <div className={`text-xs flex items-center gap-1.5 ${isFileConnected ? 'text-green-700 dark:text-green-400' : 'text-slate-400'
+                  <div className={`text-xs flex items-center gap-1.5 ${isFileConnected ? 'text-green-700 dark:text-green-400' : 'text-slate-500 dark:text-slate-400'
                     }`}>
                     {isFileConnected
-                      ? <><RefreshCw className="h-3 w-3 animate-spin" style={{ animationDuration: '3s' }} /><span className="font-mono truncate max-w-[140px]" title={connectedFileName}>{connectedFileName}</span></>
+                      ? <><CheckCircle className="h-3.5 w-3.5 text-emerald-500 shrink-0" /><span className="font-mono truncate max-w-[140px]" title={connectedFileName}>{connectedFileName}</span></>
                       : isIdbOnly
-                        ? <><RefreshCw className="h-3 w-3 animate-spin" style={{ animationDuration: '3s' }} /><span>Auto-saving to database</span></>
+                        ? <><CheckCircle className="h-3.5 w-3.5 text-emerald-500 shrink-0" /><span>Auto-saving locally</span></>
                         : <span className="flex items-center gap-1 px-2 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 text-[10px] font-bold rounded-full uppercase tracking-wider"><ShieldAlert className="h-3 w-3" /> No file linked</span>
                     }
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     {isFileConnected && (
                       <button
+                        type="button"
                         onClick={handleManualLocalSave}
                         disabled={isProcessing}
                         className="px-2 py-1 bg-green-600 text-white text-[10px] font-medium rounded hover:bg-green-700 disabled:opacity-50"
@@ -505,6 +578,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                     )}
                     {isFileConnected && isFileSystemAvailable && (
                       <button
+                        type="button"
                         onClick={handleChangeLocalFile}
                         disabled={isProcessing}
                         className="text-xs text-slate-500 hover:text-brand-600 dark:hover:text-brand-400 transition-colors"
@@ -516,6 +590,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                       <>
                         <span className="text-slate-300 dark:text-slate-600">·</span>
                         <button
+                          type="button"
                           onClick={handleDisconnectLocalFile}
                           disabled={isProcessing}
                           className="text-xs text-red-500 hover:underline"
@@ -530,6 +605,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                 {/* Request Persistent Storage — hidden when file is linked (file IS the persistent location) */}
                 {persistenceStatus !== 'granted' && !isFileConnected && persistenceStatus !== 'unsupported' && (
                   <button
+                    type="button"
                     onClick={handleRequestPersistence}
                     disabled={isProcessing}
                     className="w-full py-2 text-xs font-medium border border-dashed border-emerald-400 dark:border-emerald-700 text-emerald-700 dark:text-emerald-400 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
@@ -542,6 +618,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                 {/* Link a File — always available when no physical file linked; label adapts based on whether IDB is already persistent */}
                 {isFileSystemAvailable && !isFileConnected && (
                   <button
+                    type="button"
                     onClick={handleConnectLocal}
                     disabled={isProcessing}
                     className="w-full py-2 text-xs font-medium border border-dashed border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:border-brand-400 hover:text-brand-600 dark:hover:text-brand-400 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
@@ -558,33 +635,36 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
           })()}
 
           {/* ── Anki Import ─────────────────────────────────────────────── */}
-          <div className="p-4 rounded-xl border border-orange-100 dark:border-orange-800/40 bg-orange-50/40 dark:bg-orange-900/10 space-y-3">
-            <div className="flex items-center gap-2">
-              <Zap className="h-4 w-4 text-orange-500" />
-              <span className="text-sm font-semibold text-slate-800 dark:text-white">Import from Anki</span>
+          {showImportSection && (
+            <div className="p-4 rounded-xl border border-orange-100 dark:border-orange-800/40 bg-orange-50/40 dark:bg-orange-900/10 space-y-3">
+              <div className="flex items-center gap-2">
+                <Zap className="h-4 w-4 text-orange-500" />
+                <span className="text-sm font-semibold text-slate-800 dark:text-white">Import from Anki</span>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Upload an <strong>.apkg</strong> file exported from Anki. You'll be able to map fields before importing.
+              </p>
+              <button
+                type="button"
+                onClick={() => ankiFileInputRef.current?.click()}
+                className="w-full flex items-center justify-center gap-2 py-2.5 bg-orange-500 text-white text-sm font-medium rounded-xl hover:bg-orange-600 transition-colors shadow-sm shadow-orange-500/20"
+              >
+                <Upload className="h-4 w-4" />
+                Choose Anki Deck (.apkg)
+              </button>
+              <input
+                type="file"
+                ref={ankiFileInputRef}
+                accept=".apkg"
+                className="hidden"
+                onChange={handleAnkiFileChange}
+              />
             </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Upload an <strong>.apkg</strong> file exported from Anki. You'll be able to map fields before importing.
-            </p>
-            <button
-              onClick={() => ankiFileInputRef.current?.click()}
-              className="w-full flex items-center justify-center gap-2 py-2.5 bg-orange-500 text-white text-sm font-medium rounded-xl hover:bg-orange-600 transition-colors shadow-sm shadow-orange-500/20"
-            >
-              <Upload className="h-4 w-4" />
-              Choose Anki Deck (.apkg)
-            </button>
-            <input
-              type="file"
-              ref={ankiFileInputRef}
-              accept=".apkg"
-              className="hidden"
-              onChange={handleAnkiFileChange}
-            />
-          </div>
+          )}
 
 
           {/* ── Cloud Sync (GitHub Gist — Instant 1-Request Sync) ───────── */}
-          {(!cloudConfig || isGistConnected) && (
+          {showCloudSection && (!cloudConfig || isGistConnected) && (
             <div
               data-testid="gist-cloud-section"
               className={`p-5 rounded-xl border transition-colors ${
@@ -758,7 +838,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
 
                   {cloudProgress && !isMigratingCloud && (
                     <div
-                      data-testid="pantry-progress-bar"
+                      data-testid="gist-progress-bar"
                       className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/60 space-y-2"
                     >
                       <div className="flex items-center justify-between text-xs font-medium text-emerald-900 dark:text-emerald-200">
@@ -772,7 +852,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                       </div>
                       <div
                         role="progressbar"
-                        aria-label="Pantry sync progress"
+                        aria-label="GitHub Gist sync progress"
                         aria-valuenow={cloudProgress.percent}
                         aria-valuemin={0}
                         aria-valuemax={100}
@@ -830,7 +910,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
 
                   <div className="flex items-center justify-between pt-3 border-t border-emerald-200/50 dark:border-emerald-800/40">
                     <div className="text-xs text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
-                      <RefreshCw className="h-3 w-3 animate-spin" style={{ animationDuration: '3s' }} />
+                      <CheckCircle className="h-3.5 w-3.5 shrink-0" />
                       Auto-sync enabled (1-request Gist)
                     </div>
                     <div className="flex items-center gap-3">
@@ -853,7 +933,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
           )}
 
           {/* ── Cloud Sync (Pantry) — Shown when disconnected or connected to Pantry ── */}
-          {!isGistConnected && (
+          {showCloudSection && !isGistConnected && (
             <div className={`p-5 rounded-xl border transition-colors ${cloudConfig ? 'bg-sky-50/50 dark:bg-sky-900/10 border-sky-100 dark:border-sky-800/40' : 'bg-slate-50 dark:bg-slate-900/30 border-slate-200 dark:border-slate-700'}`}>
               <div className="flex items-start justify-between mb-4">
                 <div>
@@ -1172,7 +1252,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
 
                   <div className="flex items-center justify-between pt-3 border-t border-sky-200/50">
                     <div className="text-xs text-sky-700 dark:text-sky-400 flex items-center gap-1.5">
-                      <RefreshCw className="h-3 w-3 animate-spin" style={{ animationDuration: '3s' }} />
+                      <CheckCircle className="h-3.5 w-3.5 shrink-0" />
                       Auto-sync enabled
                     </div>
                     <div className="flex items-center gap-3">
@@ -1203,15 +1283,6 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
             className="hidden"
             onChange={handleFileChange}
           />
-
-          {/* Status Messages */}
-          {status.type !== 'idle' && (
-            <div className={`flex items-center gap-3 p-3 rounded-xl text-sm font-medium animate-in fade-in slide-in-from-bottom-2
-                ${status.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-              {status.type === 'success' ? <CheckCircle className="h-5 w-5" /> : <AlertCircle className="h-5 w-5" />}
-              {status.msg}
-            </div>
-          )}
         </div>
       </div>
     </div>

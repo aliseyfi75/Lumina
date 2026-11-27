@@ -173,7 +173,7 @@ test.describe('iOS 3D Flashcard Flip Isolation & Device-Adaptive Scaling', () =>
     await expect(dashBack).toHaveAttribute('aria-hidden', 'false');
   });
 
-  test('adapts root font-size and dimensions to device viewport and neutralizes oversized OS font inflation without horizontal overflow', async ({ page }) => {
+  test('adapts root font-size proportionally via percentage scaling while respecting user OS font zoom without horizontal overflow', async ({ page }) => {
     // Verify proportional scaling across device classes
     await page.setViewportSize({ width: 320, height: 568 });
     await page.goto('http://localhost:5173/#/');
@@ -194,57 +194,23 @@ test.describe('iOS 3D Flashcard Flip Isolation & Device-Adaptive Scaling', () =>
     const desktopRootPx = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize));
     expect(desktopRootPx).toBeCloseTo(16, 1);
 
-    // Simulate an OS / browser environment that inflates explicit px font sizes by 1.35x (e.g., 135% system font size)
+    // Verify percentage-based root fontSize is used so OS / browser text zoom is honored (WCAG 1.4.4)
     await page.setViewportSize({ width: 375, height: 667 });
     await page.waitForTimeout(100);
 
-    const compensatedResult = await page.evaluate(() => {
+    const percentageResult = await page.evaluate(() => {
       const root = document.documentElement;
-      const origGetComputedStyle = window.getComputedStyle.bind(window);
-      const inflationFactor = 1.35;
-
-      window.getComputedStyle = ((el: Element, pseudo?: string | null) => {
-        const style = origGetComputedStyle(el, pseudo);
-        if (el === root) {
-          const rawInline = parseFloat(root.style.fontSize || '16');
-          return new Proxy(style, {
-            get(target, prop, receiver) {
-              if (prop === 'fontSize') {
-                return `${rawInline * inflationFactor}px`;
-              }
-              const val = Reflect.get(target, prop, receiver);
-              return typeof val === 'function' ? val.bind(target) : val;
-            },
-          });
-        }
-        return style;
-      }) as typeof window.getComputedStyle;
-
-      try {
-        window.dispatchEvent(new Event('resize'));
-        return new Promise<{ targetPx: number; compensatedInlinePx: number; effectiveRenderedPx: number }>((resolve) => {
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-              const targetPx = parseFloat(root.dataset.targetRootPx || '0');
-              const compensatedInlinePx = parseFloat(root.style.fontSize || '0');
-              const effectiveRenderedPx = parseFloat(window.getComputedStyle(root).fontSize);
-              resolve({ targetPx, compensatedInlinePx, effectiveRenderedPx });
-            });
-          });
-        });
-      } finally {
-        // Restore after rafs settle via microtask delay
-        setTimeout(() => {
-          window.getComputedStyle = origGetComputedStyle;
-          window.dispatchEvent(new Event('resize'));
-        }, 60);
-      }
+      return {
+        inlineFontSize: root.style.fontSize,
+        targetPx: parseFloat(root.dataset.targetRootPx || '0'),
+        computedPx: parseFloat(window.getComputedStyle(root).fontSize),
+      };
     });
 
-    expect(compensatedResult.compensatedInlinePx).toBeLessThan(compensatedResult.targetPx);
-    expect(compensatedResult.effectiveRenderedPx).toBeCloseTo(compensatedResult.targetPx, 0);
+    expect(percentageResult.inlineFontSize.endsWith('%')).toBe(true);
+    expect(percentageResult.computedPx).toBeCloseTo(percentageResult.targetPx, 0);
 
-    await page.waitForTimeout(120);
+    await page.waitForTimeout(80);
 
     // Check zero horizontal overflow on a compact Display-Zoomed mobile screen (320x568) across all main routes
     await page.setViewportSize({ width: 320, height: 568 });

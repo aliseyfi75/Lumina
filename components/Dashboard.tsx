@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect, useMemo, lazy, Suspense } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Flashcard, FlashcardStatus, MeaningLanguagePreference, ViewState } from '../types';
 import { getWordSuggestions } from '../services/suggestionService';
 import { prefetchWord } from '../services/dictionaryService';
 import { playAudio } from '../utils/audio';
-import { getLocalDateString, calculateCurrentStreak, getDueCards } from '../utils/studyUtils';
+import { getLocalDateString, calculateStreakSummary, getDueCards, sortStudySessionCards } from '../utils/studyUtils';
 import type { BookExtractedWord } from '../services/bookService';
 import { MeaningDisplay } from './MeaningDisplay';
 
@@ -19,20 +20,23 @@ import {
     Search, Play, BookOpen, CheckCircle, Brain, Loader2,
     Flame, Layers, Sparkles, Clock, TrendingUp, Volume2,
     ArrowRight, Star, Calendar, X, RotateCw, Tag, Plus, Trash2, AlertTriangle,
-    Database, Globe
+    Database, Globe, Snowflake, Zap
 } from 'lucide-react';
 
 interface DashboardProps {
     cards: Flashcard[];
     studyHistory: Record<string, number>;
     longestStreak: number;
+    dailyGoal?: number;
     onNavigate: (view: ViewState) => void;
     onQuickSearch: (word: string) => void;
     onStartStudy?: (initialTag?: string, initialChapters?: string[]) => void;
     onImportBookWords?: (bookTitle: string, words: BookExtractedWord[]) => void;
     onDeleteBook?: (bookTag: string) => void;
     onOpenDataModal?: () => void;
+    onOpenSettings?: () => void;
     onChangeLanguagePreference?: (pref: MeaningLanguagePreference) => void;
+    onQuickReviewCard?: (id: string, quality: number) => void;
     languagePreference?: MeaningLanguagePreference;
 }
 
@@ -229,21 +233,28 @@ export const Dashboard: React.FC<DashboardProps> = ({
     cards,
     studyHistory,
     longestStreak,
+    dailyGoal = 10,
     onNavigate,
     onQuickSearch,
     onStartStudy,
     onImportBookWords,
     onDeleteBook,
     onOpenDataModal,
+    onOpenSettings,
     onChangeLanguagePreference,
+    onQuickReviewCard,
     languagePreference = 'en',
 }) => {
+    const routerNavigate = useNavigate();
     const [query, setQuery] = useState('');
     const [suggestions, setSuggestions] = useState<string[]>([]);
     const [showSuggestions, setShowSuggestions] = useState(false);
     const [isSearching, setIsSearching] = useState(false);
     const [isBookPrepOpen, setIsBookPrepOpen] = useState(false);
     const [bookToDelete, setBookToDelete] = useState<{ tag: string; title: string; count: number } | null>(null);
+    const [warmupRevealed, setWarmupRevealed] = useState(false);
+    const [warmupCompletedCount, setWarmupCompletedCount] = useState(0);
+    const [warmupSkippedIds, setWarmupSkippedIds] = useState<string[]>([]);
     const wrapperRef = useRef<HTMLDivElement>(null);
     const cardPreviewModalRef = useRef<HTMLDivElement>(null);
     const deleteBookModalRef = useRef<HTMLDivElement>(null);
@@ -284,16 +295,25 @@ export const Dashboard: React.FC<DashboardProps> = ({
     const wordOfTheDay = getWordOfTheDay(cards);
 
     // Study stats
-    const dueCount = getDueCards(cards).length;
+    const dueCardsList = useMemo(() => sortStudySessionCards(getDueCards(cards)), [cards]);
+    const dueCount = dueCardsList.length;
 
     const newCount = cards.filter(c => c.status === FlashcardStatus.New).length;
     const learningCount = cards.filter(c => c.status === FlashcardStatus.Learning).length;
     const masteredCount = cards.filter(c => c.status === FlashcardStatus.Mastered).length;
-    const currentStreak = calculateCurrentStreak(studyHistory);
+    const streakSummary = useMemo(() => calculateStreakSummary(studyHistory), [studyHistory]);
+    const currentStreak = streakSummary.currentStreak;
     const todayStr = getLocalDateString(new Date());
     const studiedToday = studyHistory[todayStr] ?? 0;
+    const goalProgressPct = Math.min(100, Math.round((studiedToday / Math.max(1, dailyGoal)) * 100));
+    const isGoalComplete = studiedToday >= dailyGoal;
     const isNewUser =
         cards.length === 0 || (cards.length === 1 && cards[0].id === 'welcome-card');
+
+    const warmupCard = useMemo(() => {
+        if (dueCardsList.length === 0) return null;
+        return dueCardsList.find(c => !warmupSkippedIds.includes(c.id)) || dueCardsList[0];
+    }, [dueCardsList, warmupSkippedIds]);
 
     // Recently added (last 6)
     const recentCards = [...cards]
@@ -488,23 +508,84 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         </div>
 
                         <div className="relative space-y-4 sm:space-y-6">
-                            <div className="space-y-1">
-                                <div className="flex items-center gap-2 text-brand-300 text-xs sm:text-sm font-medium">
-                                    <Sparkles className="h-4 w-4 shrink-0" />
-                                    {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+                            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+                                <div className="space-y-1 min-w-0">
+                                    <div className="flex items-center gap-2 text-brand-300 text-xs sm:text-sm font-medium flex-wrap">
+                                        <Sparkles className="h-4 w-4 shrink-0" />
+                                        <span>{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</span>
+                                        {(streakSummary.freezeProtected || streakSummary.freezesAvailable > 0) && (
+                                            <span
+                                                data-testid="streak-freeze-badge"
+                                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-sky-500/20 text-sky-200 border border-sky-400/30"
+                                            >
+                                                <Snowflake className="h-3 w-3 shrink-0" />
+                                                {streakSummary.freezeProtected
+                                                    ? 'Streak Freeze active'
+                                                    : `${streakSummary.freezesAvailable} Freeze ready`}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <h1 className="text-2xl sm:text-3xl md:text-4xl font-serif font-bold tracking-tight">
+                                        {isNewUser ? 'Welcome to Lumina ✨' : `Welcome back${studiedToday > 0 ? ' 🔥' : ' 👋'}`}
+                                    </h1>
+                                    <p className="text-slate-300 text-sm sm:text-base">
+                                        {isNewUser
+                                            ? 'Build your personal vocabulary with smart spaced repetition, book prep, and bilingual meanings.'
+                                            : dueCount > 0
+                                                ? `You have ${dueCount} card${dueCount !== 1 ? 's' : ''} to review today.`
+                                                : cards.length > 0
+                                                    ? 'You\'re all caught up! Great work.'
+                                                    : 'Search for words to start building your vocabulary.'}
+                                    </p>
                                 </div>
-                                <h1 className="text-2xl sm:text-3xl md:text-4xl font-serif font-bold tracking-tight">
-                                    {isNewUser ? 'Welcome to Lumina ✨' : `Welcome back${studiedToday > 0 ? ' 🔥' : ' 👋'}`}
-                                </h1>
-                                <p className="text-slate-300 text-sm sm:text-base">
-                                    {isNewUser
-                                        ? 'Build your personal vocabulary with smart spaced repetition, book prep, and bilingual meanings.'
-                                        : dueCount > 0
-                                            ? `You have ${dueCount} card${dueCount !== 1 ? 's' : ''} to review today.`
-                                            : cards.length > 0
-                                                ? 'You\'re all caught up! Great work.'
-                                                : 'Search for words to start building your vocabulary.'}
-                                </p>
+
+                                {/* Daily Goal Progress Ring */}
+                                {!isNewUser && (
+                                    <button
+                                        type="button"
+                                        data-testid="daily-goal-ring"
+                                        onClick={() => onOpenSettings?.()}
+                                        title="Click to adjust your daily study goal"
+                                        aria-label={`Daily goal progress: ${studiedToday} of ${dailyGoal} cards reviewed today`}
+                                        className="self-start sm:self-center flex items-center gap-3 px-3.5 py-2.5 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/15 backdrop-blur transition-colors shrink-0 text-left"
+                                    >
+                                        <div className="relative w-12 h-12 shrink-0 flex items-center justify-center">
+                                            <svg className="w-12 h-12 -rotate-90" viewBox="0 0 44 44" aria-hidden="true">
+                                                <circle
+                                                    cx="22"
+                                                    cy="22"
+                                                    r="18"
+                                                    fill="none"
+                                                    stroke="rgba(255,255,255,0.16)"
+                                                    strokeWidth="4"
+                                                />
+                                                <circle
+                                                    cx="22"
+                                                    cy="22"
+                                                    r="18"
+                                                    fill="none"
+                                                    stroke={isGoalComplete ? '#4ade80' : '#22c55e'}
+                                                    strokeWidth="4"
+                                                    strokeLinecap="round"
+                                                    strokeDasharray={2 * Math.PI * 18}
+                                                    strokeDashoffset={2 * Math.PI * 18 * (1 - goalProgressPct / 100)}
+                                                    className="transition-all duration-500"
+                                                />
+                                            </svg>
+                                            <span className="absolute text-xs font-bold text-white tabular-nums">
+                                                {isGoalComplete ? '✓' : `${goalProgressPct}%`}
+                                            </span>
+                                        </div>
+                                        <div className="min-w-0">
+                                            <p className="text-[11px] font-bold uppercase tracking-wider text-brand-300">
+                                                {isGoalComplete ? 'Goal Complete' : 'Daily Goal'}
+                                            </p>
+                                            <p className="text-sm font-bold text-white tabular-nums">
+                                                {studiedToday} <span className="text-slate-300 font-normal">/ {dailyGoal} cards</span>
+                                            </p>
+                                        </div>
+                                    </button>
+                                )}
                             </div>
 
                             {/* Search Bar */}
@@ -676,7 +757,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         </div>
                     )}
 
-                    {/* ── Stats Grid ──────────────────────────────────────────────────── */}
+                    {/* ── Stats Grid (Clickable Shortcuts) ────────────────────────────── */}
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
                         {[
                             {
@@ -684,8 +765,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 value: dueCount,
                                 icon: Calendar,
                                 color: 'text-amber-600 dark:text-amber-400',
-                                bg: 'bg-amber-50 dark:bg-amber-900/20 border-amber-100 dark:border-amber-800/40',
+                                bg: 'bg-amber-50 dark:bg-amber-900/20 border-amber-100 dark:border-amber-800/40 hover:border-amber-300 dark:hover:border-amber-600',
                                 iconBg: 'bg-amber-100 dark:bg-amber-900/40',
+                                onClick: () => (dueCount > 0 ? onNavigate('study') : onNavigate('flashcards')),
                             },
                             {
                                 label: 'Current Streak',
@@ -693,27 +775,36 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 suffix: currentStreak === 1 ? ' day' : ' days',
                                 icon: Flame,
                                 color: 'text-orange-600 dark:text-orange-400',
-                                bg: 'bg-orange-50 dark:bg-orange-900/20 border-orange-100 dark:border-orange-800/40',
+                                bg: 'bg-orange-50 dark:bg-orange-900/20 border-orange-100 dark:border-orange-800/40 hover:border-orange-300 dark:hover:border-orange-600',
                                 iconBg: 'bg-orange-100 dark:bg-orange-900/40',
+                                onClick: () => onNavigate('statistics'),
                             },
                             {
                                 label: 'Mastered',
                                 value: masteredCount,
                                 icon: CheckCircle,
                                 color: 'text-emerald-600 dark:text-emerald-400',
-                                bg: 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-100 dark:border-emerald-800/40',
+                                bg: 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-100 dark:border-emerald-800/40 hover:border-emerald-300 dark:hover:border-emerald-600',
                                 iconBg: 'bg-emerald-100 dark:bg-emerald-900/40',
+                                onClick: () => routerNavigate('/flashcards', { state: { statusFilter: FlashcardStatus.Mastered } }),
                             },
                             {
                                 label: 'Total Cards',
                                 value: cards.length,
                                 icon: Layers,
                                 color: 'text-blue-600 dark:text-blue-400',
-                                bg: 'bg-blue-50 dark:bg-blue-900/20 border-blue-100 dark:border-blue-800/40',
+                                bg: 'bg-blue-50 dark:bg-blue-900/20 border-blue-100 dark:border-blue-800/40 hover:border-blue-300 dark:hover:border-blue-600',
                                 iconBg: 'bg-blue-100 dark:bg-blue-900/40',
+                                onClick: () => onNavigate('flashcards'),
                             },
-                        ].map(({ label, value, suffix, icon: Icon, color, bg, iconBg }) => (
-                            <div key={label} className={`p-3.5 sm:p-5 rounded-2xl border ${bg} flex flex-col gap-2.5 sm:gap-3`}>
+                        ].map(({ label, value, suffix, icon: Icon, color, bg, iconBg, onClick }) => (
+                            <button
+                                key={label}
+                                type="button"
+                                data-testid={`dashboard-stat-${label.toLowerCase().replace(/\s+/g, '-')}`}
+                                onClick={onClick}
+                                className={`text-left p-3.5 sm:p-5 rounded-2xl border ${bg} flex flex-col gap-2.5 sm:gap-3 transition-all hover:shadow-md active:scale-[0.99] cursor-pointer`}
+                            >
                                 <div className={`w-9 h-9 sm:w-10 sm:h-10 ${iconBg} rounded-xl flex items-center justify-center shrink-0`}>
                                     <Icon className={`h-4 w-4 sm:h-5 sm:w-5 ${color}`} />
                                 </div>
@@ -723,9 +814,152 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                     </p>
                                     <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1 truncate">{label}</p>
                                 </div>
-                            </div>
+                            </button>
                         ))}
                     </div>
+
+                    {/* ── Quick 1-Card Warmup Widget ──────────────────────────────────── */}
+                    {!isNewUser && onQuickReviewCard && (warmupCard || warmupCompletedCount > 0) && (
+                        <div
+                            data-testid="quick-warmup-card"
+                            className="bg-white dark:bg-slate-800 rounded-2xl sm:rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm p-4 sm:p-6 space-y-4"
+                        >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                    <div className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400">
+                                        <Zap className="h-4 w-4" />
+                                    </div>
+                                    <div>
+                                        <h2 className="font-semibold text-slate-800 dark:text-slate-100 text-sm uppercase tracking-wider">
+                                            Quick 1-Card Warmup
+                                        </h2>
+                                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                                            Review one card right here to build momentum
+                                        </p>
+                                    </div>
+                                </div>
+                                {dueCount > 0 && (
+                                    <button
+                                        type="button"
+                                        onClick={() => onNavigate('study')}
+                                        className="text-xs font-semibold text-brand-600 dark:text-brand-400 hover:underline inline-flex items-center gap-1"
+                                    >
+                                        Full Session ({dueCount})
+                                        <ArrowRight className="h-3.5 w-3.5" />
+                                    </button>
+                                )}
+                            </div>
+
+                            {warmupCard ? (
+                                <div className="rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200/80 dark:border-slate-700 p-4 sm:p-5 space-y-4">
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                <h3 className="text-xl sm:text-2xl font-serif font-bold text-slate-900 dark:text-white break-words">
+                                                    {warmupCard.word}
+                                                </h3>
+                                                {warmupCard.phonetic && (
+                                                    <span className="text-sm text-slate-500 dark:text-slate-400 font-serif italic">
+                                                        {warmupCard.phonetic}
+                                                    </span>
+                                                )}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => playAudio(warmupCard.word, warmupCard.audio)}
+                                                    aria-label="Listen to warmup word"
+                                                    className="p-1.5 text-slate-500 dark:text-slate-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded-full transition-colors"
+                                                >
+                                                    <Volume2 className="h-4 w-4" />
+                                                </button>
+                                            </div>
+                                            <p className="text-xs italic text-slate-500 dark:text-slate-400 mt-0.5">
+                                                {warmupCard.partOfSpeech}
+                                            </p>
+                                        </div>
+                                        <StatusPill status={warmupCard.status} />
+                                    </div>
+
+                                    {!warmupRevealed ? (
+                                        <div className="flex items-center justify-between gap-2 pt-1">
+                                            <span className="text-xs text-slate-500 dark:text-slate-400">
+                                                Try recalling the definition before revealing
+                                            </span>
+                                            <button
+                                                type="button"
+                                                data-testid="warmup-reveal-btn"
+                                                onClick={() => setWarmupRevealed(true)}
+                                                className="px-4 py-2 rounded-xl bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 text-xs sm:text-sm font-semibold hover:bg-slate-800 dark:hover:bg-white transition-colors"
+                                            >
+                                                Reveal Meaning
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-3 pt-2 border-t border-slate-200/80 dark:border-slate-700 animate-in fade-in duration-200">
+                                            <MeaningDisplay
+                                                englishText={warmupCard.mainDefinition}
+                                                translations={warmupCard.translations}
+                                                preference={languagePreference}
+                                                variant="compact"
+                                                englishClassName="text-sm sm:text-base text-slate-800 dark:text-slate-100 leading-relaxed"
+                                                testIdPrefix="warmup"
+                                            />
+                                            {warmupCard.example && (
+                                                <p className="text-xs sm:text-sm italic font-serif text-slate-500 dark:text-slate-400">
+                                                    “{warmupCard.example}”
+                                                </p>
+                                            )}
+                                            <div className="grid grid-cols-3 gap-2 pt-1">
+                                                <button
+                                                    type="button"
+                                                    data-testid="warmup-rate-again"
+                                                    onClick={() => {
+                                                        onQuickReviewCard(warmupCard.id, 1);
+                                                        setWarmupSkippedIds(prev => [...prev, warmupCard.id]);
+                                                        setWarmupRevealed(false);
+                                                        setWarmupCompletedCount(c => c + 1);
+                                                    }}
+                                                    className="py-2 px-3 rounded-xl text-xs font-bold bg-red-50 dark:bg-red-900/25 hover:bg-red-100 dark:hover:bg-red-900/40 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800/60 transition-colors"
+                                                >
+                                                    Again
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    data-testid="warmup-rate-learned"
+                                                    onClick={() => {
+                                                        onQuickReviewCard(warmupCard.id, 3);
+                                                        setWarmupRevealed(false);
+                                                        setWarmupCompletedCount(c => c + 1);
+                                                    }}
+                                                    className="py-2 px-3 rounded-xl text-xs font-bold bg-blue-50 dark:bg-blue-900/25 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/60 transition-colors"
+                                                >
+                                                    Learned
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    data-testid="warmup-rate-mastered"
+                                                    onClick={() => {
+                                                        onQuickReviewCard(warmupCard.id, 5);
+                                                        setWarmupRevealed(false);
+                                                        setWarmupCompletedCount(c => c + 1);
+                                                    }}
+                                                    className="py-2 px-3 rounded-xl text-xs font-bold bg-emerald-50 dark:bg-emerald-900/25 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 transition-colors"
+                                                >
+                                                    Mastered
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            ) : (
+                                <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/50 flex items-center justify-between gap-3">
+                                    <p className="text-sm font-medium text-emerald-800 dark:text-emerald-200">
+                                        Nice warmup! You&apos;re all caught up on due cards right now.
+                                    </p>
+                                    <CheckCircle className="h-5 w-5 text-emerald-500 shrink-0" />
+                                </div>
+                            )}
+                        </div>
+                    )}
 
                     {/* ── Categories & Books Progress (Books in Priority) ─────────────── */}
                     {categoryProgressItems.length > 0 && (
@@ -1044,13 +1278,30 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                         </p>
                                     )}
 
-                                    <button
-                                        onClick={() => onNavigate('flashcards')}
-                                        className="inline-flex items-center gap-2 text-brand-600 hover:text-brand-700 font-medium text-sm self-start group"
-                                    >
-                                        View in Flashcards
-                                        <ArrowRight className="h-3.5 w-3.5 group-hover:translate-x-0.5 transition-transform" />
-                                    </button>
+                                    <div className="flex flex-wrap items-center gap-3 pt-1">
+                                        <button
+                                            type="button"
+                                            data-testid="wotd-flip-preview-btn"
+                                            onClick={() => openCard(wordOfTheDay)}
+                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200/80 dark:border-amber-800/60 hover:bg-amber-100 dark:hover:bg-amber-900/50 transition-colors"
+                                        >
+                                            <RotateCw className="h-3.5 w-3.5" />
+                                            Flip Card
+                                        </button>
+                                        <button
+                                            type="button"
+                                            data-testid="wotd-view-in-flashcards-btn"
+                                            onClick={() =>
+                                                routerNavigate('/flashcards', {
+                                                    state: { searchQuery: wordOfTheDay.word },
+                                                })
+                                            }
+                                            className="inline-flex items-center gap-1.5 text-brand-600 hover:text-brand-700 dark:text-brand-400 font-medium text-sm group"
+                                        >
+                                            View in Flashcards
+                                            <ArrowRight className="h-3.5 w-3.5 group-hover:translate-x-0.5 transition-transform" />
+                                        </button>
+                                    </div>
                                 </div>
                             ) : (
                                 <div className="flex-1 flex flex-col items-center justify-center p-8 sm:p-10 text-center gap-3">

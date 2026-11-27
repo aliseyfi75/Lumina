@@ -48,6 +48,158 @@ export const calculateCurrentStreak = (
   return streak;
 };
 
+export interface StreakSummary {
+  currentStreak: number;
+  rawStreak: number;
+  activeDaysTotal: number;
+  freezesEarned: number;
+  freezesAvailable: number;
+  freezeProtected: boolean;
+}
+
+/**
+ * Calculates the user's current streak with automatic Streak Freeze protection:
+ * Every 5 active study days earns 1 Streak Freeze (up to 1 bridged missed day
+ * in the active run), keeping momentum alive after an occasional busy day.
+ */
+export const calculateStreakSummary = (
+  history: Record<string, number>,
+  referenceDate: Date = new Date()
+): StreakSummary => {
+  const activeDaysTotal = Object.values(history).filter((count) => (count ?? 0) > 0).length;
+  const freezesEarned = Math.floor(activeDaysTotal / 5);
+  const rawStreak = calculateCurrentStreak(history, referenceDate);
+
+  if (freezesEarned === 0) {
+    return {
+      currentStreak: rawStreak,
+      rawStreak,
+      activeDaysTotal,
+      freezesEarned: 0,
+      freezesAvailable: 0,
+      freezeProtected: false,
+    };
+  }
+
+  // Walk backward allowing at most 1 missed-day bridge within the active streak
+  const cursor = new Date(referenceDate.getTime());
+  const todayStr = getLocalDateString(cursor);
+  let remainingFreezes = 1;
+  let freezeUsed = false;
+
+  if ((history[todayStr] ?? 0) <= 0) {
+    cursor.setDate(cursor.getDate() - 1);
+    const yesterdayStr = getLocalDateString(cursor);
+    if ((history[yesterdayStr] ?? 0) <= 0) {
+      // Missed yesterday too -> check if day-before-yesterday was studied (1-day freeze bridges yesterday)
+      cursor.setDate(cursor.getDate() - 1);
+      const twoDaysAgoStr = getLocalDateString(cursor);
+      if ((history[twoDaysAgoStr] ?? 0) > 0) {
+        remainingFreezes = 0;
+        freezeUsed = true;
+      } else {
+        return {
+          currentStreak: 0,
+          rawStreak: 0,
+          activeDaysTotal,
+          freezesEarned,
+          freezesAvailable: Math.min(2, freezesEarned),
+          freezeProtected: false,
+        };
+      }
+    }
+  }
+
+  let protectedStreak = 0;
+  while (true) {
+    const key = getLocalDateString(cursor);
+    if ((history[key] ?? 0) > 0) {
+      protectedStreak++;
+      cursor.setDate(cursor.getDate() - 1);
+      continue;
+    }
+    if (remainingFreezes > 0) {
+      const prevCursor = new Date(cursor.getTime());
+      prevCursor.setDate(prevCursor.getDate() - 1);
+      if ((history[getLocalDateString(prevCursor)] ?? 0) > 0) {
+        remainingFreezes--;
+        freezeUsed = true;
+        cursor.setDate(cursor.getDate() - 1);
+        continue;
+      }
+    }
+    break;
+  }
+
+  const currentStreak = Math.max(rawStreak, protectedStreak);
+  const freezesAvailable = Math.max(0, Math.min(2, freezesEarned) - (freezeUsed ? 1 : 0));
+
+  return {
+    currentStreak,
+    rawStreak,
+    activeDaysTotal,
+    freezesEarned,
+    freezesAvailable,
+    freezeProtected: freezeUsed && currentStreak > rawStreak,
+  };
+};
+
+export const isHardestCard = (card: Flashcard): boolean => {
+  return (card.missCount ?? 0) >= 2 || card.lastQuality === 1;
+};
+
+export interface ClozePrompt {
+  maskedSentence: string;
+  answer: string;
+  hasSentenceMatch: boolean;
+}
+
+/**
+ * Replaces occurrences of the target word (or simple inflected forms) inside an example
+ * sentence with a fill-in-the-blank placeholder (`_____`).
+ */
+export const buildClozePrompt = (word: string, example?: string): ClozePrompt => {
+  const cleanWord = (word || '').trim();
+  const cleanExample = (example || '').trim();
+  if (!cleanWord || !cleanExample) {
+    return {
+      maskedSentence: cleanExample,
+      answer: cleanWord,
+      hasSentenceMatch: false,
+    };
+  }
+
+  const escaped = cleanWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // Match exact word or common inflections (s, es, ed, ing, ly, er, est)
+  const exactRegex = new RegExp(`\\b${escaped}[a-zA-Z]{0,4}\\b`, 'gi');
+  if (exactRegex.test(cleanExample)) {
+    return {
+      maskedSentence: cleanExample.replace(exactRegex, '_____'),
+      answer: cleanWord,
+      hasSentenceMatch: true,
+    };
+  }
+
+  // Fallback for stem match when word ends in e/y (e.g. "ephemeral" / "mitigate" -> "mitigating")
+  if (cleanWord.length >= 5) {
+    const stem = cleanWord.slice(0, -1).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const stemRegex = new RegExp(`\\b${stem}[a-zA-Z]{1,5}\\b`, 'gi');
+    if (stemRegex.test(cleanExample)) {
+      return {
+        maskedSentence: cleanExample.replace(stemRegex, '_____'),
+        answer: cleanWord,
+        hasSentenceMatch: true,
+      };
+    }
+  }
+
+  return {
+    maskedSentence: cleanExample,
+    answer: cleanWord,
+    hasSentenceMatch: false,
+  };
+};
+
 export const isCardDue = (card: Flashcard, now: number = Date.now()): boolean => {
   if (card.status === FlashcardStatus.Mastered) return false;
   if (card.status === FlashcardStatus.New) return true;

@@ -3,55 +3,103 @@
 <head>
   <meta charset="UTF-8">
   <style>
-    body { width: 300px; padding: 20px; font-family: 'Inter', sans-serif; color: #334155; }
-    h3 { margin: 0 0 15px 0; color: #0f172a; font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
-    
+    body { width: 320px; padding: 18px; font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif; color: #334155; margin: 0; background: #ffffff; }
+    h3 { margin: 0 0 14px 0; color: #0f172a; font-size: 16px; font-weight: 700; display: flex; align-items: center; justify-content: space-between; }
+    .title-left { display: flex; align-items: center; gap: 8px; }
+    .version-pill { font-size: 10px; font-weight: 700; background: #dcfce7; color: #15803d; padding: 2px 7px; border-radius: 999px; }
+
     /* Layout Classes */
     .hidden { display: none !important; }
     .section { animation: fadeIn 0.2s; }
-    
+
+    /* Provider Tabs */
+    .provider-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 12px; background: #f1f5f9; padding: 4px; border-radius: 8px; }
+    .tab-btn { border: none; background: transparent; padding: 6px 8px; border-radius: 6px; font-size: 12px; font-weight: 600; color: #64748b; cursor: pointer; transition: all 0.15s; }
+    .tab-btn.active { background: #ffffff; color: #15803d; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08); }
+
     /* Input Styles */
-    label { display: block; font-size: 12px; color: #64748b; margin-bottom: 6px; }
-    input { width: 100%; padding: 8px 12px; margin-bottom: 12px; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; outline: none; }
-    input:focus { border-color: #0ea5e9; box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.1); }
+    label { display: block; font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 5px; }
+    input[type="text"], input[type="password"] { width: 100%; padding: 8px 10px; margin-bottom: 10px; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 7px; font-size: 12.5px; outline: none; }
+    input[type="text"]:focus, input[type="password"]:focus { border-color: #16a34a; box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.14); }
+    .hint { font-size: 11px; color: #64748b; margin: -6px 0 10px 0; line-height: 1.4; }
+
+    /* Toggle row */
+    .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 9px 10px; margin: 10px 0 12px 0; font-size: 12px; color: #334155; }
+    .toggle-row input { width: 16px; height: 16px; accent-color: #16a34a; cursor: pointer; margin: 0; }
 
     /* Button Styles */
-    .btn { width: 100%; padding: 8px; border: none; border-radius: 6px; cursor: pointer; font-weight: 500; font-size: 13px; transition: all 0.2s; }
-    .btn-primary { background: #0284c7; color: white; }
-    .btn-primary:hover { background: #0369a1; }
+    .btn { width: 100%; padding: 9px; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 13px; transition: all 0.15s; }
+    .btn-primary { background: #16a34a; color: white; }
+    .btn-primary:hover { background: #15803d; }
+    .btn-primary:disabled { opacity: 0.65; cursor: default; }
     .btn-secondary { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; margin-top: 8px; }
     .btn-secondary:hover { background: #e2e8f0; color: #1e293b; }
 
     /* Static Display Styles */
-    .id-display { background: #f8fafc; border: 1px dashed #cbd5e1; padding: 12px; border-radius: 8px; margin-bottom: 12px; word-break: break-all; font-family: monospace; font-size: 12px; color: #475569; text-align: center; }
-    
+    .id-display { background: #f8fafc; border: 1px dashed #cbd5e1; padding: 10px; border-radius: 8px; margin-bottom: 10px; word-break: break-all; font-family: monospace; font-size: 12px; color: #334155; text-align: center; }
+    .provider-badge { display: inline-block; font-size: 11px; font-weight: 600; color: #15803d; background: #dcfce7; padding: 2px 8px; border-radius: 999px; margin-bottom: 8px; }
+
     /* Status Messages */
-    .status { margin-top: 12px; font-size: 11px; text-align: center; min-height: 16px; }
+    .status { margin-top: 10px; font-size: 11.5px; text-align: center; min-height: 16px; line-height: 1.4; }
     .status.success { color: #16a34a; }
-    .status.error { color: #ef4444; }
+    .status.error { color: #dc2626; }
 
     @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
   </style>
 </head>
 <body>
   <h3>
-    <img src="icon.png" style="width: 20px; height: 20px;">
-    Lumina Sync
+    <span class="title-left">
+      <img src="icon.png" style="width: 22px; height: 22px; border-radius: 5px;">
+      Lumina Collector
+    </span>
+    <span class="version-pill">v2.0</span>
   </h3>
 
   <div id="viewSection" class="section hidden">
-    <div class="id-display" id="displayId"></div>
-    <div style="font-size: 11px; color: #64748b; text-align: center; margin-bottom: 12px;">
-      <span style="color:#16a34a">&#9679;</span> Connected to Cloud
+    <div style="text-align: center;">
+      <span id="providerBadge" class="provider-badge">GitHub Gist (Instant)</span>
     </div>
-    <button id="openAppBtn" class="btn btn-primary">Open Web App</button>
-    <button id="editBtn" class="btn btn-secondary">Edit Pantry ID</button>
+    <div class="id-display" id="displayId"></div>
+    <div style="font-size: 11.5px; color: #64748b; text-align: center; margin-bottom: 10px;">
+      <span style="color:#16a34a">&#9679;</span> Connected &amp; Ready — double-click or right-click any word
+    </div>
+
+    <label class="toggle-row" for="inlineToggleView">
+      <span>Inline lookup tooltip on double-click</span>
+      <input type="checkbox" id="inlineToggleView" checked />
+    </label>
+
+    <button id="openAppBtn" class="btn btn-primary">Open Lumina Web App</button>
+    <button id="editBtn" class="btn btn-secondary">Change Sync Settings</button>
   </div>
 
   <div id="editSection" class="section hidden">
-    <label for="pantryIdInput">Enter your Pantry ID:</label>
-    <input type="text" id="pantryIdInput" placeholder="e.g. 94389b-..." />
-    
+    <div class="provider-tabs" role="tablist">
+      <button type="button" id="tabGist" class="tab-btn active" role="tab">GitHub Gist (Instant)</button>
+      <button type="button" id="tabPantry" class="tab-btn" role="tab">Pantry (Legacy)</button>
+    </div>
+
+    <div id="gistFields">
+      <label for="gistTokenInput">GitHub Personal Access Token (gist scope)</label>
+      <input type="password" id="gistTokenInput" placeholder="ghp_..." autocomplete="off" />
+
+      <label for="gistIdInput">Gist ID</label>
+      <input type="text" id="gistIdInput" placeholder="Paste Gist ID from Lumina Data Manager" />
+      <p class="hint">Instant 1-request sync matching Lumina's GitHub Gist backup.</p>
+    </div>
+
+    <div id="pantryFields" class="hidden">
+      <label for="pantryIdInput">Pantry ID</label>
+      <input type="text" id="pantryIdInput" placeholder="e.g. 94389b-..." />
+      <p class="hint">Syncs with your existing Pantry cloud basket.</p>
+    </div>
+
+    <label class="toggle-row" for="inlineToggleEdit">
+      <span>Inline lookup tooltip on double-click</span>
+      <input type="checkbox" id="inlineToggleEdit" checked />
+    </label>
+
     <button id="saveBtn" class="btn btn-primary">Connect Extension</button>
     <button id="cancelBtn" class="btn btn-secondary hidden">Cancel</button>
   </div>

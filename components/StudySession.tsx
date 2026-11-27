@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Flashcard, FlashcardStatus, LocalizedTranslations, MeaningLanguagePreference } from '../types';
-import { RotateCw, CheckCircle, Brain, ArrowLeft, Volume2, MoveUp, MoveDown, MoveLeft, MoveRight, XCircle, ArrowRight, ListChecks, Undo2, RefreshCw, Lightbulb, BookOpen } from 'lucide-react';
+import { RotateCw, CheckCircle, Brain, ArrowLeft, Volume2, MoveUp, MoveDown, MoveLeft, MoveRight, XCircle, ArrowRight, ListChecks, Undo2, RefreshCw, Lightbulb, BookOpen, PenLine, Headphones } from 'lucide-react';
 import Confetti from 'react-confetti';
 import { useWindowSize } from 'react-use';
 import { motion, useMotionValue, useTransform, PanInfo, AnimatePresence } from 'framer-motion';
 import { useLocation } from 'react-router-dom';
 import { playAudio } from '../utils/audio';
-import { getDueCards, sortStudySessionCards, isBookFlashcard, getCardComplexityLevel } from '../utils/studyUtils';
+import { getDueCards, sortStudySessionCards, isBookFlashcard, getCardComplexityLevel, isHardestCard, buildClozePrompt } from '../utils/studyUtils';
 import { parseTagHierarchy, getCardBookInfo, getCardBookInfoForBook } from '../utils/tagUtils';
 import { useCardFlip3D } from '../utils/cardFlip';
 import { getAdaptiveWordHeadingClass } from '../utils/deviceScale';
@@ -97,6 +97,9 @@ export const StudySession: React.FC<StudySessionProps> = ({
   const [showBookHint, setShowBookHint] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
   const [selectedQuizOption, setSelectedQuizOption] = useState<string | null>(null);
+  const [clozeInput, setClozeInput] = useState('');
+  const [clozeResult, setClozeResult] = useState<'correct' | 'incorrect' | null>(null);
+  const [clozeHintCount, setClozeHintCount] = useState(0);
   const [reviewHistory, setReviewHistory] = useState<ReviewHistoryItem[]>([]);
 
   const isAdvancingRef = useRef(false);
@@ -120,8 +123,11 @@ export const StudySession: React.FC<StudySessionProps> = ({
     count?: number;
     tag?: string;
     chapters?: string[];
+    onlyHardest?: boolean;
   } | undefined;
   const isQuizMode = sessionConfig?.mode === 'quiz';
+  const isClozeMode = sessionConfig?.mode === 'cloze';
+  const isListeningMode = sessionConfig?.mode === 'listening';
 
   useEffect(() => {
     if (isInitialized) return;
@@ -158,6 +164,17 @@ export const StudySession: React.FC<StudySessionProps> = ({
       }
     }
 
+    if (sessionConfig?.onlyHardest) {
+      dueCards = dueCards.filter(isHardestCard);
+    }
+
+    if (sessionConfig?.mode === 'cloze') {
+      const withSentence = dueCards.filter(c => buildClozePrompt(c.word, c.example).hasSentenceMatch);
+      if (withSentence.length > 0) {
+        dueCards = withSentence;
+      }
+    }
+
     const isBookSession = Boolean(
       (sessionConfig?.tag && /^(?:book\s*:|books\s*\/|__folder:Books__)/i.test(sessionConfig.tag.trim())) ||
       dueCards.some(c => isBookFlashcard(c) || c.complexityLevel !== undefined)
@@ -181,6 +198,21 @@ export const StudySession: React.FC<StudySessionProps> = ({
     const liveCard = cards.find(c => c.id === queuedCard.id);
     return liveCard ? { ...queuedCard, translations: liveCard.translations } : queuedCard;
   }, [queuedCard, cards]);
+
+  // Auto-play pronunciation on each new card in Listening Recall mode
+  useEffect(() => {
+    if (!isListeningMode || !currentCard || isFlipped) return;
+    try {
+      playAudio(currentCard.word, currentCard.audio);
+    } catch {
+      // ignore autoplay blocks
+    }
+  }, [isListeningMode, currentCard?.id]);
+
+  const clozePrompt = useMemo(
+    () => (currentCard && isClozeMode ? buildClozePrompt(currentCard.word, currentCard.example) : null),
+    [currentCard, isClozeMode]
+  );
 
   const activeSessionBookTitle = useMemo(() => {
     if (!sessionConfig?.tag) return null;
@@ -242,22 +274,29 @@ export const StudySession: React.FC<StudySessionProps> = ({
     );
   }, []);
 
-  // Build 4 deterministic multiple-choice options for the current quiz card
+  // Build 4 deterministic multiple-choice options for the current quiz card (preferring same partOfSpeech distractors)
   const quizOptions = useMemo<QuizOptionItem[]>(() => {
     if (!currentCard || !isQuizMode) return [];
     const correct = currentCard.mainDefinition.trim();
+    const targetPos = (currentCard.partOfSpeech || '').trim().toLowerCase();
     const seenDefs = new Set<string>([correct]);
-    const otherCandidates: Array<{ englishText: string; translations?: LocalizedTranslations }> = [];
+    const samePosCandidates: Array<{ englishText: string; translations?: LocalizedTranslations }> = [];
+    const otherPosCandidates: Array<{ englishText: string; translations?: LocalizedTranslations }> = [];
 
     for (const c of cards) {
       if (c.id === currentCard.id) continue;
       const trimmed = c.mainDefinition.trim();
       if (!trimmed || seenDefs.has(trimmed)) continue;
       seenDefs.add(trimmed);
-      otherCandidates.push({
+      const item = {
         englishText: trimmed,
         translations: c.translations,
-      });
+      };
+      if (targetPos && (c.partOfSpeech || '').trim().toLowerCase() === targetPos) {
+        samePosCandidates.push(item);
+      } else {
+        otherPosCandidates.push(item);
+      }
     }
 
     // Deterministic pseudo-random shuffle seeded by card id + currentIndex
@@ -270,11 +309,15 @@ export const StudySession: React.FC<StudySessionProps> = ({
       return h >>> 0;
     };
 
-    const sortedDeckDistractors = [...otherCandidates].sort(
+    const sortedSamePos = [...samePosCandidates].sort(
       (a, b) => hashStr(currentCard.id + a.englishText) - hashStr(currentCard.id + b.englishText)
     );
-    const fallbackNeeded = Math.max(0, 3 - sortedDeckDistractors.length);
-    const chosenDeckDistractors = sortedDeckDistractors.slice(0, 3);
+    const sortedOtherPos = [...otherPosCandidates].sort(
+      (a, b) => hashStr(currentCard.id + a.englishText) - hashStr(currentCard.id + b.englishText)
+    );
+    const prioritizedDeckDistractors = [...sortedSamePos, ...sortedOtherPos];
+    const fallbackNeeded = Math.max(0, 3 - prioritizedDeckDistractors.length);
+    const chosenDeckDistractors = prioritizedDeckDistractors.slice(0, 3);
     const chosenDeckTexts = new Set(chosenDeckDistractors.map(d => d.englishText));
     const fallbackDistractors = FALLBACK_DISTRACTOR_ITEMS.filter(
       d => d.englishText !== correct && !chosenDeckTexts.has(d.englishText)
@@ -370,6 +413,9 @@ export const StudySession: React.FC<StudySessionProps> = ({
     setIsFlipped(false);
     setShowBookHint(false);
     setSelectedQuizOption(null);
+    setClozeInput('');
+    setClozeResult(null);
+    setClozeHintCount(0);
 
     if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
     // Wait for flip to partially complete before changing content
@@ -384,8 +430,8 @@ export const StudySession: React.FC<StudySessionProps> = ({
         }
         return nextIndex;
       });
-    }, isQuizMode ? 100 : 300);
-  }, [currentCard, cards, currentIndex, onReviewCard, queue.length, onSessionComplete, x, y, isQuizMode, showActionFeedback]);
+    }, isQuizMode || isClozeMode ? 100 : 300);
+  }, [currentCard, cards, currentIndex, onReviewCard, queue.length, onSessionComplete, x, y, isQuizMode, isClozeMode, showActionFeedback]);
 
   const handleSelectQuizOption = useCallback((option: string) => {
     if (!currentCard || selectedQuizOption !== null) return;
@@ -396,6 +442,36 @@ export const StudySession: React.FC<StudySessionProps> = ({
     setReviewHistory(prev => [...prev, { index: currentIndex, previousCard: { ...snapshot }, quality }]);
     onReviewCard(currentCard.id, quality);
   }, [currentCard, cards, currentIndex, selectedQuizOption, onReviewCard]);
+
+  const handleUpgradeToMastered = useCallback(() => {
+    if (!currentCard) return;
+    onReviewCard(currentCard.id, 5);
+    setReviewHistory(prev => {
+      if (prev.length === 0) return prev;
+      const copy = [...prev];
+      copy[copy.length - 1] = { ...copy[copy.length - 1], quality: 5 };
+      return copy;
+    });
+    showActionFeedback(
+      { message: 'Mastered', colorClass: 'text-green-500', bgColorClass: 'bg-green-500/10 border-green-500/20' },
+      1800
+    );
+    handleNext(null);
+  }, [currentCard, onReviewCard, showActionFeedback, handleNext]);
+
+  const handleSubmitCloze = useCallback((e?: React.FormEvent, forceGiveUp = false) => {
+    if (e) e.preventDefault();
+    if (!currentCard || clozeResult !== null) return;
+    const normalize = (s: string) => s.trim().toLowerCase().replace(/[^a-z'-]/g, '');
+    const expected = normalize(currentCard.word);
+    const typed = normalize(clozeInput);
+    const isCorrect = !forceGiveUp && typed.length > 0 && (typed === expected || (expected.length >= 5 && typed.startsWith(expected)));
+    const quality = isCorrect ? 3 : 1;
+    setClozeResult(isCorrect ? 'correct' : 'incorrect');
+    const snapshot = cards.find(c => c.id === currentCard.id) || currentCard;
+    setReviewHistory(prev => [...prev, { index: currentIndex, previousCard: { ...snapshot }, quality }]);
+    onReviewCard(currentCard.id, quality);
+  }, [currentCard, clozeInput, clozeResult, cards, currentIndex, onReviewCard]);
 
   const handleUndo = useCallback(() => {
     if (reviewHistory.length === 0) return;
@@ -414,6 +490,9 @@ export const StudySession: React.FC<StudySessionProps> = ({
     setIsFlipped(false);
     setShowBookHint(false);
     setSelectedQuizOption(null);
+    setClozeInput('');
+    setClozeResult(null);
+    setClozeHintCount(0);
     setShowConfetti(false);
     setCurrentIndex(lastEntry.index);
     showActionFeedback(
@@ -440,6 +519,9 @@ export const StudySession: React.FC<StudySessionProps> = ({
     setIsFlipped(false);
     setShowBookHint(false);
     setSelectedQuizOption(null);
+    setClozeInput('');
+    setClozeResult(null);
+    setClozeHintCount(0);
     setShowConfetti(false);
   }, [resetFlipInstant]);
 
@@ -843,25 +925,196 @@ export const StudySession: React.FC<StudySessionProps> = ({
             </div>
 
             {selectedQuizOption !== null && (
-              <div className="pt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 dark:border-slate-700">
-                <span
-                  className={`text-xs sm:text-sm font-semibold ${
-                    selectedQuizOption === currentCard.mainDefinition.trim()
-                      ? 'text-emerald-600 dark:text-emerald-400'
-                      : 'text-red-600 dark:text-red-400'
+              <div className="pt-3 space-y-3 border-t border-slate-100 dark:border-slate-700">
+                {(currentCard.example || currentCard.image) && (
+                  <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-700/70 flex items-center gap-3">
+                    {currentCard.image && (
+                      <img
+                        src={currentCard.image}
+                        alt={`Visual mnemonic for ${currentCard.word}`}
+                        className="w-14 h-14 rounded-xl object-contain bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shrink-0"
+                        loading="lazy"
+                      />
+                    )}
+                    {currentCard.example && (
+                      <p className="text-xs sm:text-sm italic font-serif text-slate-600 dark:text-slate-300 leading-relaxed">
+                        “{currentCard.example}”
+                      </p>
+                    )}
+                  </div>
+                )}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span
+                    className={`text-xs sm:text-sm font-semibold ${
+                      selectedQuizOption === currentCard.mainDefinition.trim()
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-red-600 dark:text-red-400'
+                    }`}
+                  >
+                    {selectedQuizOption === currentCard.mainDefinition.trim()
+                      ? 'Correct! Marked as Learned.'
+                      : 'Not quite — marked for review again.'}
+                  </span>
+                  <div className="ml-auto flex items-center gap-2">
+                    {selectedQuizOption === currentCard.mainDefinition.trim() && (
+                      <button
+                        type="button"
+                        data-testid="quiz-mark-mastered-btn"
+                        onClick={handleUpgradeToMastered}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-700 text-xs sm:text-sm font-semibold rounded-xl transition-colors"
+                      >
+                        <CheckCircle className="h-4 w-4" />
+                        Mark Mastered
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleNext(null)}
+                      className="inline-flex items-center gap-2 px-4 sm:px-5 py-2 sm:py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl shadow-md shadow-indigo-500/20 transition-colors"
+                    >
+                      Next Question
+                      <ArrowRight className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : isClozeMode ? (
+          <div
+            data-testid="cloze-study-card"
+            className="w-full max-w-lg max-h-full overflow-y-auto custom-scrollbar bg-white dark:bg-slate-800 rounded-3xl shadow-xl border border-slate-100 dark:border-slate-700 p-5 sm:p-8 flex flex-col gap-5"
+          >
+            <div className="text-center space-y-2 border-b border-slate-100 dark:border-slate-700 pb-4">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 text-xs font-bold uppercase tracking-wider">
+                <PenLine className="h-3.5 w-3.5" />
+                Fill-in-the-Blank
+              </div>
+              {currentCard.partOfSpeech && (
+                <p className="text-xs italic text-slate-500 dark:text-slate-400">
+                  {currentCard.partOfSpeech} · {currentCard.word.length} letters
+                </p>
+              )}
+            </div>
+
+            {clozePrompt?.hasSentenceMatch && (
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-700">
+                <p
+                  data-testid="cloze-masked-sentence"
+                  className="text-base sm:text-lg font-serif italic text-slate-800 dark:text-slate-100 leading-relaxed text-center"
+                >
+                  “{clozePrompt.maskedSentence}”
+                </p>
+              </div>
+            )}
+
+            <div className="p-3.5 rounded-2xl bg-brand-50/50 dark:bg-brand-900/15 border border-brand-100 dark:border-brand-800/40">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-brand-700 dark:text-brand-400 mb-1">
+                Meaning Cue
+              </p>
+              <MeaningDisplay
+                englishText={currentCard.mainDefinition}
+                translations={currentCard.translations}
+                preference={languagePreference}
+                variant="compact"
+                englishClassName="text-sm sm:text-base text-slate-700 dark:text-slate-200 leading-relaxed"
+                testIdPrefix="cloze-cue"
+              />
+            </div>
+
+            {clozeResult === null ? (
+              <form onSubmit={handleSubmitCloze} className="space-y-3">
+                <input
+                  type="text"
+                  autoFocus
+                  autoComplete="off"
+                  spellCheck={false}
+                  data-testid="cloze-answer-input"
+                  aria-label="Type the missing word"
+                  value={clozeInput}
+                  onChange={(e) => setClozeInput(e.target.value)}
+                  placeholder={
+                    clozeHintCount > 0
+                      ? `Hint: ${currentCard.word.slice(0, clozeHintCount)}${'•'.repeat(Math.max(0, currentCard.word.length - clozeHintCount))}`
+                      : 'Type the missing word...'
+                  }
+                  className="w-full px-4 py-3 rounded-2xl bg-slate-50 dark:bg-slate-900/70 border-2 border-slate-200 dark:border-slate-600 text-base sm:text-lg font-serif font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                />
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setClozeHintCount(c => Math.min(currentCard.word.length - 1, c + 1))}
+                      disabled={clozeHintCount >= currentCard.word.length - 1}
+                      className="px-3 py-2 rounded-xl text-xs font-semibold bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 hover:bg-amber-100 disabled:opacity-40 transition-colors"
+                    >
+                      Letter Hint
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSubmitCloze(undefined, true)}
+                      className="px-3 py-2 rounded-xl text-xs font-semibold text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                    >
+                      Reveal Answer
+                    </button>
+                  </div>
+                  <button
+                    type="submit"
+                    data-testid="cloze-check-btn"
+                    disabled={!clozeInput.trim()}
+                    className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold shadow-md shadow-emerald-500/20 disabled:opacity-45 transition-colors"
+                  >
+                    Check Answer
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-700">
+                <div
+                  data-testid="cloze-feedback"
+                  className={`p-3.5 rounded-2xl border flex items-center justify-between gap-3 ${
+                    clozeResult === 'correct'
+                      ? 'bg-emerald-50 dark:bg-emerald-900/25 border-emerald-200 dark:border-emerald-700 text-emerald-900 dark:text-emerald-100'
+                      : 'bg-red-50 dark:bg-red-900/25 border-red-200 dark:border-red-700 text-red-900 dark:text-red-100'
                   }`}
                 >
-                  {selectedQuizOption === currentCard.mainDefinition.trim()
-                    ? 'Correct! Marked as Learned.'
-                    : 'Not quite — marked for review again.'}
-                </span>
-                <button
-                  onClick={() => handleNext(null)}
-                  className="ml-auto inline-flex items-center gap-2 px-4 sm:px-5 py-2 sm:py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl shadow-md shadow-indigo-500/20 transition-colors"
-                >
-                  Next Question
-                  <ArrowRight className="h-4 w-4" />
-                </button>
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wider">
+                      {clozeResult === 'correct' ? 'Correct!' : 'Answer'}
+                    </p>
+                    <p className="text-xl font-serif font-bold mt-0.5">{currentCard.word}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => playAudio(currentCard.word, currentCard.audio)}
+                    aria-label={`Listen to pronunciation of ${currentCard.word}`}
+                    className="p-2 rounded-full bg-white/80 dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 hover:text-brand-600"
+                  >
+                    <Volume2 className="h-5 w-5" />
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  {clozeResult === 'correct' && (
+                    <button
+                      type="button"
+                      onClick={handleUpgradeToMastered}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-700 text-xs sm:text-sm font-semibold rounded-xl transition-colors"
+                    >
+                      <CheckCircle className="h-4 w-4" />
+                      Mark Mastered
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    data-testid="cloze-next-btn"
+                    onClick={() => handleNext(null)}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-xl shadow-md shadow-emerald-500/20 transition-colors"
+                  >
+                    Next Word
+                    <ArrowRight className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -906,7 +1159,7 @@ export const StudySession: React.FC<StudySessionProps> = ({
               rotateY: flipRotateY,
             }}
           >
-            {/* Front of Card - Minimal Design (Word Only) */}
+            {/* Front of Card - Word (or Audio-First Prompt in Listening Mode) */}
             <div
               data-testid="study-card-front"
               aria-hidden={isFlipped}
@@ -927,101 +1180,131 @@ export const StudySession: React.FC<StudySessionProps> = ({
 
                 <div className="relative z-10 flex-1 min-h-0 flex flex-col items-center justify-start w-full overflow-y-auto custom-scrollbar py-2">
                   <div className="my-auto w-full flex flex-col items-center">
-                    {(currentCardComplexity || currentCardChapter) && (
-                      <div className="mb-3 flex flex-wrap items-center justify-center gap-1.5">
-                        {currentCardComplexity && (
-                          <span
-                            data-testid="study-card-complexity-badge"
-                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
-                              currentCardComplexity === 'advanced'
-                                ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800/60'
-                                : currentCardComplexity === 'intermediate'
-                                  ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/60'
-                                  : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/60'
-                            }`}
-                          >
-                            {currentCardComplexity}
-                          </span>
-                        )}
-                        {currentCardChapter && (
-                          <span
-                            data-testid="study-card-chapter-badge"
-                            className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/60"
-                          >
-                            {currentCardChapter}
+                    {isListeningMode ? (
+                      <div data-testid="listening-front-prompt" className="flex flex-col items-center gap-4">
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300 text-xs font-bold uppercase tracking-wider border border-sky-200 dark:border-sky-800/60">
+                          <Headphones className="h-3.5 w-3.5" />
+                          Listening Recall
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            playAudio(currentCard.word, currentCard.audio);
+                          }}
+                          aria-label="Replay pronunciation"
+                          className="w-20 h-20 rounded-full bg-sky-500 hover:bg-sky-600 text-white shadow-xl shadow-sky-500/30 flex items-center justify-center transition-transform active:scale-95"
+                        >
+                          <Volume2 className="h-9 w-9" />
+                        </button>
+                        <p className="text-sm text-slate-500 dark:text-slate-400">
+                          Tap the speaker to replay · Recall the word &amp; meaning
+                        </p>
+                        {currentCard.partOfSpeech && (
+                          <span className="text-xs italic text-slate-400 dark:text-slate-500">
+                            Hint: {currentCard.partOfSpeech}
                           </span>
                         )}
                       </div>
-                    )}
-                    <h2 className={`${getAdaptiveWordHeadingClass(currentCard.word, 'study')} font-serif font-bold text-slate-900 dark:text-white mb-4 sm:mb-6 break-words max-w-full px-1`}>
-                      {currentCard.word}
-                    </h2>
-                    <div className="flex flex-wrap items-center gap-2 sm:gap-3 justify-center max-w-full">
-                      {currentCard.phonetic && (
-                        <p className="text-lg sm:text-2xl text-slate-500 dark:text-slate-400 font-serif italic break-words">
-                          {currentCard.phonetic}
-                        </p>
-                      )}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          playAudio(currentCard.word, currentCard.audio);
-                        }}
-                        className="p-2 text-slate-500 dark:text-slate-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded-full transition-colors"
-                        title="Listen to pronunciation"
-                        aria-label={`Listen to pronunciation of ${currentCard.word}`}
-                      >
-                        <Volume2 className="h-5 w-5 sm:h-6 sm:w-6" />
-                      </button>
-                    </div>
-
-                    {bookSourceTitle && currentCard.example && (
-                      <div
-                        className="mt-4 sm:mt-6 w-full flex flex-col items-center"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {!showBookHint ? (
-                          <button
-                            type="button"
-                            data-testid="book-hint-button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setShowBookHint(true);
-                            }}
-                            className="inline-flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-full text-xs font-semibold bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 hover:bg-amber-100 dark:hover:bg-amber-900/50 transition-all shadow-sm"
-                          >
-                            <Lightbulb className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-                            <span>Show Book Hint</span>
-                            <span className="hidden sm:inline text-[10px] opacity-70 font-mono">(H)</span>
-                          </button>
-                        ) : (
-                          <div
-                            data-testid="book-hint-content"
-                            className="w-full p-3.5 sm:p-4 rounded-2xl bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 text-left space-y-2"
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400 min-w-0">
-                                <BookOpen className="h-3 w-3 shrink-0" />
-                                <span className="truncate">From {bookSourceTitle}</span>
-                              </span>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setShowBookHint(false);
-                                }}
-                                className="text-[11px] font-semibold text-amber-700/80 dark:text-amber-400/80 hover:underline shrink-0"
+                    ) : (
+                      <>
+                        {(currentCardComplexity || currentCardChapter) && (
+                          <div className="mb-3 flex flex-wrap items-center justify-center gap-1.5">
+                            {currentCardComplexity && (
+                              <span
+                                data-testid="study-card-complexity-badge"
+                                className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
+                                  currentCardComplexity === 'advanced'
+                                    ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800/60'
+                                    : currentCardComplexity === 'intermediate'
+                                      ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/60'
+                                      : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/60'
+                                }`}
                               >
-                                Hide Hint
-                              </button>
-                            </div>
-                            <p className="text-xs sm:text-sm italic font-serif text-slate-700 dark:text-slate-200 leading-relaxed max-h-28 overflow-y-auto custom-scrollbar">
-                              {renderHighlightedBookSentence(currentCard.example, currentCard.word)}
-                            </p>
+                                {currentCardComplexity}
+                              </span>
+                            )}
+                            {currentCardChapter && (
+                              <span
+                                data-testid="study-card-chapter-badge"
+                                className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/60"
+                              >
+                                {currentCardChapter}
+                              </span>
+                            )}
                           </div>
                         )}
-                      </div>
+                        <h2 className={`${getAdaptiveWordHeadingClass(currentCard.word, 'study')} font-serif font-bold text-slate-900 dark:text-white mb-4 sm:mb-6 break-words max-w-full px-1`}>
+                          {currentCard.word}
+                        </h2>
+                        <div className="flex flex-wrap items-center gap-2 sm:gap-3 justify-center max-w-full">
+                          {currentCard.phonetic && (
+                            <p className="text-lg sm:text-2xl text-slate-500 dark:text-slate-400 font-serif italic break-words">
+                              {currentCard.phonetic}
+                            </p>
+                          )}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              playAudio(currentCard.word, currentCard.audio);
+                            }}
+                            className="p-2 text-slate-500 dark:text-slate-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded-full transition-colors"
+                            title="Listen to pronunciation"
+                            aria-label={`Listen to pronunciation of ${currentCard.word}`}
+                          >
+                            <Volume2 className="h-5 w-5 sm:h-6 sm:w-6" />
+                          </button>
+                        </div>
+
+                        {bookSourceTitle && currentCard.example && (
+                          <div
+                            className="mt-4 sm:mt-6 w-full flex flex-col items-center"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {!showBookHint ? (
+                              <button
+                                type="button"
+                                data-testid="book-hint-button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setShowBookHint(true);
+                                }}
+                                className="inline-flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-full text-xs font-semibold bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 hover:bg-amber-100 dark:hover:bg-amber-900/50 transition-all shadow-sm"
+                              >
+                                <Lightbulb className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                                <span>Show Book Hint</span>
+                                <span className="hidden sm:inline text-[10px] opacity-70 font-mono">(H)</span>
+                              </button>
+                            ) : (
+                              <div
+                                data-testid="book-hint-content"
+                                className="w-full p-3.5 sm:p-4 rounded-2xl bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 text-left space-y-2"
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400 min-w-0">
+                                    <BookOpen className="h-3 w-3 shrink-0" />
+                                    <span className="truncate">From {bookSourceTitle}</span>
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setShowBookHint(false);
+                                    }}
+                                    className="text-[11px] font-semibold text-amber-700/80 dark:text-amber-400/80 hover:underline shrink-0"
+                                  >
+                                    Hide Hint
+                                  </button>
+                                </div>
+                                <p className="text-xs sm:text-sm italic font-serif text-slate-700 dark:text-slate-200 leading-relaxed max-h-28 overflow-y-auto custom-scrollbar">
+                                  {renderHighlightedBookSentence(currentCard.example, currentCard.word)}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
@@ -1052,6 +1335,14 @@ export const StudySession: React.FC<StudySessionProps> = ({
 
                 <div className="relative z-10 flex-1 min-h-0 flex flex-col items-center justify-start overflow-y-auto custom-scrollbar w-full">
                   <div className="my-auto w-full flex flex-col items-center py-1">
+                    {isListeningMode && (
+                      <div className="mb-2 flex items-center gap-2">
+                        <span className="text-xl sm:text-2xl font-serif font-bold text-white">{currentCard.word}</span>
+                        {currentCard.phonetic && (
+                          <span className="text-sm text-slate-400 font-serif italic">{currentCard.phonetic}</span>
+                        )}
+                      </div>
+                    )}
                     <span className="inline-block px-3 py-1 bg-brand-900/50 text-brand-300 text-[11px] sm:text-xs font-bold uppercase tracking-widest rounded-full mb-3 sm:mb-5 shrink-0">
                       {currentCard.partOfSpeech}
                     </span>

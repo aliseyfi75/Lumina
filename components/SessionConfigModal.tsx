@@ -1,19 +1,19 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Play, Zap, BrainCircuit, ListChecks, Tag, BookOpen, Check, ChevronDown, ChevronUp } from 'lucide-react';
+import { X, Play, Zap, BrainCircuit, ListChecks, Tag, BookOpen, Check, ChevronDown, ChevronUp, PenLine, Headphones, Flame } from 'lucide-react';
 import { Flashcard } from '../types';
-import { getDueCards } from '../utils/studyUtils';
-import { parseTagHierarchy, formatBookTag, getCardBookInfo, getCardBookInfoForBook, compareChapterNames } from '../utils/tagUtils';
+import { getDueCards, isHardestCard, buildClozePrompt } from '../utils/studyUtils';
+import { parseTagHierarchy, formatBookTag, getCardBookInfoForBook, compareChapterNames } from '../utils/tagUtils';
 import { useAccessibleModal } from '../hooks/useAccessibleModal';
 
-export type SessionMode = 'full' | 'short' | 'quiz';
+export type SessionMode = 'full' | 'short' | 'quiz' | 'cloze' | 'listening';
 
 const COLLAPSED_SESSION_CHAPTER_LIMIT = 6;
 
 interface SessionConfigModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onStart: (config: { mode: SessionMode; count?: number; tag?: string; chapters?: string[] }) => void;
+    onStart: (config: { mode: SessionMode; count?: number; tag?: string; chapters?: string[]; onlyHardest?: boolean }) => void;
     dueCount: number;
     cards?: Flashcard[];
     initialTag?: string;
@@ -33,6 +33,7 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
     const [count, setCount] = useState(10);
     const [selectedTag, setSelectedTag] = useState<string>(initialTag || '');
     const [selectedChapters, setSelectedChapters] = useState<string[]>(initialChapters || []);
+    const [onlyHardest, setOnlyHardest] = useState(false);
     const [isChaptersExpanded, setIsChaptersExpanded] = useState(false);
     const modalRef = useRef<HTMLDivElement>(null);
 
@@ -41,6 +42,7 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
     useEffect(() => {
         if (isOpen) {
             setIsChaptersExpanded(false);
+            setOnlyHardest(false);
             if (initialTag) {
                 const parsed = parseTagHierarchy(initialTag);
                 if (parsed.folder === 'Books' && parsed.bookTitle) {
@@ -116,8 +118,8 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
         );
     };
 
-    const effectiveDueCount = useMemo(() => {
-        if (!selectedTag) return dueCount;
+    const scopedDueCards = useMemo(() => {
+        if (!selectedTag) return dueCards;
         if (selectedBookTitle) {
             return dueCards.filter(c => {
                 const info = getCardBookInfoForBook(c, selectedBookTitle);
@@ -126,10 +128,34 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
                     return Boolean(info.chapter && selectedChapters.includes(info.chapter));
                 }
                 return true;
-            }).length;
+            });
         }
-        return dueCards.filter(c => c.tags?.some(t => t.trim() === selectedTag)).length;
-    }, [selectedTag, selectedBookTitle, selectedChapters, dueCount, dueCards]);
+        return dueCards.filter(c => c.tags?.some(t => t.trim() === selectedTag));
+    }, [selectedTag, selectedBookTitle, selectedChapters, dueCards]);
+
+    const hardestDueCards = useMemo(
+        () => scopedDueCards.filter(isHardestCard),
+        [scopedDueCards]
+    );
+
+    const activePoolCards = useMemo(() => {
+        const base = onlyHardest ? hardestDueCards : scopedDueCards;
+        if (mode === 'cloze') {
+            const withCloze = base.filter(c => buildClozePrompt(c.word, c.example).hasSentenceMatch);
+            return withCloze.length > 0 ? withCloze : base;
+        }
+        return base;
+    }, [onlyHardest, hardestDueCards, scopedDueCards, mode]);
+
+    const clozeReadyCount = useMemo(() => {
+        const base = onlyHardest ? hardestDueCards : scopedDueCards;
+        return base.filter(c => buildClozePrompt(c.word, c.example).hasSentenceMatch).length;
+    }, [onlyHardest, hardestDueCards, scopedDueCards]);
+
+    const effectiveDueCount =
+        !selectedTag && !onlyHardest && mode !== 'cloze'
+            ? dueCount
+            : activePoolCards.length;
 
     if (!isOpen) return null;
 
@@ -148,6 +174,7 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
             count: mode === 'short' || mode === 'quiz' ? effectiveCount : undefined,
             tag: selectedTag || undefined,
             chapters: selectedBookTitle && selectedChapters.length > 0 ? selectedChapters : undefined,
+            onlyHardest: onlyHardest || undefined,
         });
         onClose();
     };
@@ -475,6 +502,109 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
                             </div>
                         </label>
 
+                        {/* Cloze (Fill-in-the-Blank) Option */}
+                        <label
+                            data-testid="session-mode-cloze"
+                            className={`block relative p-4 rounded-2xl border-2 cursor-pointer transition-all ${mode === 'cloze'
+                                ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20'
+                                : 'border-slate-200 dark:border-slate-700 hover:border-emerald-300 dark:hover:border-emerald-700'
+                                }`}
+                        >
+                            <input
+                                type="radio"
+                                name="session_mode"
+                                value="cloze"
+                                checked={mode === 'cloze'}
+                                onChange={() => setMode('cloze')}
+                                className="sr-only"
+                            />
+                            <div className="flex items-start gap-4">
+                                <div className={`mt-0.5 p-2 rounded-xl shrink-0 ${mode === 'cloze' ? 'bg-emerald-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
+                                    }`}>
+                                    <PenLine className="h-5 w-5" />
+                                </div>
+                                <div className="flex-1">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <h3 className={`font-semibold text-base sm:text-lg ${mode === 'cloze' ? 'text-emerald-900 dark:text-emerald-100' : 'text-slate-700 dark:text-slate-300'
+                                            }`}>
+                                            Fill-in-the-Blank
+                                        </h3>
+                                        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300">
+                                            {clozeReadyCount > 0 ? `${clozeReadyCount} sentences` : 'Definition cue'}
+                                        </span>
+                                    </div>
+                                    <p className={`text-sm mt-1 ${mode === 'cloze' ? 'text-emerald-700 dark:text-emerald-300/80' : 'text-slate-500'
+                                        }`}>
+                                        Type the missing word from real book &amp; example sentences to build active recall.
+                                    </p>
+                                </div>
+                            </div>
+                        </label>
+
+                        {/* Listening Recall Option */}
+                        <label
+                            data-testid="session-mode-listening"
+                            className={`block relative p-4 rounded-2xl border-2 cursor-pointer transition-all ${mode === 'listening'
+                                ? 'border-sky-500 bg-sky-50 dark:bg-sky-900/20'
+                                : 'border-slate-200 dark:border-slate-700 hover:border-sky-300 dark:hover:border-sky-700'
+                                }`}
+                        >
+                            <input
+                                type="radio"
+                                name="session_mode"
+                                value="listening"
+                                checked={mode === 'listening'}
+                                onChange={() => setMode('listening')}
+                                className="sr-only"
+                            />
+                            <div className="flex items-start gap-4">
+                                <div className={`mt-0.5 p-2 rounded-xl shrink-0 ${mode === 'listening' ? 'bg-sky-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
+                                    }`}>
+                                    <Headphones className="h-5 w-5" />
+                                </div>
+                                <div className="flex-1">
+                                    <h3 className={`font-semibold text-base sm:text-lg ${mode === 'listening' ? 'text-sky-900 dark:text-sky-100' : 'text-slate-700 dark:text-slate-300'
+                                        }`}>
+                                        Listening Recall
+                                    </h3>
+                                    <p className={`text-sm mt-1 ${mode === 'listening' ? 'text-sky-700 dark:text-sky-300/80' : 'text-slate-500'
+                                        }`}>
+                                        Hear pronunciation first without seeing the spelling — train your ear before revealing.
+                                    </p>
+                                </div>
+                            </div>
+                        </label>
+
+                        {/* Hardest Words Filter Toggle */}
+                        {hardestDueCards.length > 0 && (
+                            <label
+                                data-testid="session-hardest-toggle"
+                                className={`flex items-center justify-between gap-3 p-3.5 rounded-2xl border cursor-pointer transition-colors ${
+                                    onlyHardest
+                                        ? 'bg-rose-50 dark:bg-rose-900/20 border-rose-300 dark:border-rose-700'
+                                        : 'bg-slate-50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-700 hover:border-rose-300'
+                                }`}
+                            >
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                    <Flame className={`h-4 w-4 shrink-0 ${onlyHardest ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400'}`} />
+                                    <div className="min-w-0">
+                                        <p className="text-xs sm:text-sm font-semibold text-slate-800 dark:text-slate-100">
+                                            Focus on Hardest Words Only
+                                        </p>
+                                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                            {hardestDueCards.length} missed {hardestDueCards.length === 1 ? 'card' : 'cards'} needing extra practice
+                                        </p>
+                                    </div>
+                                </div>
+                                <input
+                                    type="checkbox"
+                                    checked={onlyHardest}
+                                    onChange={(e) => setOnlyHardest(e.target.checked)}
+                                    className="h-4 w-4 accent-rose-600 rounded shrink-0"
+                                />
+                            </label>
+                        )}
+
                     </div>
                 </div>
 
@@ -495,19 +625,35 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
                             ? 'bg-brand-600 hover:bg-brand-700 shadow-brand-500/30'
                             : mode === 'short'
                                 ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-500/30'
-                                : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-500/30'
+                                : mode === 'cloze'
+                                    ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/30'
+                                    : mode === 'listening'
+                                        ? 'bg-sky-600 hover:bg-sky-700 shadow-sky-500/30'
+                                        : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-500/30'
                             }`}
                     >
                         {mode === 'full' ? (
                             <Play className="h-4 w-4 fill-current shrink-0" />
                         ) : mode === 'short' ? (
                             <Zap className="h-4 w-4 fill-current shrink-0" />
+                        ) : mode === 'cloze' ? (
+                            <PenLine className="h-4 w-4 shrink-0" />
+                        ) : mode === 'listening' ? (
+                            <Headphones className="h-4 w-4 shrink-0" />
                         ) : (
                             <ListChecks className="h-4 w-4 shrink-0" />
                         )}
                         {effectiveDueCount === 0
                             ? 'No Cards Due'
-                            : `Start ${mode === 'full' ? 'Full Session' : mode === 'short' ? 'Short Session' : 'Quiz Session'}`}
+                            : `Start ${mode === 'full'
+                                ? 'Full Session'
+                                : mode === 'short'
+                                    ? 'Short Session'
+                                    : mode === 'cloze'
+                                        ? 'Fill-in-the-Blank'
+                                        : mode === 'listening'
+                                            ? 'Listening Session'
+                                            : 'Quiz Session'}`}
                     </button>
                 </div>
             </motion.div>

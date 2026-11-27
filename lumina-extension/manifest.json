@@ -1,19 +1,27 @@
 {
   "manifest_version": 3,
   "name": "Lumina Collector",
-  "version": "1.3",
-  "description": "Highlight a word to add it to your Lumina Flashcards.",
+  "version": "2.0",
+  "description": "Instant inline word lookup & 1-click capture to your Lumina Flashcards with webpage context and GitHub Gist or Pantry sync.",
   "permissions": [
     "contextMenus",
     "storage",
-    "notifications"
+    "notifications",
+    "activeTab"
   ],
   "background": {
     "service_worker": "background.js"
   },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Lumina Settings"
+    "default_title": "Lumina Collector Settings"
   },
   "icons": {
     "16": "icon.png",

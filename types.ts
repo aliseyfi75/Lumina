@@ -67,6 +67,7 @@ export interface Flashcard {
   easinessFactor?: number;
   nextReviewDate?: number;
   lastQuality?: number;
+  missCount?: number;
   statusUpdatedAt?: number;
   updatedAt?: number;
 }
@@ -100,6 +101,8 @@ export interface CloudData {
   cards: Flashcard[];
   studyHistory?: Record<string, number>;
   longestStreak?: number;
+  /** User's daily card review goal (default 10) */
+  dailyGoal?: number;
   /** id → Unix-ms when the card was deleted. Tombstones are pruned after 30 days. */
   deletedCards?: Record<string, number>;
   /** User's selected translation display preference ('en' | 'fa' | 'both') */

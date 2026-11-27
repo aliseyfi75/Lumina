@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import { Flashcard, FlashcardStatus, LocalizedTranslations, MeaningLanguagePreference } from '../types';
-import { Play, BookOpen, CheckCircle, Brain, Trash2, RotateCw, Upload, Volume2, ChevronDown, ChevronRight, ChevronUp, Search, X, ArrowUpDown, Filter, Plus, Pencil, Tag, Sparkles, AlertTriangle, Folder, FolderOpen, CornerDownRight } from 'lucide-react';
+import { Play, BookOpen, CheckCircle, Brain, Trash2, RotateCw, Upload, Volume2, ChevronDown, ChevronRight, ChevronUp, Search, X, ArrowUpDown, Filter, Plus, Pencil, Tag, Sparkles, AlertTriangle, Folder, FolderOpen, CornerDownRight, CheckSquare, Square, RotateCcw } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { playAudio } from '../utils/audio';
 import { getDueCards } from '../utils/studyUtils';
@@ -14,6 +14,7 @@ import { TagSelectorInput } from './TagSelectorInput';
 import { useCardFlip3D } from '../utils/cardFlip';
 import { getAdaptiveWordHeadingClass } from '../utils/deviceScale';
 import { MeaningDisplay } from './MeaningDisplay';
+import { useAccessibleModal } from '../hooks/useAccessibleModal';
 
 const PAGE_SIZE = 24;
 const COLLAPSED_DOCK_CHAPTER_LIMIT = 4;
@@ -40,6 +41,8 @@ interface FlashcardsProps {
   onReviewCard: (id: string, quality: number) => void;
   onCreateCard?: (data: CustomCardFormData) => void;
   onUpdateCard?: (id: string, updates: CustomCardFormData) => void;
+  onBulkUpdateCards?: (ids: string[], updater: (card: Flashcard) => Flashcard) => void;
+  onBulkDeleteCards?: (ids: string[]) => void;
   onImportBookWords?: (bookTitle: string, words: BookExtractedWord[]) => void;
   onOpenImport: () => void;
   languagePreference?: MeaningLanguagePreference;
@@ -51,7 +54,10 @@ const FlashcardItem: React.FC<{
   onReview: (id: string, quality: number) => void;
   onEdit: (card: Flashcard) => void;
   languagePreference: MeaningLanguagePreference;
-}> = ({ card, onDelete, onReview, onEdit, languagePreference }) => {
+  selectionMode?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: (id: string) => void;
+}> = ({ card, onDelete, onReview, onEdit, languagePreference, selectionMode = false, isSelected = false, onToggleSelect }) => {
   const [isFlipped, setIsFlipped] = useState(false);
   const {
     flipRotateY,
@@ -86,7 +92,13 @@ const FlashcardItem: React.FC<{
   return (
     <div
       className="group h-72 sm:h-80 w-full perspective-1000 cursor-pointer"
-      onClick={() => setIsFlipped(!isFlipped)}
+      onClick={() => {
+        if (selectionMode && onToggleSelect) {
+          onToggleSelect(card.id);
+        } else {
+          setIsFlipped(!isFlipped);
+        }
+      }}
     >
       <motion.div
         className="relative w-full h-full preserve-3d"
@@ -101,25 +113,50 @@ const FlashcardItem: React.FC<{
         >
           <motion.div
             style={{ opacity: frontOpacity, visibility: frontVisibility }}
-            className="w-full h-full bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 p-4 sm:p-6 flex flex-col items-center justify-between text-center hover:shadow-md hover:border-brand-200 transition-shadow overflow-hidden"
+            className={`w-full h-full bg-white dark:bg-slate-800 rounded-2xl shadow-sm border p-4 sm:p-6 flex flex-col items-center justify-between text-center hover:shadow-md transition-all overflow-hidden ${
+              selectionMode && isSelected
+                ? 'border-brand-500 ring-2 ring-brand-500/50 bg-brand-50/30 dark:bg-brand-900/20'
+                : 'border-slate-200 dark:border-slate-700 hover:border-brand-200'
+            }`}
           >
             <div className="w-full flex items-center justify-between gap-2 shrink-0">
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onEdit(card);
-                }}
-                aria-label={`Edit ${card.word}`}
-                title="Edit Card"
-                className="p-1.5 text-slate-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 transition-all"
-              >
-                <Pencil className="h-3.5 w-3.5" />
-              </button>
+              {selectionMode ? (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleSelect?.(card.id);
+                  }}
+                  aria-label={`${isSelected ? 'Deselect' : 'Select'} ${card.word}`}
+                  aria-pressed={isSelected}
+                  data-testid={`select-card-${card.word.toLowerCase()}`}
+                  className={`p-1 rounded-lg transition-colors ${
+                    isSelected
+                      ? 'text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/40'
+                      : 'text-slate-400 hover:text-brand-600'
+                  }`}
+                >
+                  {isSelected ? <CheckSquare className="h-5 w-5" /> : <Square className="h-5 w-5" />}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onEdit(card);
+                  }}
+                  aria-label={`Edit ${card.word}`}
+                  title="Edit Card"
+                  className="p-1.5 text-slate-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg opacity-80 sm:opacity-60 sm:group-hover:opacity-100 focus:opacity-100 transition-all"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+              )}
 
               <div className="flex items-center gap-1.5 pl-1">
                 {/* Added logic for displaying the due string for Learning cards */}
                 {card.status === FlashcardStatus.Learning && card.nextReviewDate && (
-                  <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded-md">
+                  <span className="text-[9px] font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded-md">
                     {card.nextReviewDate <= Date.now() ? 'Due Today' : `in ${Math.max(1, Math.ceil((card.nextReviewDate - Date.now()) / (1000 * 60 * 60 * 24)))} days`}
                   </span>
                 )}
@@ -138,14 +175,16 @@ const FlashcardItem: React.FC<{
               </h3>
               <p className="text-slate-500 dark:text-slate-400 italic font-serif text-sm">{card.partOfSpeech}</p>
               <div className="flex items-center gap-2 mt-1 max-w-full">
-                {card.phonetic && <p className="text-slate-400 text-xs sm:text-sm truncate">{card.phonetic}</p>}
+                {card.phonetic && <p className="text-slate-500 dark:text-slate-400 text-xs sm:text-sm truncate">{card.phonetic}</p>}
                 <button
+                  type="button"
                   onClick={(e) => {
                     e.stopPropagation();
                     playAudio(card.word, card.audio);
                   }}
-                  className="p-1 text-slate-400 hover:text-brand-500 hover:bg-brand-50 rounded-full transition-colors shrink-0"
+                  className="p-1.5 text-slate-500 dark:text-slate-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded-full transition-colors shrink-0"
                   title="Listen to pronunciation"
+                  aria-label={`Listen to pronunciation of ${card.word}`}
                 >
                   <Volume2 className="h-4 w-4" />
                 </button>
@@ -196,9 +235,15 @@ const FlashcardItem: React.FC<{
               )}
             </div>
 
-            <div className="shrink-0 pt-1 text-slate-300 dark:text-slate-600 group-hover:text-brand-400 transition-colors flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider">
-              <RotateCw className="h-3.5 w-3.5" />
-              Tap to reveal
+            <div className="shrink-0 pt-1 text-slate-500 dark:text-slate-400 group-hover:text-brand-500 transition-colors flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider">
+              {selectionMode ? (
+                <span>{isSelected ? 'Selected' : 'Tap to select'}</span>
+              ) : (
+                <>
+                  <RotateCw className="h-3.5 w-3.5" />
+                  Tap to reveal
+                </>
+              )}
             </div>
           </motion.div>
         </div>
@@ -241,13 +286,13 @@ const FlashcardItem: React.FC<{
                 />
               </div>
               {card.example && (
-                <p className="text-slate-400 text-xs sm:text-sm italic border-t border-slate-700 pt-2.5 sm:pt-3 mt-auto w-full">
+                <p className="text-slate-300 text-xs sm:text-sm italic border-t border-slate-700 pt-2.5 sm:pt-3 mt-auto w-full">
                   "{card.example}"
                 </p>
               )}
               {card.synonyms && card.synonyms.length > 0 && (
                 <div className="flex flex-wrap items-center justify-center gap-1.5 pt-2 mt-2 w-full">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Syn:</span>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Syn:</span>
                   {card.synonyms.slice(0, 4).map((syn) => (
                     <span
                       key={syn}
@@ -262,51 +307,57 @@ const FlashcardItem: React.FC<{
 
             <div className="pt-3 sm:pt-4 w-full grid grid-cols-4 gap-1 border-t border-slate-800 mt-2 shrink-0" onClick={(e) => e.stopPropagation()}>
               <button
+                type="button"
                 onClick={() => onReview(card.id, 1)}
                 className={`flex flex-col items-center justify-center gap-1 p-1.5 rounded-lg transition-colors 
                   ${card.lastQuality === 1
                     ? 'bg-red-500/20 text-red-400'
-                    : 'text-slate-500 hover:bg-slate-800 hover:text-red-400'}`}
+                    : 'text-slate-300 hover:bg-slate-800 hover:text-red-400'}`}
                 title="Again"
               >
                 <RotateCw className="h-4 w-4" />
-                <span className="text-[8px] font-bold uppercase">Again</span>
+                <span className="text-[9px] font-bold uppercase">Again</span>
               </button>
               <button
+                type="button"
                 onClick={() => onReview(card.id, 3)}
                 className={`flex flex-col items-center justify-center gap-1 p-1.5 rounded-lg transition-colors
                   ${card.lastQuality === 3
                     ? 'bg-blue-500/20 text-blue-400'
-                    : 'text-slate-500 hover:bg-slate-800 hover:text-blue-400'}`}
+                    : 'text-slate-300 hover:bg-slate-800 hover:text-blue-400'}`}
                 title="Learned"
               >
                 <Brain className="h-4 w-4" />
-                <span className="text-[8px] font-bold uppercase">Learned</span>
+                <span className="text-[9px] font-bold uppercase">Learned</span>
               </button>
               <button
+                type="button"
                 onClick={() => onReview(card.id, 5)}
                 className={`flex flex-col items-center justify-center gap-1 p-1.5 rounded-lg transition-colors
                   ${card.lastQuality === 5
                     ? 'bg-green-500/20 text-green-400'
-                    : 'text-slate-500 hover:bg-slate-800 hover:text-green-400'}`}
+                    : 'text-slate-300 hover:bg-slate-800 hover:text-green-400'}`}
                 title="Mastered"
               >
                 <CheckCircle className="h-4 w-4" />
-                <span className="text-[8px] font-bold uppercase">Mastered</span>
+                <span className="text-[9px] font-bold uppercase">Mastered</span>
               </button>
               <div className="flex border-l border-slate-700 justify-center items-center ml-1 pl-1 gap-0.5">
                 <button
+                  type="button"
                   onClick={() => onEdit(card)}
-                  className="p-1.5 text-slate-500 hover:text-brand-400 hover:bg-brand-500/10 rounded-lg transition-colors"
+                  className="p-1.5 text-slate-300 hover:text-brand-400 hover:bg-brand-500/10 rounded-lg transition-colors"
                   title="Edit Card"
                   aria-label={`Edit ${card.word} (back)`}
                 >
                   <Pencil className="h-4 w-4" />
                 </button>
                 <button
+                  type="button"
                   onClick={() => onDelete(card.id)}
-                  className="p-1.5 text-slate-600 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                  className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
                   title="Delete Card"
+                  aria-label="Delete Card"
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
@@ -334,6 +385,9 @@ const CardEditorModal: React.FC<{
   const [example, setExample] = useState('');
   const [image, setImage] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const modalRef = useRef<HTMLDivElement>(null);
+
+  useAccessibleModal(isOpen, onClose, modalRef);
 
   useEffect(() => {
     if (editingCard) {
@@ -386,12 +440,19 @@ const CardEditorModal: React.FC<{
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center modal-safe-overlay">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-lg bg-white dark:bg-slate-800 rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-100 dark:border-slate-700 overflow-hidden z-10 flex flex-col modal-safe-panel">
+      <div
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="card-editor-modal-title"
+        className="relative w-full max-w-lg bg-white dark:bg-slate-800 rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-100 dark:border-slate-700 overflow-hidden z-10 flex flex-col modal-safe-panel"
+      >
         <div className="px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between bg-slate-50 dark:bg-slate-800/60">
-          <h2 className="text-lg sm:text-xl font-serif font-bold text-slate-900 dark:text-white">
+          <h2 id="card-editor-modal-title" className="text-lg sm:text-xl font-serif font-bold text-slate-900 dark:text-white">
             {editingCard ? 'Edit Flashcard' : 'Create Custom Card'}
           </h2>
           <button
+            type="button"
             onClick={onClose}
             aria-label="Close card editor"
             className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full transition-colors"
@@ -551,6 +612,8 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
   onReviewCard,
   onCreateCard,
   onUpdateCard,
+  onBulkUpdateCards,
+  onBulkDeleteCards,
   onImportBookWords,
   onOpenImport,
   languagePreference = 'en',
@@ -565,7 +628,34 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
   const [editingCard, setEditingCard] = useState<Flashcard | null>(null);
   const [isBookPrepOpen, setIsBookPrepOpen] = useState(false);
   const [bookToDelete, setBookToDelete] = useState<{ tag: string; title: string; count: number } | null>(null);
+  const [isBookDockExpanded, setIsBookDockExpanded] = useState(true);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedCardIds, setSelectedCardIds] = useState<Set<string>>(() => new Set());
+  const [showBulkTagInput, setShowBulkTagInput] = useState(false);
+  const [bulkTagInput, setBulkTagInput] = useState('');
+  const [confirmingBulkDelete, setConfirmingBulkDelete] = useState(false);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  const deleteBookModalRef = useRef<HTMLDivElement>(null);
+
+  useAccessibleModal(Boolean(bookToDelete), () => setBookToDelete(null), deleteBookModalRef);
+
+  const exitSelectionMode = () => {
+    setSelectionMode(false);
+    setSelectedCardIds(new Set());
+    setShowBulkTagInput(false);
+    setBulkTagInput('');
+    setConfirmingBulkDelete(false);
+  };
+
+  const toggleCardSelection = (id: string) => {
+    setSelectedCardIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+    setConfirmingBulkDelete(false);
+  };
 
   const existingWordsSet = useMemo(
     () => new Set(cards.map(c => c.word.trim().toLowerCase())),
@@ -1091,29 +1181,42 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
             className="bg-white dark:bg-slate-800/90 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm space-y-3"
           >
             <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-brand-50 dark:bg-brand-900/40 text-brand-600 dark:text-brand-400">
+              <button
+                type="button"
+                data-testid="toggle-book-dock-collapse"
+                onClick={() => setIsBookDockExpanded(prev => !prev)}
+                aria-expanded={isBookDockExpanded}
+                className="flex items-center gap-2 text-left min-w-0 group"
+              >
+                <div className="p-1.5 rounded-lg bg-brand-50 dark:bg-brand-900/40 text-brand-600 dark:text-brand-400 shrink-0">
                   <BookOpen className="h-4 w-4" />
                 </div>
-                <div>
-                  <h2 className="text-sm font-serif font-bold text-slate-900 dark:text-white">
-                    Book Vocabulary Dock
+                <div className="min-w-0">
+                  <h2 className="text-sm font-serif font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                    <span>Book Vocabulary Dock</span>
+                    <span className="text-[11px] font-sans font-semibold text-slate-400 dark:text-slate-500">({bookGroups.length})</span>
+                    {isBookDockExpanded ? (
+                      <ChevronUp className="h-3.5 w-3.5 text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-200" />
+                    ) : (
+                      <ChevronDown className="h-3.5 w-3.5 text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-200" />
+                    )}
                   </h2>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
                     Pre-study complex vocabulary from your books before reading
                   </p>
                 </div>
-              </div>
+              </button>
               <button
                 type="button"
                 onClick={() => setIsBookPrepOpen(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 hover:bg-brand-100 dark:hover:bg-brand-900/50 transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 hover:bg-brand-100 dark:hover:bg-brand-900/50 transition-colors shrink-0"
               >
                 <Plus className="h-3.5 w-3.5" />
                 Add Book
               </button>
             </div>
 
+            {isBookDockExpanded && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {bookGroups.map((book) => {
                 const isSelected = selectedTag === book.tag;
@@ -1324,6 +1427,7 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
                 );
               })}
             </div>
+            )}
           </div>
         )}
 
@@ -1456,6 +1560,23 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
                 <option value="due">Sort: Due Date</option>
               </select>
             </div>
+
+            {(onBulkUpdateCards || onBulkDeleteCards) && (
+              <button
+                type="button"
+                data-testid="toggle-bulk-select-btn"
+                onClick={() => (selectionMode ? exitSelectionMode() : setSelectionMode(true))}
+                aria-pressed={selectionMode}
+                className={`inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold border transition-colors shrink-0 ${
+                  selectionMode
+                    ? 'bg-brand-600 text-white border-brand-600 shadow-sm'
+                    : 'bg-slate-50 dark:bg-slate-900/60 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-brand-400 hover:text-brand-600 dark:hover:text-brand-400'
+                }`}
+              >
+                <CheckSquare className="h-4 w-4" />
+                <span>{selectionMode ? 'Done' : 'Select'}</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -1747,6 +1868,9 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
                 onReview={onReviewCard}
                 onEdit={handleOpenEditModal}
                 languagePreference={languagePreference}
+                selectionMode={selectionMode}
+                isSelected={selectedCardIds.has(card.id)}
+                onToggleSelect={toggleCardSelection}
               />
             ))}
           </div>
@@ -1779,6 +1903,165 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
         </div>
       )}
 
+      {/* Floating Bulk Action Bar */}
+      {selectionMode && (
+        <div
+          data-testid="bulk-action-bar"
+          role="region"
+          aria-label="Bulk card actions"
+          className="fixed safe-floating-bottom left-1/2 -translate-x-1/2 z-40 w-[calc(100%-1.5rem)] max-w-2xl bg-slate-900 dark:bg-slate-800 text-white rounded-2xl shadow-2xl border border-slate-700 p-3 sm:p-3.5 space-y-2.5 animate-in fade-in slide-in-from-bottom-4 duration-200"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-xs sm:text-sm font-semibold">
+              <span className="px-2.5 py-0.5 rounded-full bg-brand-600 text-white tabular-nums">
+                {selectedCardIds.size} selected
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  const allFilteredIds = filteredCards.map(c => c.id);
+                  const allAlreadySelected = allFilteredIds.length > 0 && allFilteredIds.every(id => selectedCardIds.has(id));
+                  setSelectedCardIds(allAlreadySelected ? new Set() : new Set(allFilteredIds));
+                }}
+                className="text-xs text-brand-300 hover:text-brand-200 hover:underline"
+              >
+                {filteredCards.length > 0 && filteredCards.every(c => selectedCardIds.has(c.id))
+                  ? 'Clear all'
+                  : `Select all (${filteredCards.length})`}
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              {onBulkUpdateCards && (
+                <>
+                  <button
+                    type="button"
+                    disabled={selectedCardIds.size === 0}
+                    onClick={() => setShowBulkTagInput(prev => !prev)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 dark:bg-slate-700 hover:bg-slate-700 dark:hover:bg-slate-600 text-slate-100 disabled:opacity-40 transition-colors"
+                  >
+                    <Tag className="h-3.5 w-3.5" />
+                    Add Tag
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="bulk-mark-mastered-btn"
+                    disabled={selectedCardIds.size === 0}
+                    onClick={() => {
+                      const ids = Array.from(selectedCardIds);
+                      onBulkUpdateCards(ids, (card) => ({
+                        ...card,
+                        status: FlashcardStatus.Mastered,
+                        lastQuality: 5,
+                        lastReviewed: Date.now(),
+                        nextReviewDate: undefined,
+                      }));
+                      exitSelectionMode();
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-40 transition-colors"
+                  >
+                    <CheckCircle className="h-3.5 w-3.5" />
+                    Master
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="bulk-reset-new-btn"
+                    disabled={selectedCardIds.size === 0}
+                    onClick={() => {
+                      const ids = Array.from(selectedCardIds);
+                      onBulkUpdateCards(ids, (card) => ({
+                        ...card,
+                        status: FlashcardStatus.New,
+                        interval: 0,
+                        repetition: 0,
+                        lastQuality: undefined,
+                        nextReviewDate: undefined,
+                      }));
+                      exitSelectionMode();
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 dark:bg-slate-700 hover:bg-slate-700 dark:hover:bg-slate-600 text-slate-100 disabled:opacity-40 transition-colors"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    Reset
+                  </button>
+                </>
+              )}
+              {onBulkDeleteCards && (
+                confirmingBulkDelete ? (
+                  <button
+                    type="button"
+                    data-testid="bulk-confirm-delete-btn"
+                    onClick={() => {
+                      onBulkDeleteCards(Array.from(selectedCardIds));
+                      exitSelectionMode();
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-red-600 hover:bg-red-700 text-white transition-colors"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Confirm Delete ({selectedCardIds.size})
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    data-testid="bulk-delete-btn"
+                    disabled={selectedCardIds.size === 0}
+                    onClick={() => setConfirmingBulkDelete(true)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-red-500/20 hover:bg-red-600 text-red-300 hover:text-white border border-red-500/40 disabled:opacity-40 transition-colors"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Delete
+                  </button>
+                )
+              )}
+              <button
+                type="button"
+                onClick={exitSelectionMode}
+                aria-label="Cancel selection"
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          {showBulkTagInput && onBulkUpdateCards && (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const cleanTag = bulkTagInput.trim();
+                if (!cleanTag || selectedCardIds.size === 0) return;
+                const ids = Array.from(selectedCardIds);
+                onBulkUpdateCards(ids, (card) => {
+                  const existing = card.tags || [];
+                  if (existing.some(t => t.toLowerCase() === cleanTag.toLowerCase())) return card;
+                  return { ...card, tags: [...existing, cleanTag] };
+                });
+                setBulkTagInput('');
+                setShowBulkTagInput(false);
+                exitSelectionMode();
+              }}
+              className="flex items-center gap-2 pt-2 border-t border-slate-700/80"
+            >
+              <input
+                type="text"
+                value={bulkTagInput}
+                onChange={(e) => setBulkTagInput(e.target.value)}
+                placeholder="Tag name (e.g. GRE, Favorites)..."
+                aria-label="Bulk tag name"
+                className="flex-1 px-3 py-1.5 rounded-lg bg-slate-800 dark:bg-slate-900 border border-slate-600 text-xs sm:text-sm text-white placeholder:text-slate-400 focus:outline-none focus:border-brand-400"
+              />
+              <button
+                type="submit"
+                disabled={!bulkTagInput.trim() || selectedCardIds.size === 0}
+                className="px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-xs font-semibold disabled:opacity-40 transition-colors"
+              >
+                Apply Tag
+              </button>
+            </form>
+          )}
+        </div>
+      )}
+
       <CardEditorModal
         isOpen={isEditorOpen}
         editingCard={editingCard}
@@ -1807,6 +2090,10 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
           onClick={() => setBookToDelete(null)}
         >
           <div
+            ref={deleteBookModalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="flashcards-delete-book-title"
             className="relative z-10 w-full max-w-md bg-white dark:bg-slate-800 rounded-3xl shadow-2xl border border-slate-100 dark:border-slate-700 p-6 space-y-5"
             onClick={(e) => e.stopPropagation()}
           >
@@ -1815,7 +2102,7 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
                 <AlertTriangle className="h-6 w-6" />
               </div>
               <div className="space-y-1.5">
-                <h3 className="text-lg font-serif font-bold text-slate-900 dark:text-white">
+                <h3 id="flashcards-delete-book-title" className="text-lg font-serif font-bold text-slate-900 dark:text-white">
                   Remove “{bookToDelete.title}”?
                 </h3>
                 <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">

@@ -111,14 +111,9 @@ export function applyDeviceRootScale(
   }
 
   const targetPx = computeTargetRootFontSize(rawWidth, stableHeight);
-  root.style.fontSize = `${targetPx}px`;
-
-  // If OS / browser text-zoom multiplied our explicit px root font-size, counter-scale it
-  const renderedPx = parseFloat(win.getComputedStyle(root).fontSize);
-  if (Number.isFinite(renderedPx) && renderedPx > 0 && Math.abs(renderedPx - targetPx) > 0.2) {
-    const compensatedPx = Math.min(20, Math.max(7, (targetPx * targetPx) / renderedPx));
-    root.style.fontSize = `${Math.round(compensatedPx * 100) / 100}px`;
-  }
+  // Use percentage relative to the browser/OS base font size so user accessibility text scaling is always respected
+  const scalePercent = Math.round((targetPx / MAX_ROOT_PX) * 10000) / 100;
+  root.style.fontSize = `${scalePercent}%`;
 
   root.dataset.targetRootPx = String(targetPx);
   return targetPx;

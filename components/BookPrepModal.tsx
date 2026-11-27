@@ -31,6 +31,7 @@ import {
 } from '../services/bookService';
 import { compareChapterNames } from '../utils/tagUtils';
 import { MeaningDisplay } from './MeaningDisplay';
+import { useAccessibleModal } from '../hooks/useAccessibleModal';
 
 const PAGE_SECTION_PRESETS = [5, 10, 20, 50] as const;
 const COLLAPSED_PREVIEW_CHAPTER_LIMIT = 6;
@@ -89,8 +90,7 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
   const [extractionError, setExtractionError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-
-  if (!isOpen) return null;
+  const modalRef = useRef<HTMLDivElement>(null);
 
   const resetModal = () => {
     setSearchQuery('');
@@ -121,6 +121,10 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
     resetModal();
     onClose();
   };
+
+  useAccessibleModal(isOpen, handleClose, modalRef);
+
+  if (!isOpen) return null;
 
   const applySegmentationConfig = (
     nextMode: BookSegmentationMode,
@@ -297,11 +301,27 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
     handleClose();
   };
 
+  const visibleFilteredWords = extractedWords.filter(item => {
+    const matchLvl =
+      complexityFilter === 'all' || (item.complexityLevel || 'intermediate') === complexityFilter;
+    const matchChap = chapterFilter === 'all' || item.chapter === chapterFilter;
+    return matchLvl && matchChap;
+  });
+  const allVisibleSelected =
+    visibleFilteredWords.length > 0 &&
+    visibleFilteredWords.every(w => selectedWordSet.has(w.word.toLowerCase()));
+
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center modal-safe-overlay">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={handleClose} />
 
-      <div className="relative w-full max-w-2xl bg-white dark:bg-slate-800 rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-100 dark:border-slate-700 overflow-hidden z-10 flex flex-col modal-safe-panel">
+      <div
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="book-prep-modal-title"
+        className="relative w-full max-w-2xl bg-white dark:bg-slate-800 rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-100 dark:border-slate-700 overflow-hidden z-10 flex flex-col modal-safe-panel"
+      >
         {/* Header */}
         <div className="px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between bg-slate-50 dark:bg-slate-800/60 shrink-0">
           <div className="flex items-center gap-2.5 min-w-0">
@@ -309,7 +329,7 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
               <BookOpen className="h-5 w-5" />
             </div>
             <div className="min-w-0">
-              <h2 className="text-lg sm:text-xl font-serif font-bold text-slate-900 dark:text-white truncate">
+              <h2 id="book-prep-modal-title" className="text-lg sm:text-xl font-serif font-bold text-slate-900 dark:text-white truncate">
                 Prepare for a Book
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
@@ -318,6 +338,7 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
             </div>
           </div>
           <button
+            type="button"
             onClick={handleClose}
             aria-label="Close book preparation modal"
             className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full transition-colors"
@@ -408,6 +429,26 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                       </span>
                     ) : null;
                   })()}
+                  {(complexityFilter !== 'all' || chapterFilter !== 'all') && visibleFilteredWords.length > 0 && (
+                    <button
+                      type="button"
+                      data-testid="book-prep-toggle-visible"
+                      onClick={() => {
+                        setSelectedWordSet(prev => {
+                          const next = new Set(prev);
+                          if (allVisibleSelected) {
+                            visibleFilteredWords.forEach(w => next.delete(w.word.toLowerCase()));
+                          } else {
+                            visibleFilteredWords.forEach(w => next.add(w.word.toLowerCase()));
+                          }
+                          return next;
+                        });
+                      }}
+                      className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline"
+                    >
+                      {allVisibleSelected ? 'Deselect visible' : 'Select visible'}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => {
@@ -482,15 +523,7 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                           key={lvl.id}
                           type="button"
                           data-testid={`complexity-filter-${lvl.id}`}
-                          onClick={() => {
-                            setComplexityFilter(lvl.id);
-                            const matching = extractedWords.filter(w => {
-                              const matchLvl = lvl.id === 'all' || (w.complexityLevel || 'intermediate') === lvl.id;
-                              const matchChap = chapterFilter === 'all' || w.chapter === chapterFilter;
-                              return matchLvl && matchChap;
-                            });
-                            setSelectedWordSet(new Set(matching.map(w => w.word.toLowerCase())));
-                          }}
+                          onClick={() => setComplexityFilter(lvl.id)}
                           className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
                             isActive
                               ? 'bg-brand-600 text-white border-brand-600 shadow-sm'
@@ -626,13 +659,7 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                       <div className="flex flex-wrap gap-1.5">
                         <button
                           type="button"
-                          onClick={() => {
-                            setChapterFilter('all');
-                            const matching = extractedWords.filter(
-                              w => complexityFilter === 'all' || (w.complexityLevel || 'intermediate') === complexityFilter
-                            );
-                            setSelectedWordSet(new Set(matching.map(w => w.word.toLowerCase())));
-                          }}
+                          onClick={() => setChapterFilter('all')}
                           className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
                             chapterFilter === 'all'
                               ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
@@ -648,15 +675,7 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                             <button
                               key={chap}
                               type="button"
-                              onClick={() => {
-                                setChapterFilter(chap);
-                                const matching = extractedWords.filter(w => {
-                                  const matchLvl =
-                                    complexityFilter === 'all' || (w.complexityLevel || 'intermediate') === complexityFilter;
-                                  return matchLvl && w.chapter === chap;
-                                });
-                                setSelectedWordSet(new Set(matching.map(w => w.word.toLowerCase())));
-                              }}
+                              onClick={() => setChapterFilter(chap)}
                               className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
                                 isActive
                                   ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
@@ -674,14 +693,7 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
               </div>
 
               <div className="space-y-3">
-                {extractedWords
-                  .filter(item => {
-                    const matchLvl =
-                      complexityFilter === 'all' || (item.complexityLevel || 'intermediate') === complexityFilter;
-                    const matchChap = chapterFilter === 'all' || item.chapter === chapterFilter;
-                    return matchLvl && matchChap;
-                  })
-                  .map((item) => {
+                {visibleFilteredWords.map((item) => {
                   const lower = item.word.toLowerCase();
                   const isChecked = selectedWordSet.has(lower);
                   const existingCard = existingCardsByWord.get(lower);
@@ -966,7 +978,7 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                       Matching Books Found ({searchResults.length})
                     </p>
                     <span className="text-[11px] text-slate-400 dark:text-slate-500">
-                      Multi-Source Public Domain Catalog
+                      Public Domain Library
                     </span>
                   </div>
                   <div className="grid grid-cols-1 gap-3">
@@ -1035,7 +1047,7 @@ export const BookPrepModal: React.FC<BookPrepModalProps> = ({
                       Similar Books You Might Mean ({similarResults.length})
                     </p>
                     <span className="text-[11px] text-slate-400 dark:text-slate-500">
-                      Fuzzy Title & Author Match
+                      Related Books
                     </span>
                   </div>
                   <div className="grid grid-cols-1 gap-3">

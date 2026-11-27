@@ -13,11 +13,13 @@ const BookPrepModal = lazy(() =>
 import { parseTagHierarchy, formatBookTag } from '../utils/tagUtils';
 import { useCardFlip3D } from '../utils/cardFlip';
 import { getAdaptiveWordHeadingClass } from '../utils/deviceScale';
+import { useAccessibleModal } from '../hooks/useAccessibleModal';
 import { motion } from 'framer-motion';
 import {
     Search, Play, BookOpen, CheckCircle, Brain, Loader2,
     Flame, Layers, Sparkles, Clock, TrendingUp, Volume2,
-    ArrowRight, Star, Calendar, X, RotateCw, Tag, Plus, Trash2, AlertTriangle
+    ArrowRight, Star, Calendar, X, RotateCw, Tag, Plus, Trash2, AlertTriangle,
+    Database, Globe
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -29,6 +31,8 @@ interface DashboardProps {
     onStartStudy?: (initialTag?: string, initialChapters?: string[]) => void;
     onImportBookWords?: (bookTitle: string, words: BookExtractedWord[]) => void;
     onDeleteBook?: (bookTag: string) => void;
+    onOpenDataModal?: () => void;
+    onChangeLanguagePreference?: (pref: MeaningLanguagePreference) => void;
     languagePreference?: MeaningLanguagePreference;
 }
 
@@ -230,6 +234,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
     onStartStudy,
     onImportBookWords,
     onDeleteBook,
+    onOpenDataModal,
+    onChangeLanguagePreference,
     languagePreference = 'en',
 }) => {
     const [query, setQuery] = useState('');
@@ -239,6 +245,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
     const [isBookPrepOpen, setIsBookPrepOpen] = useState(false);
     const [bookToDelete, setBookToDelete] = useState<{ tag: string; title: string; count: number } | null>(null);
     const wrapperRef = useRef<HTMLDivElement>(null);
+    const cardPreviewModalRef = useRef<HTMLDivElement>(null);
+    const deleteBookModalRef = useRef<HTMLDivElement>(null);
     const lastSearched = useRef<string>('');
 
     const categoryProgressItems = useMemo(() => buildCategoryProgress(cards), [cards]);
@@ -269,6 +277,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
     };
     const closeCard = () => setSelectedCard(null);
 
+    useAccessibleModal(Boolean(selectedCard), closeCard, cardPreviewModalRef);
+    useAccessibleModal(Boolean(bookToDelete), () => setBookToDelete(null), deleteBookModalRef);
+
     // Word of the Day
     const wordOfTheDay = getWordOfTheDay(cards);
 
@@ -281,6 +292,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
     const currentStreak = calculateCurrentStreak(studyHistory);
     const todayStr = getLocalDateString(new Date());
     const studiedToday = studyHistory[todayStr] ?? 0;
+    const isNewUser =
+        cards.length === 0 || (cards.length === 1 && cards[0].id === 'welcome-card');
 
     // Recently added (last 6)
     const recentCards = [...cards]
@@ -360,11 +373,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     onClick={closeCard}
                 >
                     <div
+                        ref={cardPreviewModalRef}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label={`Flashcard preview for ${selectedCard.word}`}
                         className="relative w-full max-w-sm"
                         onClick={e => e.stopPropagation()}
                     >
                         {/* Close button */}
                         <button
+                            type="button"
                             onClick={closeCard}
                             aria-label="Close card preview"
                             className="absolute -top-3 -right-2 sm:-top-4 sm:-right-4 z-10 bg-white dark:bg-slate-700 rounded-full p-2 shadow-lg text-slate-500 dark:text-slate-300 hover:text-slate-800 dark:hover:text-white transition-colors"
@@ -400,17 +418,19 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                                 {selectedCard.word}
                                             </h3>
                                             {selectedCard.phonetic && (
-                                                <p className="text-slate-400 text-sm font-serif italic truncate max-w-full">{selectedCard.phonetic}</p>
+                                                <p className="text-slate-500 dark:text-slate-400 text-sm font-serif italic truncate max-w-full">{selectedCard.phonetic}</p>
                                             )}
                                             <button
+                                                type="button"
+                                                aria-label={`Listen to pronunciation of ${selectedCard.word}`}
                                                 onClick={e => { e.stopPropagation(); playAudio(selectedCard.word, selectedCard.audio); }}
-                                                className="mt-1 p-1 text-slate-400 hover:text-brand-500 rounded-full transition-colors"
+                                                className="mt-1 p-1.5 text-slate-500 dark:text-slate-400 hover:text-brand-500 rounded-full transition-colors"
                                             >
                                                 <Volume2 className="h-4 w-4" />
                                             </button>
                                             <p className="text-slate-500 dark:text-slate-400 italic text-sm mt-1">{selectedCard.partOfSpeech}</p>
                                         </div>
-                                        <div className="shrink-0 flex items-center gap-1.5 text-slate-300 dark:text-slate-600 text-xs font-medium uppercase tracking-wider">
+                                        <div className="shrink-0 flex items-center gap-1.5 text-slate-500 dark:text-slate-400 text-xs font-medium uppercase tracking-wider">
                                             <RotateCw className="h-3.5 w-3.5" /> Tap to reveal
                                         </div>
                                     </motion.div>
@@ -443,7 +463,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                                 />
                                             </div>
                                             {selectedCard.example && (
-                                                <p className="text-slate-400 text-xs sm:text-sm italic border-t border-slate-700 pt-3">
+                                                <p className="text-slate-300 text-xs sm:text-sm italic border-t border-slate-700 pt-3">
                                                     "{selectedCard.example}"
                                                 </p>
                                             )}
@@ -474,14 +494,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                     {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
                                 </div>
                                 <h1 className="text-2xl sm:text-3xl md:text-4xl font-serif font-bold tracking-tight">
-                                    Welcome back{studiedToday > 0 ? ' 🔥' : ' 👋'}
+                                    {isNewUser ? 'Welcome to Lumina ✨' : `Welcome back${studiedToday > 0 ? ' 🔥' : ' 👋'}`}
                                 </h1>
-                                <p className="text-slate-400 text-sm sm:text-base">
-                                    {dueCount > 0
-                                        ? `You have ${dueCount} card${dueCount !== 1 ? 's' : ''} to review today.`
-                                        : cards.length > 0
-                                            ? 'You\'re all caught up! Great work.'
-                                            : 'Search for words to start building your vocabulary.'}
+                                <p className="text-slate-300 text-sm sm:text-base">
+                                    {isNewUser
+                                        ? 'Build your personal vocabulary with smart spaced repetition, book prep, and bilingual meanings.'
+                                        : dueCount > 0
+                                            ? `You have ${dueCount} card${dueCount !== 1 ? 's' : ''} to review today.`
+                                            : cards.length > 0
+                                                ? 'You\'re all caught up! Great work.'
+                                                : 'Search for words to start building your vocabulary.'}
                                 </p>
                             </div>
 
@@ -489,7 +511,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             <div ref={wrapperRef} className="relative">
                                 <form onSubmit={handleSearch} className="relative group">
                                     <div className="absolute inset-y-0 left-0 pl-3.5 sm:pl-4 flex items-center pointer-events-none">
-                                        <Search className="h-5 w-5 text-slate-400 group-focus-within:text-brand-400 transition-colors" />
+                                        <Search className="h-5 w-5 text-slate-300 group-focus-within:text-brand-400 transition-colors" />
                                     </div>
                                     <input
                                         type="text"
@@ -502,8 +524,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                             }
                                         }}
                                         placeholder="Look up a word…"
+                                        aria-label="Look up a word"
                                         autoComplete="off"
-                                        className="block w-full pl-10 sm:pl-11 pr-24 sm:pr-28 py-3 sm:py-4 bg-white/10 backdrop-blur border border-white/20 rounded-2xl text-white text-base sm:text-lg placeholder:text-slate-500 focus:outline-none focus:border-brand-400 focus:ring-4 focus:ring-brand-400/20 transition-all"
+                                        className="block w-full pl-10 sm:pl-11 pr-24 sm:pr-28 py-3 sm:py-4 bg-white/10 backdrop-blur border border-white/20 rounded-2xl text-white text-base sm:text-lg placeholder:text-slate-300/80 focus:outline-none focus:border-brand-400 focus:ring-4 focus:ring-brand-400/20 transition-all"
                                     />
                                     <button
                                         type="submit"
@@ -525,7 +548,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                                     onClick={() => handleSuggestionClick(word)}
                                                     className="px-4 py-3 flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer text-slate-700 dark:text-slate-200 transition-colors border-b border-slate-50 dark:border-slate-700 last:border-none"
                                                 >
-                                                    <Search className="h-4 w-4 text-slate-300 dark:text-slate-500" />
+                                                    <Search className="h-4 w-4 text-slate-400 dark:text-slate-500" />
                                                     <span className="font-medium">{word}</span>
                                                 </li>
                                             ))}
@@ -549,6 +572,109 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             )}
                         </div>
                     </div>
+
+                    {/* ── First-Time Quick-Start Onboarding Card ──────────────────────── */}
+                    {isNewUser && (
+                        <div
+                            data-testid="ftue-onboarding-card"
+                            className="bg-white dark:bg-slate-800 rounded-2xl sm:rounded-3xl border border-brand-200/80 dark:border-brand-800/50 shadow-sm p-5 sm:p-6 space-y-5"
+                        >
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                                <div>
+                                    <h2 className="text-base sm:text-lg font-serif font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                                        <Sparkles className="h-4 w-4 text-brand-500" />
+                                        Get Started in 30 Seconds
+                                    </h2>
+                                    <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+                                        Choose your favorite way to build your deck — everything works offline and stays private.
+                                    </p>
+                                </div>
+                                {onChangeLanguagePreference && (
+                                    <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-900/60 p-1 rounded-xl border border-slate-200/70 dark:border-slate-700" role="group" aria-label="Meaning language">
+                                        <Globe className="h-3.5 w-3.5 text-slate-400 ml-1.5" />
+                                        {([
+                                            { value: 'en', label: 'EN' },
+                                            { value: 'both', label: 'EN + FA' },
+                                            { value: 'fa', label: 'فارسی' },
+                                        ] as const).map((opt) => (
+                                            <button
+                                                key={opt.value}
+                                                type="button"
+                                                onClick={() => onChangeLanguagePreference(opt.value)}
+                                                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors ${
+                                                    languagePreference === opt.value
+                                                        ? 'bg-brand-600 text-white shadow-sm'
+                                                        : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                                                }`}
+                                            >
+                                                {opt.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => onNavigate('dictionary')}
+                                    className="group text-left p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/50 hover:bg-brand-50 dark:hover:bg-brand-900/20 border border-slate-200/80 dark:border-slate-700 hover:border-brand-300 dark:hover:border-brand-700 transition-all space-y-2"
+                                >
+                                    <div className="w-9 h-9 rounded-xl bg-brand-100 dark:bg-brand-900/40 text-brand-600 dark:text-brand-400 flex items-center justify-center">
+                                        <Search className="h-4 w-4" />
+                                    </div>
+                                    <div>
+                                        <p className="font-semibold text-sm text-slate-900 dark:text-white group-hover:text-brand-700 dark:group-hover:text-brand-300">
+                                            Explore Dictionary
+                                        </p>
+                                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                                            Look up words or try curated GRE & literary packs.
+                                        </p>
+                                    </div>
+                                </button>
+
+                                {onImportBookWords && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsBookPrepOpen(true)}
+                                        className="group text-left p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/50 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 border border-slate-200/80 dark:border-slate-700 hover:border-emerald-300 dark:hover:border-emerald-700 transition-all space-y-2"
+                                    >
+                                        <div className="w-9 h-9 rounded-xl bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                                            <BookOpen className="h-4 w-4" />
+                                        </div>
+                                        <div>
+                                            <p className="font-semibold text-sm text-slate-900 dark:text-white group-hover:text-emerald-700 dark:group-hover:text-emerald-300">
+                                                Prepare for a Book
+                                            </p>
+                                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                                                Extract chapter vocabulary from classics or your .epub/.txt.
+                                            </p>
+                                        </div>
+                                    </button>
+                                )}
+
+                                {onOpenDataModal && (
+                                    <button
+                                        type="button"
+                                        onClick={onOpenDataModal}
+                                        className="group text-left p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/50 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 border border-slate-200/80 dark:border-slate-700 hover:border-indigo-300 dark:hover:border-indigo-700 transition-all space-y-2"
+                                    >
+                                        <div className="w-9 h-9 rounded-xl bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+                                            <Database className="h-4 w-4" />
+                                        </div>
+                                        <div>
+                                            <p className="font-semibold text-sm text-slate-900 dark:text-white group-hover:text-indigo-700 dark:group-hover:text-indigo-300">
+                                                Import Anki or Sync
+                                            </p>
+                                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                                                Bring .apkg decks or connect GitHub Gist cloud sync.
+                                            </p>
+                                        </div>
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    )}
 
                     {/* ── Stats Grid ──────────────────────────────────────────────────── */}
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
@@ -681,7 +807,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                                     <span
                                                         className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
                                                             isBook
-                                                                ? 'bg-brand-600 text-white shadow-xs'
+                                                                ? 'bg-brand-600 text-white shadow-sm'
                                                                 : isTag
                                                                     ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300'
                                                                     : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
@@ -823,6 +949,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                             <button
                                                 type="button"
                                                 aria-label={`Study ${cat.name}`}
+                                                disabled={cat.dueCount === 0}
                                                 onClick={() => {
                                                     if (onStartStudy) {
                                                         onStartStudy(cat.rawTag);
@@ -830,14 +957,25 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                                         onNavigate('study');
                                                     }
                                                 }}
-                                                className={`w-full py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
-                                                    isBook
-                                                        ? 'bg-brand-600 hover:bg-brand-700 text-white shadow-xs'
-                                                        : 'bg-white dark:bg-slate-800 hover:bg-brand-50 dark:hover:bg-brand-900/30 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-600'
+                                                className={`w-full py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
+                                                    cat.dueCount === 0
+                                                        ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/50'
+                                                        : isBook
+                                                            ? 'bg-brand-600 hover:bg-brand-700 text-white shadow-sm'
+                                                            : 'bg-white dark:bg-slate-800 hover:bg-brand-50 dark:hover:bg-brand-900/30 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-600'
                                                 }`}
                                             >
-                                                <Play className="h-3.5 w-3.5 fill-current" />
-                                                Study {isBook ? 'Book' : 'Category'}
+                                                {cat.dueCount === 0 ? (
+                                                    <>
+                                                        <CheckCircle className="h-3.5 w-3.5" />
+                                                        All Caught Up
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <Play className="h-3.5 w-3.5 fill-current" />
+                                                        Study {isBook ? 'Book' : 'Category'}
+                                                    </>
+                                                )}
                                             </button>
                                         </div>
                                     );
@@ -866,9 +1004,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                                     <span className="text-slate-400 text-sm font-serif italic">{wordOfTheDay.phonetic}</span>
                                                 )}
                                                 <button
+                                                    type="button"
                                                     onClick={() => playAudio(wordOfTheDay.word, wordOfTheDay.audio)}
-                                                    className="p-1 text-slate-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded-full transition-colors"
+                                                    className="p-1.5 text-slate-500 dark:text-slate-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded-full transition-colors"
                                                     title="Listen"
+                                                    aria-label="Listen to pronunciation"
                                                 >
                                                     <Volume2 className="h-4 w-4" />
                                                 </button>
@@ -1053,6 +1193,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     onClick={() => setBookToDelete(null)}
                 >
                     <div
+                        ref={deleteBookModalRef}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="dashboard-delete-book-title"
                         className="relative z-10 w-full max-w-md bg-white dark:bg-slate-800 rounded-3xl shadow-2xl border border-slate-100 dark:border-slate-700 p-6 space-y-5"
                         onClick={(e) => e.stopPropagation()}
                     >
@@ -1061,7 +1205,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 <AlertTriangle className="h-6 w-6" />
                             </div>
                             <div className="space-y-1.5">
-                                <h3 className="text-lg font-serif font-bold text-slate-900 dark:text-white">
+                                <h3 id="dashboard-delete-book-title" className="text-lg font-serif font-bold text-slate-900 dark:text-white">
                                     Remove “{bookToDelete.title}”?
                                 </h3>
                                 <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">

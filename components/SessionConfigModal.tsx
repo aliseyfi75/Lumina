@@ -1,9 +1,10 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Play, Zap, BrainCircuit, ListChecks, Tag, BookOpen, Check, ChevronDown, ChevronUp } from 'lucide-react';
 import { Flashcard } from '../types';
 import { getDueCards } from '../utils/studyUtils';
 import { parseTagHierarchy, formatBookTag, getCardBookInfo, getCardBookInfoForBook, compareChapterNames } from '../utils/tagUtils';
+import { useAccessibleModal } from '../hooks/useAccessibleModal';
 
 export type SessionMode = 'full' | 'short' | 'quiz';
 
@@ -33,6 +34,9 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
     const [selectedTag, setSelectedTag] = useState<string>(initialTag || '');
     const [selectedChapters, setSelectedChapters] = useState<string[]>(initialChapters || []);
     const [isChaptersExpanded, setIsChaptersExpanded] = useState(false);
+    const modalRef = useRef<HTMLDivElement>(null);
+
+    useAccessibleModal(isOpen, onClose, modalRef);
 
     useEffect(() => {
         if (isOpen) {
@@ -129,10 +133,19 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
 
     if (!isOpen) return null;
 
+    const sliderMin = effectiveDueCount > 0 && effectiveDueCount < 5 ? 1 : 5;
+    const sliderStep = effectiveDueCount > 0 && effectiveDueCount < 5 ? 1 : 5;
+    const sliderMax =
+        effectiveDueCount > 0 && effectiveDueCount < 5
+            ? effectiveDueCount
+            : Math.max(10, Math.ceil(effectiveDueCount / 5) * 5);
+    const effectiveCount = Math.min(Math.max(sliderMin, count), effectiveDueCount);
+
     const handleStart = () => {
+        if (effectiveDueCount === 0) return;
         onStart({
             mode,
-            count: mode === 'short' || mode === 'quiz' ? Math.min(count, effectiveDueCount) : undefined,
+            count: mode === 'short' || mode === 'quiz' ? effectiveCount : undefined,
             tag: selectedTag || undefined,
             chapters: selectedBookTitle && selectedChapters.length > 0 ? selectedChapters : undefined,
         });
@@ -140,26 +153,35 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
     };
 
     return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center modal-safe-overlay">
+        <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="session-config-modal-title"
+            className="fixed inset-0 z-[100] flex items-center justify-center modal-safe-overlay"
+        >
             <div
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
                 onClick={onClose}
             />
             <motion.div
+                ref={modalRef}
+                tabIndex={-1}
                 initial={{ opacity: 0, scale: 0.95, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 20 }}
                 transition={{ duration: 0.2 }}
-                className="relative w-full max-w-md modal-safe-panel flex flex-col bg-white dark:bg-slate-800 rounded-2xl sm:rounded-3xl shadow-2xl overflow-hidden border border-slate-100 dark:border-slate-700"
+                className="relative w-full max-w-md modal-safe-panel flex flex-col bg-white dark:bg-slate-800 rounded-2xl sm:rounded-3xl shadow-2xl overflow-hidden border border-slate-100 dark:border-slate-700 focus:outline-none"
             >
                 {/* Header */}
                 <div className="px-4 sm:px-6 py-4 sm:py-5 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between bg-slate-50 dark:bg-slate-800/50 shrink-0">
-                    <h2 className="text-lg sm:text-xl font-serif font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <h2 id="session-config-modal-title" className="text-lg sm:text-xl font-serif font-bold text-slate-900 dark:text-white flex items-center gap-2">
                         <BrainCircuit className="h-5 w-5 text-brand-500" />
                         Study Session
                     </h2>
                     <button
+                        type="button"
                         onClick={onClose}
+                        aria-label="Close study session configuration"
                         className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full transition-colors"
                     >
                         <X className="h-5 w-5" />
@@ -259,7 +281,7 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
                                                 {isSelected && <Check className="h-3 w-3" />}
                                                 <span>{ch.chapter}</span>
                                                 <span
-                                                    className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                                                    className={`text-[10px] px-1.5 py-0.5 rounded-full ${
                                                         isSelected
                                                             ? 'bg-amber-700/60 text-amber-50'
                                                             : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
@@ -373,15 +395,16 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
                                                     <span className="text-sm font-medium text-slate-600 dark:text-slate-400 ml-2">Cards:</span>
                                                     <input
                                                         type="range"
-                                                        min="5"
-                                                        max={Math.max(10, Math.ceil(effectiveDueCount / 5) * 5)}
-                                                        step="5"
-                                                        value={count}
+                                                        aria-label="Number of cards"
+                                                        min={sliderMin}
+                                                        max={sliderMax}
+                                                        step={sliderStep}
+                                                        value={effectiveCount || sliderMin}
                                                         onChange={(e) => setCount(Number(e.target.value))}
                                                         className="flex-1 accent-amber-500"
                                                     />
                                                     <span className="text-sm font-bold text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/50 px-3 py-1 rounded-lg w-12 text-center">
-                                                        {Math.min(count, effectiveDueCount)}
+                                                        {effectiveCount}
                                                     </span>
                                                 </div>
                                             </motion.div>
@@ -433,15 +456,16 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
                                                     <span className="text-sm font-medium text-slate-600 dark:text-slate-400 ml-2">Questions:</span>
                                                     <input
                                                         type="range"
-                                                        min="5"
-                                                        max={Math.max(10, Math.ceil(effectiveDueCount / 5) * 5)}
-                                                        step="5"
-                                                        value={count}
+                                                        aria-label="Number of quiz questions"
+                                                        min={sliderMin}
+                                                        max={sliderMax}
+                                                        step={sliderStep}
+                                                        value={effectiveCount || sliderMin}
                                                         onChange={(e) => setCount(Number(e.target.value))}
                                                         className="flex-1 accent-indigo-500"
                                                     />
                                                     <span className="text-sm font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-100 dark:bg-indigo-900/50 px-3 py-1 rounded-lg w-12 text-center">
-                                                        {Math.min(count, effectiveDueCount)}
+                                                        {effectiveCount}
                                                     </span>
                                                 </div>
                                             </motion.div>
@@ -457,14 +481,17 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
                 {/* Footer */}
                 <div className="px-4 sm:px-6 py-4 sm:py-5 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 flex justify-end gap-2.5 sm:gap-3 shrink-0">
                     <button
+                        type="button"
                         onClick={onClose}
                         className="px-4 sm:px-5 py-2 sm:py-2.5 text-sm sm:text-base text-slate-600 dark:text-slate-300 font-medium hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors"
                     >
                         Cancel
                     </button>
                     <button
+                        type="button"
                         onClick={handleStart}
-                        className={`px-4 sm:px-6 py-2 sm:py-2.5 text-sm sm:text-base text-white font-medium rounded-xl shadow-lg transition-all active:scale-95 flex items-center gap-2 ${mode === 'full'
+                        disabled={effectiveDueCount === 0}
+                        className={`px-4 sm:px-6 py-2 sm:py-2.5 text-sm sm:text-base text-white font-medium rounded-xl shadow-lg transition-all active:scale-95 disabled:opacity-45 disabled:cursor-not-allowed disabled:active:scale-100 flex items-center gap-2 ${mode === 'full'
                             ? 'bg-brand-600 hover:bg-brand-700 shadow-brand-500/30'
                             : mode === 'short'
                                 ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-500/30'
@@ -478,7 +505,9 @@ export const SessionConfigModal: React.FC<SessionConfigModalProps> = ({
                         ) : (
                             <ListChecks className="h-4 w-4 shrink-0" />
                         )}
-                        Start {mode === 'full' ? 'Full Session' : mode === 'short' ? 'Short Session' : 'Quiz Session'}
+                        {effectiveDueCount === 0
+                            ? 'No Cards Due'
+                            : `Start ${mode === 'full' ? 'Full Session' : mode === 'short' ? 'Short Session' : 'Quiz Session'}`}
                     </button>
                 </div>
             </motion.div>

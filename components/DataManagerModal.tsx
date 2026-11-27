@@ -622,6 +622,8 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                   <div className="space-y-2">
                     <input
                       type="password"
+                        autoComplete="off"
+                        spellCheck={false}
                       data-testid="gist-token-input"
                       placeholder="GitHub Personal Access Token (ghp_...)"
                       value={gistTokenInput}
@@ -642,7 +644,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                         <a
                           href="https://github.com/settings/tokens/new?description=Lumina+Flashcards+Sync&scopes=gist"
                           target="_blank"
-                          rel="noreferrer"
+                          rel="noopener noreferrer"
                           className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 font-medium"
                         >
                           Generate Token (&apos;gist&apos; scope) <ExternalLink className="h-3 w-3" />
@@ -725,7 +727,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                     <a
                       href={`https://gist.github.com/${cloudConfig?.gistId || cloudConfig?.pantryId}`}
                       target="_blank"
-                      rel="noreferrer"
+                      rel="noopener noreferrer"
                       data-testid="connected-gist-id"
                       className="font-mono text-emerald-700 dark:text-emerald-300 hover:underline flex items-center gap-1 truncate max-w-[230px]"
                       title={cloudConfig?.gistId || cloudConfig?.pantryId}
@@ -800,6 +802,8 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                       </div>
                       <input
                         type="password"
+                        autoComplete="off"
+                        spellCheck={false}
                         placeholder="GitHub Personal Access Token (ghp_...)"
                         value={gistTokenInput}
                         onChange={(e) => setGistTokenInput(e.target.value)}
@@ -881,7 +885,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                     <div className="mt-2 flex items-center justify-between text-[10px] text-slate-500 flex-wrap gap-1">
                       <div className="flex items-center gap-1">
                         <span>Don't have one?</span>
-                        <a href="https://getpantry.cloud/" target="_blank" rel="noreferrer" className="text-sky-600 hover:underline flex items-center gap-1 font-medium">
+                        <a href="https://getpantry.cloud/" target="_blank" rel="noopener noreferrer" className="text-sky-600 hover:underline flex items-center gap-1 font-medium">
                           Create Pantry ID <ExternalLink className="h-3 w-3" />
                         </a>
                       </div>
@@ -1011,6 +1015,8 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                       <form onSubmit={handleGistConnectSubmit} className="pt-2 border-t border-indigo-200/60 dark:border-indigo-800/50 space-y-2.5 animate-in fade-in duration-200">
                         <input
                           type="password"
+                        autoComplete="off"
+                        spellCheck={false}
                           data-testid="pantry-to-gist-token-input"
                           placeholder="Paste GitHub Personal Access Token (ghp_...)"
                           value={gistTokenInput}
@@ -1029,7 +1035,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                           <a
                             href="https://github.com/settings/tokens/new?description=Lumina+Flashcards+Sync&scopes=gist"
                             target="_blank"
-                            rel="noreferrer"
+                            rel="noopener noreferrer"
                             className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 font-medium"
                           >
                             Generate Token (&apos;gist&apos; scope) <ExternalLink className="h-3 w-3" />
@@ -1148,7 +1154,7 @@ export const DataManagerModal: React.FC<DataManagerModalProps> = ({
                         <a
                           href="https://getpantry.cloud/"
                           target="_blank"
-                          rel="noreferrer"
+                          rel="noopener noreferrer"
                           className="text-[11px] text-sky-600 hover:underline flex items-center gap-1 font-medium"
                         >
                           Create New Pantry ID <ExternalLink className="h-3 w-3" />

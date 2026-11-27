@@ -27,6 +27,7 @@ import {
   LANGUAGE_PREFERENCE_OPTIONS,
 } from './utils/languageUtils';
 import { mergeFlashcardDecks, MergeDeckOptions } from './utils/cardMerge';
+import { sanitizeMediaUrl } from './utils/security';
 import { translateCardMeaningToPersian } from './services/translationService';
 import { Book, Layers, Database, Save, Cloud, BarChart2, Home, Sun, Moon, RefreshCw, Settings } from 'lucide-react';
 import Confetti from 'react-confetti';
@@ -2394,7 +2395,7 @@ const App: React.FC = () => {
       mainDefinition: data.mainDefinition.trim(),
       translations: cleanTranslations,
       example: data.example?.trim() || undefined,
-      image: data.image?.trim() || undefined,
+      image: sanitizeMediaUrl(data.image, { allowDataImage: true }),
       tags: cleanedTags.length > 0 ? cleanedTags : undefined,
       status: FlashcardStatus.New,
       lastReviewed: 0,
@@ -2468,7 +2469,7 @@ const App: React.FC = () => {
           mainDefinition: nextDef,
           translations: nextTranslations,
           example: updates.example !== undefined ? (updates.example.trim() || undefined) : card.example,
-          image: updates.image !== undefined ? (updates.image.trim() || undefined) : card.image,
+          image: updates.image !== undefined ? sanitizeMediaUrl(updates.image, { allowDataImage: true }) : card.image,
           tags: cleanedTags && cleanedTags.length > 0 ? cleanedTags : undefined,
           updatedAt: Date.now(),
         };

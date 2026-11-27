@@ -1,6 +1,7 @@
 import JSZip from 'jszip';
 import initSqlJs from 'sql.js';
 import { Flashcard, FlashcardStatus } from '../types';
+import { stripHtmlSafely } from '../utils/security';
 
 const FIELD_SEPARATOR = String.fromCharCode(0x1f);
 let sqlJsPromise: ReturnType<typeof initSqlJs> | null = null;
@@ -12,11 +13,8 @@ async function loadSqlJs() {
   return sqlJsPromise;
 }
 
-function stripHtml(html: string): string {
-  if (!html) return '';
-  const div = document.createElement('div');
-  div.innerHTML = html;
-  return (div.textContent ?? div.innerText ?? '').trim();
+export function stripHtml(html: string): string {
+  return stripHtmlSafely(html);
 }
 
 function listTables(db: import('sql.js').Database): string[] {

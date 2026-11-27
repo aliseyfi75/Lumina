@@ -16,12 +16,16 @@ const DATA_STORE = 'app_data';
 const HANDLE_KEY = 'syncFileHandle';
 const DATA_KEY = 'appData';
 
-// ─── DB open ────────────────────────────────────────────────────────────────
+// ─── DB open (singleton connection cache) ───────────────────────────────────
+
+let dbPromise: Promise<IDBDatabase> | null = null;
 
 function openDB(): Promise<IDBDatabase> {
-    return new Promise((resolve, reject) => {
+    if (dbPromise) return dbPromise;
+
+    dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
         const req = indexedDB.open(DB_NAME, DB_VERSION);
-        req.onupgradeneeded = (ev) => {
+        req.onupgradeneeded = () => {
             const db = req.result;
             // v1 store – created in prior version
             if (!db.objectStoreNames.contains(HANDLE_STORE)) {
@@ -32,9 +36,27 @@ function openDB(): Promise<IDBDatabase> {
                 db.createObjectStore(DATA_STORE);
             }
         };
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
+        req.onsuccess = () => {
+            const db = req.result;
+            db.onclose = () => {
+                dbPromise = null;
+            };
+            db.onversionchange = () => {
+                db.close();
+                dbPromise = null;
+            };
+            resolve(db);
+        };
+        req.onerror = () => {
+            dbPromise = null;
+            reject(req.error);
+        };
+        req.onblocked = () => {
+            dbPromise = null;
+        };
     });
+
+    return dbPromise;
 }
 
 // ─── File Handle ────────────────────────────────────────────────────────────

@@ -1,43 +1,50 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { Routes, Route, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { Flashcard, WordEntry, FlashcardStatus, FileSystemFileHandle, CloudConfig, LocalizedTranslations, MeaningLanguagePreference } from './types';
+import { Flashcard, WordEntry, FlashcardStatus, CloudConfig, LocalizedTranslations, MeaningLanguagePreference } from './types';
 import { Dashboard } from './components/Dashboard';
-import { Dictionary } from './components/Dictionary';
-import { Flashcards, CustomCardFormData } from './components/Flashcards';
-import { StudySession } from './components/StudySession';
-import { Statistics } from './components/Statistics';
-import { DataManagerModal } from './components/DataManagerModal';
-import { SettingsModal } from './components/SettingsModal';
-import { AnkiImportModal } from './components/AnkiImportModal';
+import type { CustomCardFormData } from './components/Flashcards';
 import { PwaInstallBanner } from './components/PwaInstallBanner';
 import { generateJSON, parseFileContent, downloadJSON, saveToLocalFile } from './services/fileService';
 import { getDetails, getDeck, updateDeck, keepAlivePantry, getKnownChunkCount, getPendingCloudSyncPlan, CloudSyncProgress, ChunkProgressInfo } from './services/pantryService';
 import { findOrCreateLuminaGist, getGistDeck, updateGistDeck, hasPendingGistSyncChanges, normalizeGistId } from './services/gistService';
-import { saveFileHandleToIDB, loadFileHandleFromIDB, clearFileHandleFromIDB, saveAppDataToIDB, loadAppDataFromIDB, requestPersistentStorage, checkPersistentStorage, getStorageEstimate } from './services/idbService';
+import { loadFileHandleFromIDB, saveAppDataToIDB, loadAppDataFromIDB, requestPersistentStorage, checkPersistentStorage, getStorageEstimate } from './services/idbService';
 import { initializeTracking, trackEvent, setTrackingUserId, trackPageView, PAGE_TITLES, TRACKING_CATEGORY, TRACKING_ACTION } from './services/trackingService';
 import { getLocalDateString, calculateCurrentStreak, getDueCards } from './utils/studyUtils';
 import { installDeviceRootScaleListeners } from './utils/deviceScale';
 import {
-  loadLanguagePreferenceFromStorage,
-  saveLanguagePreferenceToStorage,
-  isValidLanguagePreference,
   sanitizeTranslations,
   mergeTranslations,
-  cardNeedsPersianBackfill,
   LANGUAGE_PREFERENCE_OPTIONS,
 } from './utils/languageUtils';
 import { mergeFlashcardDecks, MergeDeckOptions } from './utils/cardMerge';
 import { sanitizeMediaUrl } from './utils/security';
-import { translateCardMeaningToPersian } from './services/translationService';
-import { Book, Layers, Database, Save, Cloud, BarChart2, Home, Sun, Moon, RefreshCw, Settings } from 'lucide-react';
-import Confetti from 'react-confetti';
+import { Book, Layers, Database, Save, Cloud, BarChart2, Home, Sun, Moon, RefreshCw, Settings, Loader2 } from 'lucide-react';
 import { useWindowSize } from 'react-use';
-import { SessionConfigModal, SessionMode } from './components/SessionConfigModal';
-import { BookExtractedWord } from './services/bookService';
+import type { SessionMode } from './components/SessionConfigModal';
+import type { BookExtractedWord } from './services/bookService';
+import { useTheme } from './hooks/useTheme';
+import { useLanguagePreference } from './hooks/useLanguagePreference';
+import { useTranslationBackfill } from './hooks/useTranslationBackfill';
+import { useLocalFileSync } from './hooks/useLocalFileSync';
+
+const Dictionary = lazy(() => import('./components/Dictionary').then((m) => ({ default: m.Dictionary })));
+const Flashcards = lazy(() => import('./components/Flashcards').then((m) => ({ default: m.Flashcards })));
+const StudySession = lazy(() => import('./components/StudySession').then((m) => ({ default: m.StudySession })));
+const Statistics = lazy(() => import('./components/Statistics').then((m) => ({ default: m.Statistics })));
+const DataManagerModal = lazy(() => import('./components/DataManagerModal').then((m) => ({ default: m.DataManagerModal })));
+const SettingsModal = lazy(() => import('./components/SettingsModal').then((m) => ({ default: m.SettingsModal })));
+const AnkiImportModal = lazy(() => import('./components/AnkiImportModal').then((m) => ({ default: m.AnkiImportModal })));
+const SessionConfigModal = lazy(() => import('./components/SessionConfigModal').then((m) => ({ default: m.SessionConfigModal })));
+const Confetti = lazy(() => import('react-confetti'));
+
+const RouteLoadingFallback: React.FC = () => (
+  <div className="min-h-[45vh] flex items-center justify-center text-slate-400 dark:text-slate-500">
+    <Loader2 className="h-6 w-6 animate-spin" />
+  </div>
+);
 
 const LOCAL_STORAGE_KEY = 'lumina_cards_v1';
 const CLOUD_CONFIG_KEY = 'lumina_cloud_config';
-const THEME_STORAGE_KEY = 'lumina_theme';
 
 const isGistCloud = (cfg?: CloudConfig | null): boolean =>
   Boolean(cfg && (cfg.provider === 'gist' || (cfg.gistToken && cfg.gistId)));
@@ -105,40 +112,7 @@ const App: React.FC = () => {
   }, []);
 
   // Dark Mode — respect persisted user preference or follow device theme
-  const [isDark, setIsDark] = useState(() => {
-    const savedTheme = localStorage.getItem(THEME_STORAGE_KEY);
-    if (savedTheme === 'dark') return true;
-    if (savedTheme === 'light') return false;
-    return window.matchMedia('(prefers-color-scheme: dark)').matches;
-  });
-
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', isDark);
-    const themeMeta = document.querySelector('meta[name="theme-color"]');
-    if (themeMeta) {
-      themeMeta.setAttribute('content', isDark ? '#0f172a' : '#ffffff');
-    }
-  }, [isDark]);
-
-  // Keep in sync whenever the OS switches light/dark (unless user set a manual override)
-  useEffect(() => {
-    const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    const handler = (e: MediaQueryListEvent) => {
-      if (!localStorage.getItem(THEME_STORAGE_KEY)) {
-        setIsDark(e.matches);
-      }
-    };
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
-  }, []);
-
-  const handleToggleDark = () => {
-    setIsDark(prev => {
-      const next = !prev;
-      localStorage.setItem(THEME_STORAGE_KEY, next ? 'dark' : 'light');
-      return next;
-    });
-  };
+  const { isDark, handleToggleDark } = useTheme();
 
   // Keep refs in sync so performMerge and deletion handlers always see the latest state
   useEffect(() => {
@@ -158,91 +132,20 @@ const App: React.FC = () => {
   }, [longestStreak]);
 
   // Language Preference & Settings Modal State
-  const [languagePreference, setLanguagePreference] = useState<MeaningLanguagePreference>(
-    () => loadLanguagePreferenceFromStorage().preference
-  );
-  const [languagePreferenceUpdatedAt, setLanguagePreferenceUpdatedAt] = useState<number>(
-    () => loadLanguagePreferenceFromStorage().updatedAt
-  );
-  const languagePreferenceRef = useRef<MeaningLanguagePreference>(languagePreference);
-  const languagePreferenceUpdatedAtRef = useRef<number>(languagePreferenceUpdatedAt);
-
-  useEffect(() => {
-    languagePreferenceRef.current = languagePreference;
-  }, [languagePreference]);
-
-  useEffect(() => {
-    languagePreferenceUpdatedAtRef.current = languagePreferenceUpdatedAt;
-  }, [languagePreferenceUpdatedAt]);
-
-  const handleChangeLanguagePreference = useCallback((nextPref: MeaningLanguagePreference) => {
-    const now = Date.now();
-    languagePreferenceRef.current = nextPref;
-    languagePreferenceUpdatedAtRef.current = now;
-    setLanguagePreference(nextPref);
-    setLanguagePreferenceUpdatedAt(now);
-    saveLanguagePreferenceToStorage(nextPref, now);
-  }, []);
-
-  const applyIncomingLanguagePreference = useCallback(
-    (incomingPref?: MeaningLanguagePreference, incomingUpdatedAt?: number) => {
-      if (!isValidLanguagePreference(incomingPref)) return;
-      const incTs =
-        typeof incomingUpdatedAt === 'number' && Number.isFinite(incomingUpdatedAt)
-          ? incomingUpdatedAt
-          : 0;
-      const curTs = languagePreferenceUpdatedAtRef.current;
-      const shouldAdopt =
-        (curTs === 0 && (incTs > 0 || incomingPref !== 'en')) ||
-        (incTs > 0 && incTs > curTs);
-      if (shouldAdopt) {
-        const resolvedTs = Math.max(incTs, curTs);
-        languagePreferenceRef.current = incomingPref;
-        languagePreferenceUpdatedAtRef.current = resolvedTs;
-        setLanguagePreference(incomingPref);
-        setLanguagePreferenceUpdatedAt(resolvedTs);
-        saveLanguagePreferenceToStorage(incomingPref, resolvedTs);
-      }
-    },
-    []
-  );
-
-  const resolveMergedLanguagePreference = (
-    ...sources: Array<{
-      languagePreference?: MeaningLanguagePreference;
-      languagePreferenceUpdatedAt?: number;
-    } | undefined>
-  ): { preference: MeaningLanguagePreference; updatedAt: number } => {
-    let bestPref = languagePreferenceRef.current;
-    let bestTs = languagePreferenceUpdatedAtRef.current;
-    for (const src of sources) {
-      if (!src || !isValidLanguagePreference(src.languagePreference)) continue;
-      const ts =
-        typeof src.languagePreferenceUpdatedAt === 'number' &&
-        Number.isFinite(src.languagePreferenceUpdatedAt)
-          ? src.languagePreferenceUpdatedAt
-          : 0;
-      if ((bestTs === 0 && (ts > 0 || src.languagePreference !== 'en')) || (ts > 0 && ts > bestTs)) {
-        bestPref = src.languagePreference;
-        bestTs = Math.max(ts, bestTs);
-      }
-    }
-    return { preference: bestPref, updatedAt: bestTs };
-  };
+  const {
+    languagePreference,
+    languagePreferenceUpdatedAt,
+    languagePreferenceRef,
+    languagePreferenceUpdatedAtRef,
+    handleChangeLanguagePreference,
+    applyIncomingLanguagePreference,
+    resolveMergedLanguagePreference,
+    setResolvedLanguagePreference,
+  } = useLanguagePreference();
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isBackfillingTranslations, setIsBackfillingTranslations] = useState(false);
-  const [backfillProgress, setBackfillProgress] = useState<{ completed: number; total: number } | null>(null);
-  const isBackfillingRef = useRef(false);
-  const autoAttemptedBackfillIdsRef = useRef<Set<string>>(new Set());
-
   const [isDataModalOpen, setIsDataModalOpen] = useState(false);
   const [ankiImportFile, setAnkiImportFile] = useState<File | null>(null);
-
-  // File System State
-  const [fileHandle, setFileHandle] = useState<FileSystemFileHandle | null>(null);
-  const [pendingHandle, setPendingHandle] = useState<FileSystemFileHandle | null>(null); // needs permission re-grant
-  const [isFileSaving, setIsFileSaving] = useState(false);
 
   // Cloud Sync State — initialize synchronously from localStorage so page refresh never shows as disconnected
   const [cloudConfig, setCloudConfig] = useState<CloudConfig | null>(() => {
@@ -336,17 +239,17 @@ const App: React.FC = () => {
 
   // Prune tombstones older than 30 days and return a plain Record for serialisation
   const TOMBSTONE_TTL = 30 * 24 * 60 * 60 * 1000;
-  const prunedDeletedCards = (): Record<string, number> => {
+  const prunedDeletedCards = useCallback((): Record<string, number> => {
     const cutoff = Date.now() - TOMBSTONE_TTL;
     const result: Record<string, number> = {};
     deletedCardsRef.current.forEach((deletedAt, id) => {
       if (deletedAt >= cutoff) result[id] = deletedAt;
     });
     return result;
-  };
+  }, [TOMBSTONE_TTL]);
 
   // Pure helper: merge two card arrays while honoring tombstones and decoupling SRS status from content updatedAt
-  const mergeCardArrays = (
+  const mergeCardArrays = useCallback((
     baseCards: Flashcard[],
     incoming: Flashcard[],
     tombstones: Record<string, number>,
@@ -355,9 +258,9 @@ const App: React.FC = () => {
     mergeFlashcardDecks(baseCards, incoming, tombstones, {
       ...options,
       liveDeletedMap: deletedCardsRef.current,
-    });
+    }), []);
 
-  const mergeHistoryRecords = (
+  const mergeHistoryRecords = useCallback((
     ...histories: (Record<string, number> | undefined)[]
   ): Record<string, number> => {
     const merged: Record<string, number> = {};
@@ -368,7 +271,7 @@ const App: React.FC = () => {
       }
     }
     return merged;
-  };
+  }, []);
 
   // Helper: Merge incoming cards with existing state, honouring the tombstone map
   const performMerge = useCallback((
@@ -397,8 +300,50 @@ const App: React.FC = () => {
       cardsRef.current = mergedFromPrev;
       return mergedFromPrev;
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // intentionally empty — reads tombstones via ref, not closure
+  }, [TOMBSTONE_TTL, mergeCardArrays]);
+
+  const {
+    isBackfillingTranslations,
+    backfillProgress,
+    populateSingleCardTranslationAsync,
+    populateBatchCardTranslationsAsync,
+    runPersianBackfill,
+  } = useTranslationBackfill({
+    cards,
+    cardsRef,
+    setCards,
+    isDataLoaded,
+    languagePreference,
+  });
+
+  const {
+    fileHandle,
+    setFileHandle,
+    pendingHandle,
+    setPendingHandle,
+    isFileSaving,
+    setIsFileSaving,
+    handleConnectFile,
+    handleChangeFile,
+    handleDisconnectFile,
+    handleReGrantPermission,
+    handleManualFileSave,
+  } = useLocalFileSync({
+    cards,
+    studyHistory,
+    studyHistoryRef,
+    setStudyHistory,
+    longestStreak,
+    setLongestStreak,
+    deletedCards,
+    prunedDeletedCards,
+    languagePreference,
+    languagePreferenceUpdatedAt,
+    isDataLoaded,
+    performMerge,
+    mergeHistoryRecords,
+    applyIncomingLanguagePreference,
+  });
 
   // 1. Initial Load: IDB -> localStorage migration -> Fallback CSV DB -> Cloud -> Restore file handle
   useEffect(() => {
@@ -696,7 +641,8 @@ const App: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [performMerge]);
 
-  // 2. Persist to IndexedDB (primary store) and keep localStorage in sync for safety
+  // 2. Persist to IndexedDB (primary store) and mirror to localStorage safely without blocking large-deck reviews
+  const localStorageMirrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!isDataLoaded) return; // don't overwrite IDB before initial load finishes
     const data = {
@@ -715,9 +661,41 @@ const App: React.FC = () => {
         getStorageEstimate().then(est => { if (est) setStorageEstimate(est); });
       })
       .catch(console.error);
-    // Keep localStorage as a secondary safety net without starving CLOUD_CONFIG_KEY of quota
-    persistCardsToLocalStorageSafe(cards);
-  }, [cards, studyHistory, longestStreak, deletedCards, cloudConfig, languagePreference, languagePreferenceUpdatedAt, isDataLoaded]);
+
+    // Keep localStorage as a secondary safety net without blocking frame rendering on huge decks
+    if (localStorageMirrorTimerRef.current) {
+      clearTimeout(localStorageMirrorTimerRef.current);
+      localStorageMirrorTimerRef.current = null;
+    }
+    if (cards.length <= 200) {
+      persistCardsToLocalStorageSafe(cards);
+    } else {
+      localStorageMirrorTimerRef.current = setTimeout(() => {
+        localStorageMirrorTimerRef.current = null;
+        persistCardsToLocalStorageSafe(cardsRef.current);
+      }, 300);
+    }
+    return () => {
+      if (localStorageMirrorTimerRef.current) {
+        clearTimeout(localStorageMirrorTimerRef.current);
+        localStorageMirrorTimerRef.current = null;
+      }
+    };
+  }, [cards, studyHistory, longestStreak, deletedCards, cloudConfig, languagePreference, languagePreferenceUpdatedAt, isDataLoaded, prunedDeletedCards]);
+
+  // Flush any deferred large-deck localStorage mirror before page unload
+  useEffect(() => {
+    if (!isDataLoaded) return;
+    const flushLocalMirror = () => {
+      if (localStorageMirrorTimerRef.current) {
+        clearTimeout(localStorageMirrorTimerRef.current);
+        localStorageMirrorTimerRef.current = null;
+        persistCardsToLocalStorageSafe(cardsRef.current);
+      }
+    };
+    window.addEventListener('pagehide', flushLocalMirror);
+    return () => window.removeEventListener('pagehide', flushLocalMirror);
+  }, [isDataLoaded]);
 
   // Track online / offline status
   useEffect(() => {
@@ -730,29 +708,6 @@ const App: React.FC = () => {
       window.removeEventListener('offline', goOffline);
     };
   }, []);
-
-  // 3. Auto-Save to Local File
-  useEffect(() => {
-    if (!isDataLoaded || !fileHandle) return;
-    const timeoutId = setTimeout(async () => {
-      setIsFileSaving(true);
-      try {
-        await saveToLocalFile(fileHandle, {
-          cards,
-          studyHistory,
-          longestStreak,
-          deletedCards: prunedDeletedCards(),
-          languagePreference,
-          languagePreferenceUpdatedAt,
-        });
-      } catch (error) {
-        console.error("Auto-save file failed:", error);
-      } finally {
-        setIsFileSaving(false);
-      }
-    }, 1000);
-    return () => clearTimeout(timeoutId);
-  }, [cards, studyHistory, longestStreak, deletedCards, languagePreference, languagePreferenceUpdatedAt, fileHandle, isDataLoaded]);
 
   const applyPulledSnapshotToState = useCallback(
     (
@@ -1320,102 +1275,7 @@ const App: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOnline, cloudConfig]);
 
-  // --- File Handlers ---
-
-  const pickAndConnectFile = async (): Promise<boolean> => {
-    // @ts-ignore
-    if (!window.showOpenFilePicker) {
-      alert("Your browser does not support the File System Access API.");
-      return false;
-    }
-    try {
-      // @ts-ignore
-      const [handle] = await window.showOpenFilePicker({
-        types: [
-          { description: 'Lumina JSON Data', accept: { 'application/json': ['.json'] } },
-          { description: 'CSV Backup', accept: { 'text/csv': ['.csv'] } }
-        ],
-        multiple: false
-      });
-      if (handle) {
-        const file = await handle.getFile();
-        const text = await file.text();
-        const loadedData = parseFileContent(text);
-        if (loadedData.languagePreference) {
-          applyIncomingLanguagePreference(
-            loadedData.languagePreference,
-            loadedData.languagePreferenceUpdatedAt
-          );
-        }
-        if (loadedData.cards.length > 0) {
-          performMerge(loadedData.cards, loadedData.deletedCards ?? {});
-        }
-        if (loadedData.studyHistory) {
-          const mergedHist = mergeHistoryRecords(studyHistoryRef.current, loadedData.studyHistory);
-          studyHistoryRef.current = mergedHist;
-          setStudyHistory(mergedHist);
-        }
-        if (loadedData.longestStreak) setLongestStreak(prev => Math.max(prev, loadedData.longestStreak!));
-        setFileHandle(handle);
-        setPendingHandle(null);
-        await saveFileHandleToIDB(handle);
-        return true;
-      }
-    } catch (err: any) {
-      if (err.name === 'SecurityError' || err.message?.includes('Cross origin')) {
-        alert("Direct file syncing is disabled in this preview environment.");
-      } else if (err.name !== 'AbortError') {
-        alert("Failed to connect to file.");
-      }
-    }
-    return false;
-  };
-
-  const handleConnectFile = () => pickAndConnectFile();
-
-  // "Change File": same as connect but replaces an existing handle
-  const handleChangeFile = () => pickAndConnectFile();
-
-  // Disconnect: remove from IDB so it won't be restored next time
-  const handleDisconnectFile = async () => {
-    setFileHandle(null);
-    setPendingHandle(null);
-    await clearFileHandleFromIDB();
-  };
-
-  // Re-grant permission for a handle that was restored from IDB
-  const handleReGrantPermission = async () => {
-    if (!pendingHandle) return;
-    try {
-      // @ts-ignore
-      const perm = await pendingHandle.requestPermission({ mode: 'readwrite' });
-      if (perm === 'granted') {
-        setFileHandle(pendingHandle);
-        setPendingHandle(null);
-      }
-    } catch (e) {
-      console.warn('Permission denied for file handle', e);
-      setPendingHandle(null);
-    }
-  };
-
-  const handleManualFileSave = async () => {
-    if (!fileHandle) return;
-    setIsFileSaving(true);
-    try {
-      await saveToLocalFile(fileHandle, {
-        cards,
-        studyHistory,
-        longestStreak,
-        deletedCards: prunedDeletedCards(),
-        languagePreference,
-        languagePreferenceUpdatedAt,
-      });
-      trackEvent(TRACKING_ACTION.MANUAL_SAVE, TRACKING_CATEGORY.DATA);
-    } finally {
-      setIsFileSaving(false);
-    }
-  };
+  // --- Export & Import Handlers (local file sync handlers provided by useLocalFileSync) ---
 
   const handleExportData = () => {
     const jsonContent = generateJSON({
@@ -1620,11 +1480,7 @@ const App: React.FC = () => {
 
       // 7. Update local state & persistence
       onProgress?.({ percent: 100, step: 'Sync complete!' });
-      languagePreferenceRef.current = mergedLangPref.preference;
-      languagePreferenceUpdatedAtRef.current = mergedLangPref.updatedAt;
-      setLanguagePreference(mergedLangPref.preference);
-      setLanguagePreferenceUpdatedAt(mergedLangPref.updatedAt);
-      saveLanguagePreferenceToStorage(mergedLangPref.preference, mergedLangPref.updatedAt);
+      setResolvedLanguagePreference(mergedLangPref.preference, mergedLangPref.updatedAt);
       const nextDeletedMap = new Map(Object.entries(mergedDeletedRecord));
       deletedCardsRef.current = nextDeletedMap;
       cardsRef.current = mergedCards;
@@ -1853,11 +1709,7 @@ const App: React.FC = () => {
 
       // 5. Update local state & persistence to use GitHub Gist
       onProgress?.({ percent: 100, step: 'Synced to GitHub Gist!' });
-      languagePreferenceRef.current = mergedLangPref.preference;
-      languagePreferenceUpdatedAtRef.current = mergedLangPref.updatedAt;
-      setLanguagePreference(mergedLangPref.preference);
-      setLanguagePreferenceUpdatedAt(mergedLangPref.updatedAt);
-      saveLanguagePreferenceToStorage(mergedLangPref.preference, mergedLangPref.updatedAt);
+      setResolvedLanguagePreference(mergedLangPref.preference, mergedLangPref.updatedAt);
       const nextDeletedMap = new Map(Object.entries(mergedDeletedRecord));
       deletedCardsRef.current = nextDeletedMap;
       cardsRef.current = mergedCards;
@@ -2108,133 +1960,7 @@ const App: React.FC = () => {
   // --- App Logic ---
 
   // Helper to attach an asynchronous Persian translation onto a specific card once resolved
-  // NOTE: Do NOT mutate `updatedAt` on automatic background translation enrichment so we never
-  // overshadow user edits or cross-device study timestamps; cloud hash functions hash `translations` directly.
-  const populateSingleCardTranslationAsync = useCallback(
-    (cardId: string, word: string, mainDefinition: string, partOfSpeech?: string) => {
-      if (!word.trim() || !mainDefinition.trim()) return;
-      translateCardMeaningToPersian({ word, mainDefinition, partOfSpeech })
-        .then(resolved => {
-          if (!resolved?.fa) return;
-          setCards(prev => {
-            let changed = false;
-            const next = prev.map(c => {
-              if (c.id !== cardId) return c;
-              const merged = mergeTranslations(c.translations, resolved, false);
-              if (merged?.fa === c.translations?.fa) return c;
-              changed = true;
-              return {
-                ...c,
-                translations: merged,
-              };
-            });
-            if (changed) {
-              cardsRef.current = next;
-            }
-            return changed ? next : prev;
-          });
-        })
-        .catch(() => {
-          // Non-fatal: background backfill or manual retry can translate later
-        });
-    },
-    []
-  );
-
-  // Batch backfill missing Persian translations for pre-existing cards
-  const runPersianBackfill = useCallback(async (forceRetryAll = false) => {
-    if (isBackfillingRef.current) return;
-
-    const candidates = cardsRef.current.filter(
-      c =>
-        cardNeedsPersianBackfill(c) &&
-        (forceRetryAll || !autoAttemptedBackfillIdsRef.current.has(c.id))
-    );
-    if (candidates.length === 0) return;
-
-    isBackfillingRef.current = true;
-    setIsBackfillingTranslations(true);
-    setBackfillProgress({ completed: 0, total: candidates.length });
-
-    try {
-      const BATCH_SIZE = 4;
-      for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
-        const batch = candidates.slice(i, i + BATCH_SIZE);
-        batch.forEach(c => autoAttemptedBackfillIdsRef.current.add(c.id));
-
-        const results = await Promise.all(
-          batch.map(async card => {
-            try {
-              const resolved = await translateCardMeaningToPersian({
-                word: card.word,
-                mainDefinition: card.mainDefinition,
-                partOfSpeech: card.partOfSpeech,
-                existingTranslations: card.translations,
-                maxWaitMs: 5000,
-              });
-              return { id: card.id, resolved };
-            } catch {
-              return { id: card.id, resolved: undefined };
-            }
-          })
-        );
-
-        const resolvedMap = new Map<string, LocalizedTranslations>();
-        for (const r of results) {
-          if (r.resolved?.fa) {
-            resolvedMap.set(r.id, r.resolved);
-          }
-        }
-
-        if (resolvedMap.size > 0) {
-          setCards(prev => {
-            let changed = false;
-            const next = prev.map(card => {
-              const incoming = resolvedMap.get(card.id);
-              if (!incoming) return card;
-              const merged = mergeTranslations(card.translations, incoming, true);
-              if (merged?.fa === card.translations?.fa) return card;
-              changed = true;
-              return {
-                ...card,
-                translations: merged,
-              };
-            });
-            if (changed) {
-              cardsRef.current = next;
-            }
-            return changed ? next : prev;
-          });
-        }
-
-        setBackfillProgress({
-          completed: Math.min(i + batch.length, candidates.length),
-          total: candidates.length,
-        });
-      }
-    } finally {
-      isBackfillingRef.current = false;
-      setIsBackfillingTranslations(false);
-      setBackfillProgress(null);
-    }
-  }, []);
-
-  // Automatically backfill legacy cards in the background when user selects Persian or Both
-  useEffect(() => {
-    if (!isDataLoaded) return;
-    if (languagePreference !== 'fa' && languagePreference !== 'both') return;
-    if (isBackfillingRef.current) return;
-
-    const hasUntriedMissing = cards.some(
-      c => cardNeedsPersianBackfill(c) && !autoAttemptedBackfillIdsRef.current.has(c.id)
-    );
-    if (!hasUntriedMissing) return;
-
-    const timer = setTimeout(() => {
-      void runPersianBackfill(false);
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [isDataLoaded, languagePreference, cards, runPersianBackfill]);
+  // Translation enrichment & backfill provided by useTranslationBackfill hook
 
   const handleAddCard = (
     entry: WordEntry,
@@ -2622,51 +2348,7 @@ const App: React.FC = () => {
     });
 
     if (cardsNeedingAsyncTranslation.length > 0) {
-      void (async () => {
-        const BATCH_SIZE = 4;
-        for (let i = 0; i < cardsNeedingAsyncTranslation.length; i += BATCH_SIZE) {
-          const batch = cardsNeedingAsyncTranslation.slice(i, i + BATCH_SIZE);
-          const results = await Promise.all(
-            batch.map(async (item) => {
-              try {
-                const resolved = await translateCardMeaningToPersian({
-                  word: item.word,
-                  mainDefinition: item.def,
-                  partOfSpeech: item.pos,
-                });
-                return { id: item.id, resolved };
-              } catch {
-                return { id: item.id, resolved: undefined };
-              }
-            })
-          );
-
-          const resolvedMap = new Map<string, LocalizedTranslations>();
-          for (const r of results) {
-            if (r.resolved?.fa) {
-              resolvedMap.set(r.id, r.resolved);
-            }
-          }
-
-          if (resolvedMap.size > 0) {
-            setCards(prev => {
-              let changed = false;
-              const next = prev.map(card => {
-                const incoming = resolvedMap.get(card.id);
-                if (!incoming) return card;
-                const merged = mergeTranslations(card.translations, incoming, false);
-                if (merged?.fa === card.translations?.fa) return card;
-                changed = true;
-                return { ...card, translations: merged };
-              });
-              if (changed) {
-                cardsRef.current = next;
-              }
-              return changed ? next : prev;
-            });
-          }
-        }
-      })();
+      void populateBatchCardTranslationsAsync(cardsNeedingAsyncTranslation);
     }
 
     recordActivity();
@@ -2893,15 +2575,17 @@ const App: React.FC = () => {
       )}
 
       {showConfetti && (
-        <div className="fixed inset-0 z-[100] pointer-events-none">
-          <Confetti
-            width={width}
-            height={height}
-            recycle={true}
-            numberOfPieces={500}
-            gravity={0.15}
-          />
-        </div>
+        <Suspense fallback={null}>
+          <div className="fixed inset-0 z-[100] pointer-events-none">
+            <Confetti
+              width={width}
+              height={height}
+              recycle={true}
+              numberOfPieces={500}
+              gravity={0.15}
+            />
+          </div>
+        </Suspense>
       )}
 
       <header
@@ -2996,109 +2680,111 @@ const App: React.FC = () => {
       </header>
 
       <main className="flex-1 max-w-5xl mx-auto w-full safe-px pt-4 sm:pt-8 safe-main-pb">
-        <Routes>
-          <Route
-            path="/"
-            element={
-              <Dashboard
-                cards={cards}
-                studyHistory={studyHistory}
-                longestStreak={longestStreak}
-                onNavigate={(view) => {
-                  if (view === 'study') {
-                    handleStartStudySession();
-                  } else {
-                    navigate(`/${view === 'dashboard' ? '' : view}`);
-                  }
-                }}
-                onQuickSearch={handleQuickSearch}
-                onStartStudy={handleStartStudySession}
-                onImportBookWords={handleImportBookWords}
-                onDeleteBook={handleDeleteBook}
-                languagePreference={languagePreference}
-              />
-            }
-          />
-          <Route
-            path="/dictionary"
-            element={
-              <Dictionary
-                onAddCard={handleAddCard}
-                onRemoveCard={handleDeleteCard}
-                onUpdateCard={handleUpdateCard}
-                existingCards={cards}
-                languagePreference={languagePreference}
-              />
-            }
-          />
-          <Route
-            path="/flashcards"
-            element={
-              <Flashcards
-                cards={cards}
-                onStartStudy={handleStartStudySession}
-                onDeleteCard={handleDeleteCard}
-                onDeleteBook={handleDeleteBook}
-                onReviewCard={handleReviewCard}
-                onCreateCard={handleCreateCustomCard}
-                onUpdateCard={handleUpdateCard}
-                onImportBookWords={handleImportBookWords}
-                onOpenImport={() => setIsDataModalOpen(true)}
-                languagePreference={languagePreference}
-              />
-            }
-          />
-          <Route
-            path="/study"
-            element={
-              <StudySession
-                cards={cards}
-                isDataLoaded={isDataLoaded}
-                onReviewCard={handleReviewCard}
-                onRestoreCard={handleRestoreCard}
-                onSessionComplete={handleSessionComplete}
-                onExit={() => {
-                  void flushPendingGistSyncNow();
-                  navigate('/flashcards');
-                }}
-                languagePreference={languagePreference}
-              />
-            }
-          />
-          <Route
-            path="/statistics"
-            element={
-              <Statistics
-                cards={cards}
-                studyHistory={studyHistory}
-                longestStreak={longestStreak}
-              />
-            }
-          />
-          {/* Catch-all — redirect unknown hashes to home */}
-          <Route
-            path="*"
-            element={
-              <Dashboard
-                cards={cards}
-                studyHistory={studyHistory}
-                longestStreak={longestStreak}
-                onNavigate={(view) => {
-                  if (view === 'study') {
-                    handleStartStudySession();
-                  } else {
-                    navigate(`/${view === 'dashboard' ? '' : view}`);
-                  }
-                }}
-                onQuickSearch={handleQuickSearch}
-                onStartStudy={handleStartStudySession}
-                onImportBookWords={handleImportBookWords}
-                onDeleteBook={handleDeleteBook}
-                languagePreference={languagePreference}
-              />
-            }
-          />
-        </Routes>
+        <Suspense fallback={<RouteLoadingFallback />}>
+          <Routes>
+            <Route
+              path="/"
+              element={
+                <Dashboard
+                  cards={cards}
+                  studyHistory={studyHistory}
+                  longestStreak={longestStreak}
+                  onNavigate={(view) => {
+                    if (view === 'study') {
+                      handleStartStudySession();
+                    } else {
+                      navigate(`/${view === 'dashboard' ? '' : view}`);
+                    }
+                  }}
+                  onQuickSearch={handleQuickSearch}
+                  onStartStudy={handleStartStudySession}
+                  onImportBookWords={handleImportBookWords}
+                  onDeleteBook={handleDeleteBook}
+                  languagePreference={languagePreference}
+                />
+              }
+            />
+            <Route
+              path="/dictionary"
+              element={
+                <Dictionary
+                  onAddCard={handleAddCard}
+                  onRemoveCard={handleDeleteCard}
+                  onUpdateCard={handleUpdateCard}
+                  existingCards={cards}
+                  languagePreference={languagePreference}
+                />
+              }
+            />
+            <Route
+              path="/flashcards"
+              element={
+                <Flashcards
+                  cards={cards}
+                  onStartStudy={handleStartStudySession}
+                  onDeleteCard={handleDeleteCard}
+                  onDeleteBook={handleDeleteBook}
+                  onReviewCard={handleReviewCard}
+                  onCreateCard={handleCreateCustomCard}
+                  onUpdateCard={handleUpdateCard}
+                  onImportBookWords={handleImportBookWords}
+                  onOpenImport={() => setIsDataModalOpen(true)}
+                  languagePreference={languagePreference}
+                />
+              }
+            />
+            <Route
+              path="/study"
+              element={
+                <StudySession
+                  cards={cards}
+                  isDataLoaded={isDataLoaded}
+                  onReviewCard={handleReviewCard}
+                  onRestoreCard={handleRestoreCard}
+                  onSessionComplete={handleSessionComplete}
+                  onExit={() => {
+                    void flushPendingGistSyncNow();
+                    navigate('/flashcards');
+                  }}
+                  languagePreference={languagePreference}
+                />
+              }
+            />
+            <Route
+              path="/statistics"
+              element={
+                <Statistics
+                  cards={cards}
+                  studyHistory={studyHistory}
+                  longestStreak={longestStreak}
+                />
+              }
+            />
+            {/* Catch-all — redirect unknown hashes to home */}
+            <Route
+              path="*"
+              element={
+                <Dashboard
+                  cards={cards}
+                  studyHistory={studyHistory}
+                  longestStreak={longestStreak}
+                  onNavigate={(view) => {
+                    if (view === 'study') {
+                      handleStartStudySession();
+                    } else {
+                      navigate(`/${view === 'dashboard' ? '' : view}`);
+                    }
+                  }}
+                  onQuickSearch={handleQuickSearch}
+                  onStartStudy={handleStartStudySession}
+                  onImportBookWords={handleImportBookWords}
+                  onDeleteBook={handleDeleteBook}
+                  languagePreference={languagePreference}
+                />
+              }
+            />
+          </Routes>
+        </Suspense>
       </main>
 
       {/* Auto-Save Indicators */}
@@ -3166,63 +2852,79 @@ const App: React.FC = () => {
         </div>
       )}
 
-      <SettingsModal
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        languagePreference={languagePreference}
-        onChangeLanguagePreference={handleChangeLanguagePreference}
-        totalCards={cards.length}
-        translatedPersianCount={cards.filter(c => Boolean(c.translations?.fa?.trim())).length}
-        isBackfilling={isBackfillingTranslations}
-        backfillProgress={backfillProgress}
-        onTriggerBackfill={() => {
-          void runPersianBackfill(true);
-        }}
-        isDarkMode={isDark}
-        onToggleDarkMode={handleToggleDark}
-      />
+      {isSettingsOpen && (
+        <Suspense fallback={null}>
+          <SettingsModal
+            isOpen={isSettingsOpen}
+            onClose={() => setIsSettingsOpen(false)}
+            languagePreference={languagePreference}
+            onChangeLanguagePreference={handleChangeLanguagePreference}
+            totalCards={cards.length}
+            translatedPersianCount={cards.filter(c => Boolean(c.translations?.fa?.trim())).length}
+            isBackfilling={isBackfillingTranslations}
+            backfillProgress={backfillProgress}
+            onTriggerBackfill={() => {
+              void runPersianBackfill(true);
+            }}
+            isDarkMode={isDark}
+            onToggleDarkMode={handleToggleDark}
+          />
+        </Suspense>
+      )}
 
-      <DataManagerModal
-        isOpen={isDataModalOpen}
-        onClose={() => setIsDataModalOpen(false)}
-        onExport={handleExportData}
-        onImport={handleImportData}
-        onAnkiFileSelected={handleAnkiFileSelected}
-        onConnectFile={handleConnectFile}
-        onChangeFile={handleChangeFile}
-        onDisconnectFile={handleDisconnectFile}
-        onManualSave={handleManualFileSave}
-        isFileConnected={!!fileHandle}
-        connectedFileName={fileHandle?.name}
-        cardCount={cards.length}
-        persistenceStatus={persistenceStatus}
-        storageEstimate={storageEstimate}
-        onRequestPersistence={handleRequestPersistence}
-        lastSavedAt={lastSavedAt}
-        cloudConfig={cloudConfig}
-        onConnectCloud={handleConnectCloud}
-        onMigrateCloud={handleMigrateCloud}
-        onConnectGist={handleConnectGist}
-        onDisconnectCloud={handleDisconnectCloud}
-        onCloudPull={handleCloudPull}
-        onCloudPush={handleCloudPush}
-      />
+      {isDataModalOpen && (
+        <Suspense fallback={null}>
+          <DataManagerModal
+            isOpen={isDataModalOpen}
+            onClose={() => setIsDataModalOpen(false)}
+            onExport={handleExportData}
+            onImport={handleImportData}
+            onAnkiFileSelected={handleAnkiFileSelected}
+            onConnectFile={handleConnectFile}
+            onChangeFile={handleChangeFile}
+            onDisconnectFile={handleDisconnectFile}
+            onManualSave={handleManualFileSave}
+            isFileConnected={!!fileHandle}
+            connectedFileName={fileHandle?.name}
+            cardCount={cards.length}
+            persistenceStatus={persistenceStatus}
+            storageEstimate={storageEstimate}
+            onRequestPersistence={handleRequestPersistence}
+            lastSavedAt={lastSavedAt}
+            cloudConfig={cloudConfig}
+            onConnectCloud={handleConnectCloud}
+            onMigrateCloud={handleMigrateCloud}
+            onConnectGist={handleConnectGist}
+            onDisconnectCloud={handleDisconnectCloud}
+            onCloudPull={handleCloudPull}
+            onCloudPush={handleCloudPush}
+          />
+        </Suspense>
+      )}
 
-      <AnkiImportModal
-        file={ankiImportFile}
-        onClose={() => setAnkiImportFile(null)}
-        onImport={handleAnkiImport}
-      />
+      {ankiImportFile && (
+        <Suspense fallback={null}>
+          <AnkiImportModal
+            file={ankiImportFile}
+            onClose={() => setAnkiImportFile(null)}
+            onImport={handleAnkiImport}
+          />
+        </Suspense>
+      )}
 
-      <SessionConfigModal
-        isOpen={isSessionConfigOpen}
-        onClose={() => setIsSessionConfigOpen(false)}
-        onStart={handleSessionStart}
-        dueCount={getDueCards(cards).length}
-        cards={cards}
-        initialTag={sessionInitialTag}
-        initialChapters={sessionInitialChapters}
-      />
+      {isSessionConfigOpen && (
+        <Suspense fallback={null}>
+          <SessionConfigModal
+            isOpen={isSessionConfigOpen}
+            onClose={() => setIsSessionConfigOpen(false)}
+            onStart={handleSessionStart}
+            dueCount={getDueCards(cards).length}
+            cards={cards}
+            initialTag={sessionInitialTag}
+            initialChapters={sessionInitialChapters}
+          />
+        </Suspense>
+      )}
     </div>
   );
 };

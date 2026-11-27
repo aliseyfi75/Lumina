@@ -1,12 +1,15 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, lazy, Suspense } from 'react';
 import { Flashcard, FlashcardStatus, MeaningLanguagePreference, ViewState } from '../types';
 import { getWordSuggestions } from '../services/suggestionService';
 import { prefetchWord } from '../services/dictionaryService';
 import { playAudio } from '../utils/audio';
 import { getLocalDateString, calculateCurrentStreak, getDueCards } from '../utils/studyUtils';
-import { BookExtractedWord } from '../services/bookService';
-import { BookPrepModal } from './BookPrepModal';
+import type { BookExtractedWord } from '../services/bookService';
 import { MeaningDisplay } from './MeaningDisplay';
+
+const BookPrepModal = lazy(() =>
+    import('./BookPrepModal').then((m) => ({ default: m.BookPrepModal }))
+);
 import { parseTagHierarchy, formatBookTag } from '../utils/tagUtils';
 import { useCardFlip3D } from '../utils/cardFlip';
 import { getAdaptiveWordHeadingClass } from '../utils/deviceScale';
@@ -1030,15 +1033,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </div>
             }
 
-            {onImportBookWords && (
-                <BookPrepModal
-                    isOpen={isBookPrepOpen}
-                    onClose={() => setIsBookPrepOpen(false)}
-                    existingWords={existingWordsSet}
-                    existingCards={cards}
-                    onImportBookWords={onImportBookWords}
-                    languagePreference={languagePreference}
-                />
+            {onImportBookWords && isBookPrepOpen && (
+                <Suspense fallback={null}>
+                    <BookPrepModal
+                        isOpen={isBookPrepOpen}
+                        onClose={() => setIsBookPrepOpen(false)}
+                        existingWords={existingWordsSet}
+                        existingCards={cards}
+                        onImportBookWords={onImportBookWords}
+                        languagePreference={languagePreference}
+                    />
+                </Suspense>
             )}
 
             {bookToDelete && (

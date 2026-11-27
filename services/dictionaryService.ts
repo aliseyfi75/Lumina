@@ -1,5 +1,6 @@
 import type { WordEntry, Meaning, Definition } from "../types";
 import { mergeTranslations } from "../utils/languageUtils";
+import { LruMap } from "../utils/lruCache";
 import {
   clearTranslationCache,
   enrichWordEntryWithTranslations,
@@ -25,10 +26,10 @@ interface DatamuseEntry {
   tags?: string[];
 }
 
-// In-memory caches and in-flight request deduplication for instant lookups
-const wordCache = new Map<string, WordEntry>();
+// Bounded LRU in-memory caches and in-flight request deduplication for instant lookups
+const wordCache = new LruMap<string, WordEntry>(500);
 const inFlightLookups = new Map<string, Promise<WordEntry | null>>();
-const imageCache = new Map<string, string | null>();
+const imageCache = new LruMap<string, string | null>(500);
 const inFlightImages = new Map<string, Promise<string | null>>();
 
 export const clearDictionaryCache = () => {

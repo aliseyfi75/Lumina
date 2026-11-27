@@ -188,10 +188,18 @@ export const mergeFlashcardDecks = (
   };
 
   const cardMap = new Map<string, Flashcard>();
+  const wordDefToId = new Map<string, string>();
+  const makeWordDefKey = (word: string, def: string) =>
+    `${word.trim().toLowerCase()}\u0000${def.trim().toLowerCase()}`;
+
   for (const c of baseCards) {
     if (!isDeleted(c)) {
       const cleanCard = sanitizeCardFields(c);
       cardMap.set(cleanCard.id, cleanCard);
+      const wdKey = makeWordDefKey(cleanCard.word, cleanCard.mainDefinition);
+      if (!wordDefToId.has(wdKey)) {
+        wordDefToId.set(wdKey, cleanCard.id);
+      }
     }
   }
 
@@ -199,29 +207,24 @@ export const mergeFlashcardDecks = (
     if (isDeleted(rawIncoming)) continue;
     const c = sanitizeCardFields(rawIncoming);
 
-    const normWord = c.word.trim().toLowerCase();
-    const normDef = c.mainDefinition.trim().toLowerCase();
-
+    const wdKey = makeWordDefKey(c.word, c.mainDefinition);
     let duplicateId: string | undefined;
     if (cardMap.has(c.id)) {
       duplicateId = c.id;
     } else {
-      for (const [key, existing] of cardMap.entries()) {
-        if (
-          existing.word.trim().toLowerCase() === normWord &&
-          existing.mainDefinition.trim().toLowerCase() === normDef
-        ) {
-          duplicateId = key;
-          break;
-        }
-      }
+      duplicateId = wordDefToId.get(wdKey);
     }
 
     if (duplicateId) {
       const existing = cardMap.get(duplicateId)!;
-      cardMap.set(duplicateId, mergeTwoFlashcards(existing, c, duplicateId, options));
+      const merged = mergeTwoFlashcards(existing, c, duplicateId, options);
+      cardMap.set(duplicateId, merged);
+      wordDefToId.set(makeWordDefKey(merged.word, merged.mainDefinition), duplicateId);
     } else {
       cardMap.set(c.id, c);
+      if (!wordDefToId.has(wdKey)) {
+        wordDefToId.set(wdKey, c.id);
+      }
     }
   }
 

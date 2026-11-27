@@ -95,6 +95,20 @@ export const Statistics: React.FC<StatisticsProps> = ({ cards, studyHistory, lon
             cardIndex++;
         }
 
+        // Pre-bucket mastered dates once in O(N) instead of filtering all cards inside every day loop (O(365*N))
+        const startDateMs = startDate.getTime();
+        let cumulativeMastered = 0;
+        const masteredByDayMs = new Map<number, number>();
+        for (const c of cards) {
+            if (c.status !== FlashcardStatus.Mastered) continue;
+            const dayMs = startOfDay(new Date(c.lastReviewed || c.createdAt)).getTime();
+            if (dayMs < startDateMs) {
+                cumulativeMastered++;
+            } else {
+                masteredByDayMs.set(dayMs, (masteredByDayMs.get(dayMs) || 0) + 1);
+            }
+        }
+
         const historical = historyInterval.map(date => {
             const isTomorrow = date > today;
 
@@ -110,18 +124,13 @@ export const Statistics: React.FC<StatisticsProps> = ({ cards, studyHistory, lon
                 cardIndex++;
             }
 
-            // Approximate Mastering Date using lastReviewed if status is currently Mastered
-            const masteredCount = cards.filter(c =>
-                c.status === FlashcardStatus.Mastered &&
-                startOfDay(new Date(c.lastReviewed || c.createdAt)) <= date
-            ).length;
-
-            const remainingCount = cumulativeTotal - masteredCount;
+            cumulativeMastered += masteredByDayMs.get(date.getTime()) || 0;
+            const remainingCount = Math.max(0, cumulativeTotal - cumulativeMastered);
 
             return {
                 date: format(date, 'MMM dd, yyyy'),
                 total: cumulativeTotal,
-                mastered: masteredCount,
+                mastered: cumulativeMastered,
                 remaining: remainingCount
             };
         });

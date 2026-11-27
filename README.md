@@ -1,87 +1,105 @@
-<img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/e5c54ecf-0760-4251-803d-bb08e0e526cf" />
+<img width="1024" height="559" alt="Lumina Vocabulary & Flashcards Preview" src="https://github.com/user-attachments/assets/e5c54ecf-0760-4251-803d-bb08e0e526cf" />
 
 # Lumina
 
 **Illuminate your vocabulary.**
 
-Lumina is a modern, elegant dictionary and flashcard application designed to help you master new words effectively. It bridges the gap between looking up a word and actually remembering it by combining a clean dictionary interface with a spaced-repetition study system.
+Lumina is a modern, privacy-first dictionary, book vocabulary prep tool, and spaced-repetition flashcard app. Look up words in English & Persian, extract tough vocabulary from books before reading, import existing Anki `.apkg` decks, and master every word with active-recall study modes — completely free, private, and works offline.
 
 👉 [Try Lumina Live Here](https://aliseyfi75.github.io/Lumina/)
 
 [![Lumina](https://img.youtube.com/vi/zdaJXz-VHzA/0.jpg)](https://www.youtube.com/watch?v=zdaJXz-VHzA)
 
-## Motivation
+## Why Lumina?
 
-Learning new vocabulary often feels disjointed. You look up a word, understand it for a moment, and then forget it a day later. Traditional flashcard apps can be clunky to populate, requiring manual entry of definitions.
+Learning vocabulary often breaks across disconnected tools: you look up a word in a dictionary, forget it the next day, or spend hours formatting spreadsheets to build flashcards.
 
-**Lumina solves this flow:**
-1.  **Discover**: Instantly look up definitions, phonetics, and examples.
-2.  **Capture**: With one click, turn any definition into a flashcard.
-3.  **Master**: Use a study mode that helps you focus on words you find difficult.
+**Lumina unifies the entire loop:**
+1. **Discover** — Instantly look up definitions, IPA phonetics, audio pronunciation, synonyms, and bilingual Persian (`فارسی`) meanings.
+2. **Capture** — Turn any dictionary definition, book chapter word, Anki deck, or highlighted webpage word into a rich flashcard in one click.
+3. **Master** — Retain vocabulary permanently with spaced repetition, Fill-in-the-Blank Cloze, Smart Quiz, Listening Recall, Daily Goals, and Streak Freeze.
 
-## Features
+---
 
-*   **📖 Intelligent Dictionary**: Instant search with definitions, phonetics, parts of speech, and usage examples.
-*   **⚡ One-Click Flashcards**: Seamlessly add words from the dictionary results directly to your deck.
-*   **🧠 Spaced Repetition Study**: A focused study mode that prioritizes "New" and "Learning" cards over "Mastered" ones.
-*   **☁️ Cloud Sync**: Sync your deck across devices using a free Pantry ID (JSON storage).
-*   **📂 Data Freedom**: Import/Export your deck as CSV, or sync directly to a local file on your computer (File System Access API).
-*   **🎨 Elegant UI**: A beautiful, distraction-free interface built with React and Tailwind CSS.
+## Key Features
 
-## Browser Extension
+* **📖 Intelligent Bilingual Dictionary (EN / فارسی)**: Instant autocomplete, full definitions, IPA phonetics, audio playback, synonyms/antonyms, and automatic English + Persian (`فارسی`) meanings with crisp RTL typography (`Vazirmatn`).
+* **📚 Book Vocabulary Prep**: Search thousands of classics from Project Gutenberg or upload your own `.epub` / `.txt` book. Lumina extracts chapter-by-chapter vocabulary ranked by difficulty so you can learn tricky words *before* reading each chapter.
+* **📦 In-Browser Anki (`.apkg`) Import**: Import existing Anki decks directly in the browser (powered by `sql.js` & `JSZip`) with safe HTML sanitization, embedded image/audio preservation, and automatic deck tagging.
+* **🧠 Active-Recall Study Modes**:
+  * **Classic 3D Flip** — Dynamic spaced-repetition intervals (`1d → 7d → 14d → 30d → Mastered`) with swipe & keyboard shortcuts.
+  * **Smart Quiz** — Multiple-choice challenges with part-of-speech-matched distractors, contextual example feedback, and 1-click `"Mark Mastered"`.
+  * **Fill-in-the-Blank (Cloze)** — Recall target words inside real book or dictionary example sentences with letter hints.
+  * **Listening Recall** — Audio-first recall mode that hides spelling until you flip the card.
+  * **Focus on Hardest Words** — Drill cards you previously missed for targeted mastery.
+* **🎯 Daily Goals, Streak Freeze & Celebrations**: Customizable daily review rings (`5 / 10 / 20 / 30` cards), automatic Streak Freeze earned every 5 active days, milestone celebration modals (`25, 50, 100, 200+` mastered words) with downloadable 1200×630 PNG share cards, and a Quick 1-Card Warmup right on Home.
+* **📊 Analytics & Reminders**: Interactive 90-day study heatmap, vocabulary growth & upcoming-review charts, and recurring `.ics` calendar study reminders.
+* **☁️ Instant Cloud & Local Sync**:
+  * **GitHub Gist Sync (Recommended)** — Fast, 1-request encrypted-in-transit sync using your own private GitHub Gist.
+  * **Pantry Cloud Sync** — Zero-account free JSON storage with automatic chunking.
+  * **Local File Sync & Data Freedom** — Auto-save directly to a local file via the File System Access API, or import/export JSON & CSV anytime.
+* **📱 Offline-First PWA**: Primary IndexedDB storage with persistent storage support, dark mode, WCAG 2.1 AA accessibility, and full mobile/desktop installation.
 
-Enhance your experience with **Lumina Collector**, a Chrome extension that allows you to collect words from any website and add them to your Lumina deck.
+---
 
-👉 [Get Lumina Collector](https://chromewebstore.google.com/detail/lumina-collector/jngpnagbkdaifmokdcokhakfkbpdnlag)
+## Browser Extension — Lumina Collector v2.0
+
+Capture vocabulary directly while reading articles, docs, or books on the web with **Lumina Collector**:
+* **Instant Double-Click Lookup Tooltip** on any webpage with 1-click **"Save to Lumina"**.
+* **Automatic Context Capture** saves the surrounding sentence as your card's example and tags the source website (`Web: domain.com`).
+* **GitHub Gist (Instant) & Pantry Sync** matching your Lumina web deck.
+
+👉 [Get Lumina Collector on Chrome Web Store](https://chromewebstore.google.com/detail/lumina-collector/jngpnagbkdaifmokdcokhakfkbpdnlag)
+
+---
 
 ## How to Use
 
-### 1. Dictionary & Search
-Type a word into the search bar. Lumina provides autocomplete suggestions as you type.
-*   Browse the meanings and examples.
-*   Click the **"Add to Flashcards"** button next to the specific definition you want to remember.
+### 1. Dictionary & Bilingual Search
+Type any word into the Home or Dictionary search bar for instant autocomplete suggestions. Click **"Add to Flashcards"** on the exact sense you want to remember, or switch between **English**, **Persian (`فارسی`)**, and **Both** in Settings.
 
-### 2. Flashcard Deck
-Navigate to the **Flashcards** tab to view your collection in a grid.
-*   **Flip**: Click any card to reveal the definition on the back.
-*   **Quick Status**: Mark cards as "Needs Work" or "Mastered" directly from the grid.
-*   **Delete**: Remove cards you no longer need.
+### 2. Book Vocabulary Prep
+Open **Prepare for a Book** from the Home screen or Flashcards view. Search Project Gutenberg or upload an `.epub` / `.txt` file, pick chapters and difficulty level, and import selected words straight into a tagged Book deck.
 
-### 3. Study Session
-When you have cards to review, click the **"Start Study Session"** button.
-*   The app enters a focused, distraction-free mode.
-*   It presents cards you haven't mastered yet.
-*   Test yourself, flip the card, and rate your retention to update the card's status.
+### 3. Flashcard Deck & Bulk Tools
+Browse, filter by status/tag/book, flip cards inline, edit custom definitions/images, undo accidental deletes, or use **Select Mode** for bulk tagging, resetting, and cleanup.
 
-### 4. Sync & Backup (Data Manager)
-Click the **Database/Cloud icon** in the top right header to open the Data Manager.
+### 4. Focused Study Sessions
+Start a Full Session, Short Sprint, Smart Quiz, Fill-in-the-Blank Cloze, or Listening Recall session—optionally scoped to a specific Book, Chapter, Tag, or Hardest Words.
 
-*   **Cloud Sync (Pantry)**: Enter a Pantry ID to sync your cards across different browsers or devices for free.
-*   **CSV Import/Export**: Download your deck for safekeeping or import an existing list.
-*   **Local File Sync**: (Desktop Chrome/Edge only) Connect a local `.csv` file on your hard drive. Lumina will auto-save changes to this file in the background.
+### 5. Cloud Sync & Backups (Data Manager)
+Click the **Database / Cloud icon** in the header to connect **GitHub Gist**, **Pantry Cloud**, **Local File Sync**, import **Anki `.apkg`** decks, or export JSON/CSV backups.
+
+---
 
 ## Tech Stack
 
-*   **Frontend**: React 18, TypeScript, Vite
-*   **Styling**: Tailwind CSS, Lucide React (Icons)
-*   **APIs**:
-    *   Free Dictionary API (Definitions)
-    *   Datamuse API (Autocomplete suggestions)
-    *   PantryCloud (JSON Storage)
+* **Frontend**: React 18, TypeScript, Vite, Tailwind CSS, Framer Motion, Recharts, Lucide React
+* **Offline & Imports**: IndexedDB, Workbox PWA (`vite-plugin-pwa`), `sql.js`, `JSZip`
+* **APIs**: Free Dictionary API, Datamuse API, Gutendex / Project Gutenberg, GitHub Gist API, Pantry Cloud
+* **Testing**: Playwright End-to-End & Unit Test Suite
 
-## Installation
+---
 
-To run Lumina locally:
+## Local Development
 
-1.  Clone the repository.
-2.  Install dependencies:
-    ```bash
-    npm install
-    ```
-3.  Start the development server:
-    ```bash
-    npm run dev
-    ```
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/aliseyfi75/Lumina.git
+   cd Lumina
+   ```
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+3. Start the development server:
+   ```bash
+   npm run dev
+   ```
+4. Build for production:
+   ```bash
+   npm run build
+   ```
 
 ## License
 

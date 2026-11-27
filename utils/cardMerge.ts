@@ -1,5 +1,6 @@
 import { Flashcard, FlashcardStatus } from '../types';
 import { mergeTranslations, sanitizeTranslations } from './languageUtils';
+import { sanitizeMediaUrl } from './security';
 
 export interface MergeDeckOptions {
   ignoreTombstones?: boolean;
@@ -97,8 +98,10 @@ export const mergeTwoFlashcards = (
     ),
     partOfSpeech: contentWinner.partOfSpeech || contentFallback.partOfSpeech || '',
     phonetic: contentWinner.phonetic || contentFallback.phonetic,
-    audio: contentWinner.audio || contentFallback.audio,
-    image: contentWinner.image || contentFallback.image,
+    audio: sanitizeMediaUrl(contentWinner.audio) || sanitizeMediaUrl(contentFallback.audio),
+    image:
+      sanitizeMediaUrl(contentWinner.image, { allowDataImage: true }) ||
+      sanitizeMediaUrl(contentFallback.image, { allowDataImage: true }),
     example: contentWinner.example || contentFallback.example,
     tags:
       contentWinner.tags && contentWinner.tags.length > 0
@@ -165,24 +168,36 @@ export const mergeFlashcardDecks = (
     return deletedAt >= cardTs;
   };
 
-  const sanitizeCardTranslations = (card: Flashcard): Flashcard => {
-    if (!card.translations) return card;
-    const cleaned = sanitizeTranslations(card.translations);
-    if (cleaned?.fa === card.translations.fa) return card;
-    return { ...card, translations: cleaned };
+  const sanitizeCardFields = (card: Flashcard): Flashcard => {
+    const cleanedTranslations = card.translations ? sanitizeTranslations(card.translations) : card.translations;
+    const cleanedAudio = sanitizeMediaUrl(card.audio);
+    const cleanedImage = sanitizeMediaUrl(card.image, { allowDataImage: true });
+    if (
+      cleanedTranslations?.fa === card.translations?.fa &&
+      cleanedAudio === card.audio &&
+      cleanedImage === card.image
+    ) {
+      return card;
+    }
+    return {
+      ...card,
+      translations: cleanedTranslations,
+      audio: cleanedAudio,
+      image: cleanedImage,
+    };
   };
 
   const cardMap = new Map<string, Flashcard>();
   for (const c of baseCards) {
     if (!isDeleted(c)) {
-      const cleanCard = sanitizeCardTranslations(c);
+      const cleanCard = sanitizeCardFields(c);
       cardMap.set(cleanCard.id, cleanCard);
     }
   }
 
   for (const rawIncoming of incoming) {
     if (isDeleted(rawIncoming)) continue;
-    const c = sanitizeCardTranslations(rawIncoming);
+    const c = sanitizeCardFields(rawIncoming);
 
     const normWord = c.word.trim().toLowerCase();
     const normDef = c.mainDefinition.trim().toLowerCase();

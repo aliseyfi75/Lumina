@@ -44,51 +44,95 @@ export const PAGE_TITLES: Record<string, string> = {
 };
 
 const ANONYMOUS_ID_KEY = 'lumina_anonymous_id';
+const TRACKING_HASH_SALT = 'lumina-ga-uid-v1:';
+const GA_MEASUREMENT_ID = 'G-YTM3MZZPYK';
 
-/**
- * Initializes tracking by setting up the user ID (anonymous or real).
- */
-export const initializeTracking = (userId?: string) => {
-  if (typeof window.gtag !== 'function') {
-    console.warn('Google Analytics (gtag) is not loaded.');
-    return;
-  }
-
-  let finalUserId = userId;
-
-  if (!finalUserId) {
-    // Check for existing anonymous ID or create one
+const getOrCreateAnonymousId = (): string => {
+  try {
     let anonId = localStorage.getItem(ANONYMOUS_ID_KEY);
     if (!anonId) {
       try {
         anonId = crypto.randomUUID();
-      } catch (e) {
-        // Fallback for non-secure contexts where crypto.randomUUID is not available
+      } catch {
         anonId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-          const r = Math.random() * 16 | 0;
-          const v = c === 'x' ? r : (r & 0x3 | 0x8);
+          const r = (Math.random() * 16) | 0;
+          const v = c === 'x' ? r : (r & 0x3) | 0x8;
           return v.toString(16);
         });
       }
       localStorage.setItem(ANONYMOUS_ID_KEY, anonId);
     }
-    finalUserId = anonId;
+    return anonId;
+  } catch {
+    return 'lumina_anon';
+  }
+};
+
+/**
+ * Produces a one-way pseudonymous hash of an identifier (e.g. Pantry ID or Gist ID)
+ * so raw cloud credentials / secret Gist IDs are never transmitted to third-party analytics.
+ */
+export const hashTrackingIdentifier = async (rawId: string): Promise<string> => {
+  const clean = rawId.trim();
+  if (!clean) return getOrCreateAnonymousId();
+
+  const salted = `${TRACKING_HASH_SALT}${clean}`;
+  try {
+    if (typeof crypto !== 'undefined' && crypto.subtle && typeof TextEncoder !== 'undefined') {
+      const bytes = new TextEncoder().encode(salted);
+      const digest = await crypto.subtle.digest('SHA-256', bytes);
+      const hex = Array.from(new Uint8Array(digest))
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('');
+      return `lumina_h_${hex.slice(0, 24)}`;
+    }
+  } catch {
+    // Fall through to deterministic non-reversible hash fallback
   }
 
-  // Set the User ID in GA
-  window.gtag('config', 'G-YTM3MZZPYK', {
-    'user_id': finalUserId
+  // Fallback for non-secure contexts without crypto.subtle: dual FNV-1a 32-bit digest
+  let h1 = 0x811c9dc5;
+  let h2 = 0x01000193;
+  for (let i = 0; i < salted.length; i++) {
+    const ch = salted.charCodeAt(i);
+    h1 ^= ch;
+    h1 = Math.imul(h1, 0x01000193);
+    h2 ^= ch ^ ((i * 31) & 0xff);
+    h2 = Math.imul(h2, 0x811c9dc5);
+  }
+  return `lumina_h_${(h1 >>> 0).toString(16).padStart(8, '0')}${(h2 >>> 0).toString(16).padStart(8, '0')}`;
+};
+
+const applyGtagUserId = (hashedOrAnonId: string) => {
+  if (typeof window.gtag !== 'function') return;
+  window.gtag('config', GA_MEASUREMENT_ID, {
+    user_id: hashedOrAnonId,
   });
 };
 
 /**
- * Updates the User ID (e.g., after cloud connection).
+ * Initializes tracking by setting up a privacy-safe user ID (anonymous UUID or hashed sync ID).
  */
-export const setTrackingUserId = (userId: string) => {
+export const initializeTracking = async (userId?: string): Promise<void> => {
+  if (typeof window.gtag !== 'function') {
+    console.warn('Google Analytics (gtag) is not loaded.');
+    return;
+  }
+
+  const safeUserId = userId && userId.trim()
+    ? await hashTrackingIdentifier(userId)
+    : getOrCreateAnonymousId();
+
+  applyGtagUserId(safeUserId);
+};
+
+/**
+ * Updates the User ID (e.g., after cloud connection) using a one-way hash.
+ */
+export const setTrackingUserId = async (userId: string): Promise<void> => {
   if (typeof window.gtag !== 'function') return;
-  window.gtag('config', 'G-YTM3MZZPYK', {
-    'user_id': userId
-  });
+  const safeUserId = await hashTrackingIdentifier(userId);
+  applyGtagUserId(safeUserId);
 };
 
 /**
@@ -115,16 +159,19 @@ export const trackEvent = (
 
 /**
  * Tracks a page view when the route changes.
- * Called from the RouteTracker component on every location change.
+ * Strips query parameters so tokens or sensitive URL params are never leaked to analytics.
  * @param path  The route path, e.g. '/flashcards'
  * @param title Human-readable page title for GA reports
  */
 export const trackPageView = (path: string, title: string) => {
   if (typeof window.gtag !== 'function') return;
 
+  const cleanPath = path.split('?')[0] || '/';
+  const safeLocation = `${window.location.origin}${window.location.pathname}#${cleanPath}`;
+
   window.gtag('event', 'page_view', {
-    page_path: path,
+    page_path: cleanPath,
     page_title: title,
-    page_location: window.location.href,
+    page_location: safeLocation,
   });
 };

@@ -12,7 +12,7 @@
     gtag('config', 'G-YTM3MZZPYK');
   </script>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta name="theme-color" content="#16a34a" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -28,7 +28,7 @@
     rel="stylesheet">
 
   <script>
-    // Apply dark class, iOS safe-area fallback, and device root font-size before first paint
+    // Apply dark class, iOS safe-area fallback, and proportional viewport scaling while respecting user zoom
     (function () {
       var root = document.documentElement;
       var saved = localStorage.getItem('lumina_theme');
@@ -77,12 +77,8 @@
       }
       var hCap = vh < 680 ? 13.5 + (Math.max(0, vh - 420) / 260) * 2.5 : 16;
       var targetPx = Math.round(Math.min(16, Math.max(12.5, Math.min(wPx, hCap))) * 100) / 100;
-      root.style.fontSize = targetPx + 'px';
-      var renderedPx = parseFloat(window.getComputedStyle(root).fontSize);
-      if (renderedPx > 0 && Math.abs(renderedPx - targetPx) > 0.2) {
-        var comp = Math.min(20, Math.max(7, (targetPx * targetPx) / renderedPx));
-        root.style.fontSize = (Math.round(comp * 100) / 100) + 'px';
-      }
+      var scaleRatio = targetPx / 16;
+      root.style.fontSize = (Math.round(scaleRatio * 10000) / 100) + '%';
       root.dataset.targetRootPx = String(targetPx);
     })();
   </script>
@@ -176,11 +172,11 @@
       line-height: 1.75;
     }
   </style>
-  <script type="module" crossorigin src="./assets/index-DTFII7Q-.js"></script>
+  <script type="module" crossorigin src="./assets/index-BKd31iB6.js"></script>
   <link rel="modulepreload" crossorigin href="./assets/vendor-react-DeWaH-j4.js">
   <link rel="modulepreload" crossorigin href="./assets/vendor-motion-D-6oNwGe.js">
-  <link rel="modulepreload" crossorigin href="./assets/vendor-icons-CbFNJ5c3.js">
-  <link rel="stylesheet" crossorigin href="./assets/index-nnCwiRtY.css">
+  <link rel="modulepreload" crossorigin href="./assets/vendor-icons-BEzOIz0P.js">
+  <link rel="stylesheet" crossorigin href="./assets/index-C0XfGvLc.css">
 <link rel="manifest" href="./manifest.webmanifest"><script id="vite-plugin-pwa:register-sw" src="./registerSW.js"></script></head>
 
 <body

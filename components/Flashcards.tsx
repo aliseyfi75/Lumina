@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Flashcard, FlashcardStatus, LocalizedTranslations, MeaningLanguagePreference } from '../types';
 import { Play, BookOpen, CheckCircle, Brain, Trash2, RotateCw, Upload, Volume2, ChevronDown, ChevronRight, ChevronUp, Search, X, ArrowUpDown, Filter, Plus, Pencil, Tag, Sparkles, AlertTriangle, Folder, FolderOpen, CornerDownRight, CheckSquare, Square, RotateCcw } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -618,8 +619,21 @@ export const Flashcards: React.FC<FlashcardsProps> = ({
   onOpenImport,
   languagePreference = 'en',
 }) => {
-  const [selectedStatus, setSelectedStatus] = useState<FlashcardStatus | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
+  const location = useLocation();
+  const routeState = location.state as { searchQuery?: string; statusFilter?: FlashcardStatus } | null;
+  const [selectedStatus, setSelectedStatus] = useState<FlashcardStatus | null>(
+    routeState?.statusFilter ?? null
+  );
+  const [searchQuery, setSearchQuery] = useState(routeState?.searchQuery ?? '');
+
+  useEffect(() => {
+    if (routeState?.searchQuery !== undefined) {
+      setSearchQuery(routeState.searchQuery);
+    }
+    if (routeState?.statusFilter !== undefined) {
+      setSelectedStatus(routeState.statusFilter);
+    }
+  }, [routeState?.searchQuery, routeState?.statusFilter]);
   const [selectedPos, setSelectedPos] = useState<string>('all');
   const [selectedTag, setSelectedTag] = useState<string>('all');
   const [sortBy, setSortBy] = useState<FlashcardSortOption>('priority');

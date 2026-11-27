@@ -5,7 +5,7 @@ import { Activity, Flame, BookOpen, Brain, CheckCircle, TrendingUp, Calendar, Ta
 import { format, subDays, startOfDay, eachDayOfInterval, differenceInDays } from 'date-fns';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { calculateCurrentStreak } from '../utils/studyUtils';
+import { calculateStreakSummary } from '../utils/studyUtils';
 
 function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs));
@@ -37,8 +37,9 @@ export const Statistics: React.FC<StatisticsProps> = ({ cards, studyHistory, lon
     const learningCount = cards.filter(c => c.status === FlashcardStatus.Learning).length;
     const masteredCount = cards.filter(c => c.status === FlashcardStatus.Mastered).length;
 
-    // Streak Calculation
-    const currentStreak = useMemo(() => calculateCurrentStreak(studyHistory), [studyHistory]);
+    // Streak Calculation (respects Streak Freeze protection)
+    const streakSummary = useMemo(() => calculateStreakSummary(studyHistory), [studyHistory]);
+    const currentStreak = streakSummary.currentStreak;
 
     // Heatmap Data (Last 91 days - makes 13 weeks of 7 days)
     const heatmapDays = useMemo(() => {

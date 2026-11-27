@@ -9,7 +9,7 @@ import { getDetails, getDeck, updateDeck, keepAlivePantry, getKnownChunkCount, g
 import { findOrCreateLuminaGist, getGistDeck, updateGistDeck, hasPendingGistSyncChanges, normalizeGistId } from './services/gistService';
 import { loadFileHandleFromIDB, saveAppDataToIDB, loadAppDataFromIDB, requestPersistentStorage, checkPersistentStorage, getStorageEstimate } from './services/idbService';
 import { initializeTracking, trackEvent, setTrackingUserId, trackPageView, PAGE_TITLES, TRACKING_CATEGORY, TRACKING_ACTION } from './services/trackingService';
-import { getLocalDateString, calculateCurrentStreak, getDueCards } from './utils/studyUtils';
+import { getLocalDateString, calculateCurrentStreak, calculateStreakSummary, getDueCards } from './utils/studyUtils';
 import { installDeviceRootScaleListeners } from './utils/deviceScale';
 import {
   sanitizeTranslations,
@@ -27,6 +27,7 @@ import { useLanguagePreference } from './hooks/useLanguagePreference';
 import { useTranslationBackfill } from './hooks/useTranslationBackfill';
 import { useLocalFileSync } from './hooks/useLocalFileSync';
 import { usePrefersReducedMotion } from './hooks/usePrefersReducedMotion';
+import { useDailyGoal } from './hooks/useDailyGoal';
 
 const Dictionary = lazy(() => import('./components/Dictionary').then((m) => ({ default: m.Dictionary })));
 const Flashcards = lazy(() => import('./components/Flashcards').then((m) => ({ default: m.Flashcards })));
@@ -36,7 +37,11 @@ const DataManagerModal = lazy(() => import('./components/DataManagerModal').then
 const SettingsModal = lazy(() => import('./components/SettingsModal').then((m) => ({ default: m.SettingsModal })));
 const AnkiImportModal = lazy(() => import('./components/AnkiImportModal').then((m) => ({ default: m.AnkiImportModal })));
 const SessionConfigModal = lazy(() => import('./components/SessionConfigModal').then((m) => ({ default: m.SessionConfigModal })));
+const MilestoneModal = lazy(() => import('./components/MilestoneModal').then((m) => ({ default: m.MilestoneModal })));
 const Confetti = lazy(() => import('react-confetti'));
+
+const MILESTONE_THRESHOLDS = [25, 50, 100, 200, 300, 500, 1000] as const;
+const CELEBRATED_MILESTONES_KEY = 'lumina_celebrated_milestones_v1';
 
 const RouteLoadingFallback: React.FC = () => (
   <div className="min-h-[45vh] flex items-center justify-center text-slate-400 dark:text-slate-500">
@@ -232,6 +237,11 @@ const App: React.FC = () => {
   const [isSessionConfigOpen, setIsSessionConfigOpen] = useState(false);
   const [sessionInitialTag, setSessionInitialTag] = useState<string | undefined>(undefined);
   const [sessionInitialChapters, setSessionInitialChapters] = useState<string[] | undefined>(undefined);
+
+  // Daily Goal & Milestone Celebration State
+  const { dailyGoal, setDailyGoal } = useDailyGoal();
+  const [activeMilestone, setActiveMilestone] = useState<number | null>(null);
+  const hasSeededMilestonesRef = useRef(false);
 
   // Confetti State
   const { width, height } = useWindowSize();
@@ -2056,7 +2066,7 @@ const App: React.FC = () => {
         [today]: (prev[today] || 0) + 1
       };
       studyHistoryRef.current = updatedHistory;
-      const newCurrentStreak = calculateCurrentStreak(updatedHistory);
+      const newCurrentStreak = calculateStreakSummary(updatedHistory).currentStreak;
       setLongestStreak(prevStreak => {
         const nextStreak = Math.max(prevStreak, newCurrentStreak);
         longestStreakRef.current = nextStreak;
@@ -2079,7 +2089,7 @@ const App: React.FC = () => {
     setIsSessionConfigOpen(true);
   };
 
-  const handleSessionStart = (config: { mode: SessionMode; count?: number; tag?: string; chapters?: string[] }) => {
+  const handleSessionStart = (config: { mode: SessionMode; count?: number; tag?: string; chapters?: string[]; onlyHardest?: boolean }) => {
     navigate('/study', { state: { sessionConfig: config } });
   };
 
@@ -2097,6 +2107,7 @@ const App: React.FC = () => {
         let { repetition = 0 } = card;
         let nextReviewDate = now;
         let status = FlashcardStatus.Learning;
+        const missCount = quality === 1 ? (card.missCount || 0) + 1 : card.missCount;
 
         if (quality === 1) { // Again
           repetition = 0;
@@ -2130,6 +2141,7 @@ const App: React.FC = () => {
           nextReviewDate,
           status,
           lastQuality: quality,
+          ...(missCount !== undefined ? { missCount } : {}),
           lastReviewed: now,
           statusUpdatedAt: now,
           updatedAt: now
@@ -2620,24 +2632,69 @@ const App: React.FC = () => {
     trackEvent(TRACKING_ACTION.DELETE_CARD, TRACKING_CATEGORY.FLASHCARDS, `book_${cleanTag}`);
   };
 
-  // Milestone Confetti Logic
+  // Milestone Confetti & Shareable Celebration Modal Logic
   useEffect(() => {
+    if (!isDataLoaded) return;
     const masteredCount = cards.filter(c => c.status === FlashcardStatus.Mastered).length;
 
-    if (masteredCount > 0 &&
-      masteredCount % 100 === 0 &&
-      masteredCount > prevMasteredCount) {
+    const readCelebrated = (): Set<number> => {
+      try {
+        const raw = localStorage.getItem(CELEBRATED_MILESTONES_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            return new Set(parsed.filter((n): n is number => typeof n === 'number'));
+          }
+        }
+      } catch {
+        // ignore parse errors
+      }
+      return new Set<number>();
+    };
 
-      setShowConfetti(true);
-      setTimeout(() => {
-        setShowConfetti(false);
-      }, 5000);
+    const writeCelebrated = (set: Set<number>) => {
+      try {
+        localStorage.setItem(CELEBRATED_MILESTONES_KEY, JSON.stringify(Array.from(set)));
+      } catch {
+        // ignore storage errors
+      }
+    };
 
-      trackEvent('milestone_reached', TRACKING_CATEGORY.ENGAGEMENT, `mastered_${masteredCount}`);
+    if (!hasSeededMilestonesRef.current) {
+      hasSeededMilestonesRef.current = true;
+      setPrevMasteredCount(masteredCount);
+      const celebrated = readCelebrated();
+      let changed = false;
+      for (const t of MILESTONE_THRESHOLDS) {
+        if (masteredCount >= t && !celebrated.has(t)) {
+          celebrated.add(t);
+          changed = true;
+        }
+      }
+      if (changed) writeCelebrated(celebrated);
+      return;
+    }
+
+    if (masteredCount > prevMasteredCount) {
+      const celebrated = readCelebrated();
+      const crossed = MILESTONE_THRESHOLDS.filter(
+        (t) => masteredCount >= t && prevMasteredCount < t && !celebrated.has(t)
+      );
+      if (crossed.length > 0) {
+        const milestone = crossed[crossed.length - 1];
+        crossed.forEach((t) => celebrated.add(t));
+        writeCelebrated(celebrated);
+        setActiveMilestone(milestone);
+        setShowConfetti(true);
+        setTimeout(() => {
+          setShowConfetti(false);
+        }, 5000);
+        trackEvent('milestone_reached', TRACKING_CATEGORY.ENGAGEMENT, `mastered_${milestone}`);
+      }
     }
 
     setPrevMasteredCount(masteredCount);
-  }, [cards, prevMasteredCount]);
+  }, [cards, prevMasteredCount, isDataLoaded]);
 
   // Nav link active class helper
   const navLinkClass = ({ isActive }: { isActive: boolean }) =>
@@ -2667,8 +2724,8 @@ const App: React.FC = () => {
       {/* GA page-view tracker — fires on every route change */}
       <RouteTracker />
 
-      {/* PWA Install Banner */}
-      <PwaInstallBanner />
+      {/* PWA Install Banner (deferred until engaged) */}
+      <PwaInstallBanner isEngaged={cards.length >= 2 || Object.keys(studyHistory).length > 0} />
 
       {/* Re-grant permission banner */}
       {pendingHandle && !fileHandle && (
@@ -2812,6 +2869,7 @@ const App: React.FC = () => {
                   cards={cards}
                   studyHistory={studyHistory}
                   longestStreak={longestStreak}
+                  dailyGoal={dailyGoal}
                   onNavigate={(view) => {
                     if (view === 'study') {
                       handleStartStudySession();
@@ -2824,7 +2882,9 @@ const App: React.FC = () => {
                   onImportBookWords={handleImportBookWords}
                   onDeleteBook={handleDeleteBook}
                   onOpenDataModal={() => setIsDataModalOpen(true)}
+                  onOpenSettings={() => setIsSettingsOpen(true)}
                   onChangeLanguagePreference={handleChangeLanguagePreference}
+                  onQuickReviewCard={handleReviewCard}
                   languagePreference={languagePreference}
                 />
               }
@@ -2899,6 +2959,7 @@ const App: React.FC = () => {
                   cards={cards}
                   studyHistory={studyHistory}
                   longestStreak={longestStreak}
+                  dailyGoal={dailyGoal}
                   onNavigate={(view) => {
                     if (view === 'study') {
                       handleStartStudySession();
@@ -2911,7 +2972,9 @@ const App: React.FC = () => {
                   onImportBookWords={handleImportBookWords}
                   onDeleteBook={handleDeleteBook}
                   onOpenDataModal={() => setIsDataModalOpen(true)}
+                  onOpenSettings={() => setIsSettingsOpen(true)}
                   onChangeLanguagePreference={handleChangeLanguagePreference}
+                  onQuickReviewCard={handleReviewCard}
                   languagePreference={languagePreference}
                 />
               }
@@ -3086,6 +3149,8 @@ const App: React.FC = () => {
             }}
             isDarkMode={isDark}
             onToggleDarkMode={handleToggleDark}
+            dailyGoal={dailyGoal}
+            onChangeDailyGoal={setDailyGoal}
           />
         </Suspense>
       )}
@@ -3140,6 +3205,18 @@ const App: React.FC = () => {
             cards={cards}
             initialTag={sessionInitialTag}
             initialChapters={sessionInitialChapters}
+          />
+        </Suspense>
+      )}
+
+      {activeMilestone !== null && (
+        <Suspense fallback={null}>
+          <MilestoneModal
+            isOpen={activeMilestone !== null}
+            milestoneCount={activeMilestone}
+            totalCards={cards.length}
+            currentStreak={calculateStreakSummary(studyHistory).currentStreak}
+            onClose={() => setActiveMilestone(null)}
           />
         </Suspense>
       )}

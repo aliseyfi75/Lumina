@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   X,
   Globe,
@@ -8,11 +8,20 @@ import {
   Sun,
   Moon,
   CheckCircle2,
+  Target,
+  Bell,
+  CalendarPlus,
+  Puzzle,
+  ExternalLink,
 } from 'lucide-react';
 import { MeaningLanguagePreference } from '../types';
 import { LANGUAGE_PREFERENCE_OPTIONS } from '../utils/languageUtils';
 import { MeaningDisplay } from './MeaningDisplay';
 import { useAccessibleModal } from '../hooks/useAccessibleModal';
+import { DAILY_GOAL_OPTIONS } from '../hooks/useDailyGoal';
+import { downloadDailyReminderIcs } from '../utils/calendarReminder';
+
+const REMINDER_TIME_KEY = 'lumina_daily_reminder_time_v1';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -26,6 +35,8 @@ interface SettingsModalProps {
   onTriggerBackfill: () => void;
   isDarkMode: boolean;
   onToggleDarkMode: () => void;
+  dailyGoal?: number;
+  onChangeDailyGoal?: (goal: number) => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -40,11 +51,55 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onTriggerBackfill,
   isDarkMode,
   onToggleDarkMode,
+  dailyGoal = 10,
+  onChangeDailyGoal,
 }) => {
   const modalRef = useRef<HTMLDivElement>(null);
+  const [reminderTime, setReminderTime] = useState<string>(() => {
+    try {
+      return localStorage.getItem(REMINDER_TIME_KEY) || '20:00';
+    } catch {
+      return '20:00';
+    }
+  });
+  const [reminderFeedback, setReminderFeedback] = useState<string | null>(null);
   useAccessibleModal(isOpen, onClose, modalRef);
 
   if (!isOpen) return null;
+
+  const handleReminderTimeChange = (nextTime: string) => {
+    setReminderTime(nextTime);
+    try {
+      localStorage.setItem(REMINDER_TIME_KEY, nextTime);
+    } catch {
+      // ignore storage errors
+    }
+  };
+
+  const handleDownloadCalendarReminder = () => {
+    downloadDailyReminderIcs({ time: reminderTime, dailyGoal });
+    setReminderFeedback('Calendar reminder (.ics) downloaded — open it to add to Apple/Google/Outlook Calendar.');
+  };
+
+  const handleEnableBrowserNotification = async () => {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      setReminderFeedback('Browser notifications are not supported on this device. Use the Calendar (.ics) reminder instead.');
+      return;
+    }
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm === 'granted') {
+        new Notification('Lumina Study Reminder', {
+          body: `You're all set! Daily goal: ${dailyGoal} cards.`,
+        });
+        setReminderFeedback('Browser notifications enabled!');
+      } else {
+        setReminderFeedback('Notification permission was not granted. You can still use the Calendar (.ics) reminder.');
+      }
+    } catch {
+      setReminderFeedback('Could not request notification permission.');
+    }
+  };
 
   const missingPersianCount = Math.max(0, totalCards - translatedPersianCount);
   const progressPct =
@@ -253,8 +308,99 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           )}
 
+          {/* Daily Study Goal */}
+          {onChangeDailyGoal && (
+            <div
+              data-testid="settings-daily-goal-section"
+              className="pt-4 border-t border-slate-100 dark:border-slate-700 space-y-2.5"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                    <Target className="h-4 w-4 text-brand-500" />
+                    Daily Study Goal
+                  </p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Cards to review each day to complete your Home progress ring
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-4 gap-2" role="radiogroup" aria-label="Daily study goal">
+                {DAILY_GOAL_OPTIONS.map((goalOpt) => {
+                  const isSelected = dailyGoal === goalOpt;
+                  return (
+                    <button
+                      key={goalOpt}
+                      type="button"
+                      data-testid={`daily-goal-option-${goalOpt}`}
+                      aria-pressed={isSelected}
+                      onClick={() => onChangeDailyGoal(goalOpt)}
+                      className={`py-2 px-2 rounded-xl text-xs font-bold border transition-all ${
+                        isSelected
+                          ? 'bg-brand-600 text-white border-brand-600 shadow-sm'
+                          : 'bg-slate-50 dark:bg-slate-900/50 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-brand-300'
+                      }`}
+                    >
+                      {goalOpt} / day
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Gentle Daily Study Reminder */}
+          <div
+            data-testid="settings-daily-reminder-section"
+            className="pt-4 border-t border-slate-100 dark:border-slate-700 space-y-3"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                  <Bell className="h-4 w-4 text-amber-500" />
+                  Daily Study Reminder
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Add a recurring 15-minute study block to your calendar — works offline on iOS, Android &amp; desktop
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <label htmlFor="daily-reminder-time" className="sr-only">Reminder time</label>
+              <input
+                id="daily-reminder-time"
+                type="time"
+                value={reminderTime}
+                onChange={(e) => handleReminderTimeChange(e.target.value)}
+                className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-800 dark:text-slate-100 focus:outline-none focus:border-brand-500"
+              />
+              <button
+                type="button"
+                data-testid="download-calendar-reminder-btn"
+                onClick={handleDownloadCalendarReminder}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-xs font-semibold shadow-sm transition-colors"
+              >
+                <CalendarPlus className="h-3.5 w-3.5" />
+                Add to Calendar (.ics)
+              </button>
+              <button
+                type="button"
+                onClick={handleEnableBrowserNotification}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold transition-colors"
+              >
+                <Bell className="h-3.5 w-3.5" />
+                Test Alert
+              </button>
+            </div>
+            {reminderFeedback && (
+              <p role="status" className="text-xs text-emerald-700 dark:text-emerald-400 font-medium">
+                {reminderFeedback}
+              </p>
+            )}
+          </div>
+
           {/* Appearance Quick Toggle */}
-          <div className="pt-1 flex items-center justify-between gap-3 border-t border-slate-100 dark:border-slate-700">
+          <div className="pt-4 flex items-center justify-between gap-3 border-t border-slate-100 dark:border-slate-700">
             <div>
               <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">Appearance</p>
               <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -278,6 +424,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </>
               )}
             </button>
+          </div>
+
+          {/* Subtle Lumina Collector Browser Extension Callout */}
+          <div className="p-3.5 rounded-2xl bg-brand-50/60 dark:bg-brand-900/20 border border-brand-200/70 dark:border-brand-800/50 flex items-center justify-between gap-3">
+            <div className="flex items-start gap-2.5 min-w-0">
+              <div className="p-2 rounded-xl bg-brand-100 dark:bg-brand-900/50 text-brand-700 dark:text-brand-300 shrink-0">
+                <Puzzle className="h-4 w-4" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-slate-900 dark:text-white">
+                  Lumina Collector Chrome Extension
+                </p>
+                <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5">
+                  Highlight words on any webpage to capture definitions, context sentences &amp; sync via GitHub Gist or Pantry.
+                </p>
+              </div>
+            </div>
+            <a
+              href="https://chromewebstore.google.com/detail/lumina-collector/jngpnagbkdaifmokdcokhakfkbpdnlag"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-brand-200 dark:border-brand-700 text-brand-700 dark:text-brand-300 text-xs font-semibold hover:bg-brand-50 dark:hover:bg-slate-700 transition-colors"
+            >
+              Install
+              <ExternalLink className="h-3 w-3" />
+            </a>
           </div>
         </div>
 

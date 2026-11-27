@@ -264,6 +264,7 @@ const sanitizeCardsForGist = (cards: Flashcard[]): Flashcard[] =>
     if (card.easinessFactor && card.easinessFactor !== 2.5) clean.easinessFactor = card.easinessFactor;
     if (card.nextReviewDate) clean.nextReviewDate = card.nextReviewDate;
     if (card.lastQuality) clean.lastQuality = card.lastQuality;
+    if (card.missCount) clean.missCount = card.missCount;
     if (card.statusUpdatedAt) clean.statusUpdatedAt = card.statusUpdatedAt;
     if (card.updatedAt) clean.updatedAt = card.updatedAt;
     return clean;
